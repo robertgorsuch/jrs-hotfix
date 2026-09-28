@@ -8,6 +8,7 @@ import com.jaspersoft.jrshotfix.engine.RunIds;
 import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.home.JrsVersion;
 import com.jaspersoft.jrshotfix.json.Json;
+import com.jaspersoft.jrshotfix.pkg.Action;
 import com.jaspersoft.jrshotfix.pkg.FileTarget;
 import com.jaspersoft.jrshotfix.pkg.OfficialPackage;
 import com.jaspersoft.jrshotfix.pkg.PackageContents;
@@ -15,6 +16,7 @@ import com.jaspersoft.jrshotfix.service.ServiceSteps;
 import com.jaspersoft.jrshotfix.state.HotfixState;
 import com.jaspersoft.jrshotfix.state.Ledger;
 import com.jaspersoft.jrshotfix.state.LedgerEntry;
+import com.jaspersoft.jrshotfix.state.Origin;
 import com.jaspersoft.jrshotfix.state.OwnedFile;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -23,8 +25,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Builds every plan and answers every read-only question. Invariants: planning touches nothing
@@ -34,6 +38,9 @@ import java.util.Objects;
 public final class HotfixPlans {
   public static final String APPLY = "hotfix.apply";
   public static final String ROLLBACK = "hotfix.rollback";
+
+  /** The run id of a ledger entry written by {@link #record}: no run installed it. */
+  public static final String RECORDED_RUN_ID = "recorded";
 
   private static final String AS_PUBLISHED =
       "point jrs-hotfix at the hotfix ZIP as support published it";
@@ -233,6 +240,192 @@ public final class HotfixPlans {
         steps,
         summary,
         PlanFingerprint.of(fingerprint));
+  }
+
+  /**
+   * Records a hotfix applied by hand from its package. Touches nothing on the server: the entry's
+   * files are the package's adds and replaces, with the hash on disk now as the before-hash and the
+   * package's payload hash as the after-hash; there is no snapshot, so a recorded entry cannot be
+   * rolled back by this tool.
+   */
+  public LedgerEntry record(Path packageFile) {
+    Path file = packageFile.toAbsolutePath().normalize();
+    if (!Files.isRegularFile(file)) {
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          file + " does not exist",
+          "point jrs-hotfix record at the hotfix ZIP as support published it");
+    }
+    PackageContents c;
+    try {
+      c = OfficialPackage.read(file, rt.paths(), rt.settings().webappName(), rt.files());
+    } catch (IOException | UncheckedIOException e) {
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          "cannot read " + file + ": " + e.getMessage(),
+          "check the file, then run again",
+          e);
+    }
+    Optional<LedgerEntry> existing = rt.ledger().find(c.id());
+    if (existing.isPresent()) {
+      LedgerEntry h = existing.get();
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          c.id()
+              + " is already in the ledger ("
+              + h.state()
+              + ", "
+              + (h.recorded() ? "recorded" : "applied by jrs-hotfix in run " + h.runId())
+              + ")",
+          "run jrs-hotfix list; a rolled-back entry must be removed with `jrs-hotfix runs prune`"
+              + " before the same id is recorded again");
+    }
+    List<OwnedFile> files = new ArrayList<>();
+    for (PackageContents.Entry e : c.entries()) {
+      if (e.action() == Action.DELETE) {
+        continue;
+      }
+      Path target = rt.paths().resolve(e.path());
+      files.add(
+          new OwnedFile(
+              target,
+              e.action().name().toLowerCase(Locale.ROOT),
+              FileTarget.hashOf(rt.files(), target),
+              e.sha256()));
+    }
+    LedgerEntry entry =
+        new LedgerEntry(
+            c.id(),
+            c.release(),
+            c.edition(),
+            c.build(),
+            c.title(),
+            HotfixState.INSTALLED,
+            Origin.RECORDED,
+            RECORDED_RUN_ID,
+            Optional.empty(),
+            rt.clock().instant(),
+            files);
+    rt.ledger().recordInstalled(entry);
+    return entry;
+  }
+
+  /**
+   * What {@code verify} found: whether the package could be read, what it is, whether it applies
+   * here and why not, and the files it would add, replace and delete. Invariant: lists are
+   * immutable; an unreadable package has empty identity fields and its reason in {@code problems}.
+   */
+  public record VerifyReport(
+      boolean readable,
+      String id,
+      String title,
+      String release,
+      String edition,
+      boolean applicable,
+      List<String> problems,
+      List<String> adds,
+      List<String> replaces,
+      List<String> deletes,
+      List<String> notes) {
+    public VerifyReport {
+      problems = List.copyOf(problems);
+      adds = List.copyOf(adds);
+      replaces = List.copyOf(replaces);
+      deletes = List.copyOf(deletes);
+      notes = List.copyOf(notes);
+    }
+
+    public boolean ok() {
+      return readable && applicable;
+    }
+  }
+
+  /** Reads a package and checks it against this installation; writes nothing, never throws. */
+  public VerifyReport verify(Path packageFile) {
+    Path file = packageFile.toAbsolutePath().normalize();
+    if (!Files.isRegularFile(file) || !OfficialPackage.looksOfficial(file)) {
+      return unreadable(file + OfficialPackage.NEITHER_SHAPE_SHORT);
+    }
+    PackageContents c;
+    try {
+      c = OfficialPackage.read(file, rt.paths(), rt.settings().webappName(), rt.files());
+    } catch (HotfixException e) {
+      return unreadable(e.getMessage());
+    } catch (IOException | UncheckedIOException e) {
+      return unreadable("cannot read " + file + ": " + e.getMessage());
+    }
+    List<String> problems = applicability(rt, c);
+    return new VerifyReport(
+        true,
+        c.id(),
+        c.title(),
+        c.release(),
+        c.edition(),
+        problems.isEmpty(),
+        problems,
+        paths(c.adds()),
+        paths(c.replaces()),
+        paths(c.deletes()),
+        c.notes());
+  }
+
+  private static VerifyReport unreadable(String problem) {
+    return new VerifyReport(
+        false, "", "", "", "", false, List.of(problem), List.of(), List.of(), List.of(), List.of());
+  }
+
+  private static List<String> paths(List<PackageContents.Entry> entries) {
+    return entries.stream().map(PackageContents.Entry::path).toList();
+  }
+
+  /**
+   * Why the package does not apply here, empty when it does: the installed release must equal the
+   * package's, the edition must match the webapp name, and the hotfix must not be installed
+   * already. Shared by {@code verify} and the apply plan's preflight.
+   */
+  static List<String> applicability(HotfixRuntime rt, PackageContents c) {
+    List<String> problems = new ArrayList<>();
+    String installed = JrsVersion.ofWebapp(rt.settings().webappDir()).orElse("");
+    if (!installed.equals(c.release())) {
+      problems.add(
+          "the package is for release "
+              + c.release()
+              + " but "
+              + rt.settings().webappDir()
+              + " is "
+              + (installed.isEmpty() ? "unknown" : installed));
+    }
+    boolean pro = rt.settings().webappName().endsWith("-pro");
+    if (c.edition().equals("PRO") != pro) {
+      problems.add(
+          "the package is for the "
+              + c.edition()
+              + " edition but the webapp is "
+              + rt.settings().webappName());
+    }
+    if (rt.ledger().find(c.id()).filter(e -> e.state() == HotfixState.INSTALLED).isPresent()) {
+      problems.add(c.id() + " is already installed");
+    }
+    return problems;
+  }
+
+  /** Every ledger entry, installed and rolled back alike, in install order. */
+  public List<LedgerEntry> list() {
+    return rt.ledger().all();
+  }
+
+  /**
+   * Rebuilds the plan a run was started with from its stored operation and arguments, so recovery
+   * can compare fingerprints.
+   *
+   * @throws IllegalArgumentException for an operation this tool does not plan
+   */
+  public Plan rebuild(String operation, String argsJson) {
+    return switch (operation) {
+      case APPLY -> planApply(applyArgs(argsJson));
+      case ROLLBACK -> planRollback(rollbackArgs(argsJson));
+      default -> throw new IllegalArgumentException("unknown operation " + operation);
+    };
   }
 
   public static String applyArgsJson(ApplyArgs a) {

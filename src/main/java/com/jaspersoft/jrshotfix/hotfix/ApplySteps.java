@@ -6,10 +6,8 @@ import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.engine.StepResult;
 import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
-import com.jaspersoft.jrshotfix.home.JrsVersion;
 import com.jaspersoft.jrshotfix.platform.DiskSpace;
 import com.jaspersoft.jrshotfix.service.ServiceSteps;
-import com.jaspersoft.jrshotfix.state.HotfixState;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -111,30 +109,7 @@ final class ApplySteps {
     @Override
     public CheckResult precheck(Context ctx) {
       List<String> problems = new ArrayList<>();
-      String installed = JrsVersion.ofWebapp(rt.settings().webappDir()).orElse("");
-      if (!installed.equals(in.contents().release())) {
-        problems.add(
-            "the package is for release "
-                + in.contents().release()
-                + " but "
-                + rt.settings().webappDir()
-                + " is "
-                + (installed.isEmpty() ? "unknown" : installed));
-      }
-      boolean pro = rt.settings().webappName().endsWith("-pro");
-      if (in.contents().edition().equals("PRO") != pro) {
-        problems.add(
-            "the package is for the "
-                + in.contents().edition()
-                + " edition but the webapp is "
-                + rt.settings().webappName());
-      }
-      if (rt.ledger()
-          .find(in.contents().id())
-          .filter(e -> e.state() == HotfixState.INSTALLED)
-          .isPresent()) {
-        problems.add(in.contents().id() + " is already installed");
-      }
+      problems.addAll(HotfixPlans.applicability(rt, in.contents()));
       for (Path dir :
           List.of(rt.settings().webappDir(), rt.settings().installDir(), rt.home().root())) {
         if (!rt.files().isWritable(dir)) {
