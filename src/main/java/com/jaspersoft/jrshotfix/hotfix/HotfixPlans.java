@@ -143,10 +143,27 @@ public final class HotfixPlans {
         "hotfix-apply-" + RunIds.next(rt.clock()), steps, summary, PlanFingerprint.of(inputs));
   }
 
-  /** What {@code rollback} was asked to do; stored with the run so the plan can be rebuilt. */
-  public record RollbackArgs(String hotfixId, boolean cascade) {
+  /**
+   * What {@code rollback} was asked to do; stored with the run so the plan can be rebuilt. {@code
+   * chain} is the rollback order computed at plan time, newest first and the target last; empty
+   * means "compute it from the ledger".
+   */
+  public record RollbackArgs(String hotfixId, boolean cascade, List<String> chain) {
     public RollbackArgs {
       Objects.requireNonNull(hotfixId, "hotfixId");
+      chain = List.copyOf(chain);
+    }
+
+    public RollbackArgs(String hotfixId, boolean cascade) {
+      this(hotfixId, cascade, List.of());
+    }
+  }
+
+  /** A rollback plan and the arguments that rebuild exactly it: {@code args.chain()} is filled. */
+  public record ResolvedRollback(Plan plan, RollbackArgs args) {
+    public ResolvedRollback {
+      Objects.requireNonNull(plan, "plan");
+      Objects.requireNonNull(args, "args");
     }
   }
 
@@ -157,27 +174,62 @@ public final class HotfixPlans {
    * refuses before the outage when any snapshot of the chain is missing.
    */
   public Plan planRollback(RollbackArgs args) {
+    return resolveRollback(args).plan();
+  }
+
+  /**
+   * As {@link #planRollback}, also returning the arguments with the computed chain, which is what a
+   * run must store. With a non-empty {@code args.chain()} (a rebuild for recovery) the state-based
+   * refusals are skipped, because the partial run may already have changed the ledger, and the
+   * chain is used as given; every id must still have a ledger entry.
+   */
+  public ResolvedRollback resolveRollback(RollbackArgs args) {
     Ledger ledger = rt.ledger();
-    LedgerEntry target =
-        ledger
-            .find(args.hotfixId())
-            .orElseThrow(
-                () ->
-                    new HotfixException(
-                        HotfixException.PRECHECK,
-                        "unknown hotfix " + args.hotfixId(),
-                        "run jrs-hotfix list"));
-    if (target.state() != HotfixState.INSTALLED) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          args.hotfixId() + " is not installed (state " + target.state() + ")",
-          "run jrs-hotfix list");
-    }
-    refuseRecorded(target);
-    List<String> chain = RollbackChain.of(ledger, target, args.cascade());
-    for (String id : chain) {
-      // a recorded entry owns files, so it can be a later blocker the cascade would take off
-      refuseRecorded(ledger.find(id).orElseThrow());
+    List<String> chain;
+    LedgerEntry target;
+    if (args.chain().isEmpty()) {
+      target =
+          ledger
+              .find(args.hotfixId())
+              .orElseThrow(
+                  () ->
+                      new HotfixException(
+                          HotfixException.PRECHECK,
+                          "unknown hotfix " + args.hotfixId(),
+                          "run jrs-hotfix list"));
+      if (target.state() != HotfixState.INSTALLED) {
+        throw new HotfixException(
+            HotfixException.PRECHECK,
+            args.hotfixId() + " is not installed (state " + target.state() + ")",
+            "run jrs-hotfix list");
+      }
+      refuseRecorded(target);
+      chain = RollbackChain.of(ledger, target, args.cascade());
+      for (String id : chain) {
+        // a recorded entry owns files, so it can be a later blocker the cascade would take off
+        refuseRecorded(ledger.find(id).orElseThrow());
+      }
+    } else {
+      chain = args.chain();
+      for (String id : chain) {
+        if (ledger.find(id).isEmpty()) {
+          throw new HotfixException(
+              HotfixException.PRECHECK,
+              id + " is no longer in the ledger",
+              "the run cannot be rebuilt; restore ledger.json from a backup or remove the run"
+                  + " directory by hand");
+        }
+      }
+      target =
+          ledger
+              .find(args.hotfixId())
+              .orElseThrow(
+                  () ->
+                      new HotfixException(
+                          HotfixException.PRECHECK,
+                          args.hotfixId() + " is no longer in the ledger",
+                          "the run cannot be rebuilt; restore ledger.json from a backup or remove"
+                              + " the run directory by hand"));
     }
     List<RollbackSteps.Input> inputs = new ArrayList<>();
     List<RollbackSteps.RestoreSnapshot> restores = new ArrayList<>();
@@ -235,11 +287,13 @@ public final class HotfixPlans {
             rollbackPoints,
             "snapshot",
             warnings);
-    return new Plan(
-        "hotfix-rollback-" + RunIds.next(rt.clock()),
-        steps,
-        summary,
-        PlanFingerprint.of(fingerprint));
+    Plan plan =
+        new Plan(
+            "hotfix-rollback-" + RunIds.next(rt.clock()),
+            steps,
+            summary,
+            PlanFingerprint.of(fingerprint));
+    return new ResolvedRollback(plan, new RollbackArgs(args.hotfixId(), args.cascade(), chain));
   }
 
   private static void refuseRecorded(LedgerEntry hotfix) {
@@ -464,6 +518,7 @@ public final class HotfixPlans {
     Map<String, Object> m = new LinkedHashMap<>();
     m.put("hotfixId", a.hotfixId());
     m.put("cascade", a.cascade());
+    m.put("chain", a.chain());
     return Json.write(m);
   }
 
@@ -474,6 +529,10 @@ public final class HotfixPlans {
     } catch (IOException e) {
       throw new UncheckedIOException("cannot read the rollback arguments: " + e.getMessage(), e);
     }
-    return new RollbackArgs(n.get("hotfixId").asText(), n.get("cascade").asBoolean());
+    List<String> chain = new ArrayList<>();
+    for (JsonNode id : n.path("chain")) {
+      chain.add(id.asText());
+    }
+    return new RollbackArgs(n.get("hotfixId").asText(), n.get("cascade").asBoolean(), chain);
   }
 }

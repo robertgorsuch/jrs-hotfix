@@ -153,5 +153,44 @@ class RollbackPlanTest {
   void should_round_trip_the_arguments_when_stored_as_json() {
     HotfixPlans.RollbackArgs args = new HotfixPlans.RollbackArgs("JRSHF-x", true);
     assertThat(HotfixPlans.rollbackArgs(HotfixPlans.rollbackArgsJson(args))).isEqualTo(args);
+    HotfixPlans.RollbackArgs chained =
+        new HotfixPlans.RollbackArgs("JRSHF-x", true, List.of("JRSHF-y", "JRSHF-x"));
+    assertThat(HotfixPlans.rollbackArgs(HotfixPlans.rollbackArgsJson(chained))).isEqualTo(chained);
+  }
+
+  @Test
+  void should_rebuild_the_stored_plan_when_the_ledger_already_says_rolled_back() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
+      HotfixPlans.ResolvedRollback resolved =
+          f.plans.resolveRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false));
+      assertThat(resolved.args().chain()).containsExactly(HotfixFixture.ID);
+      f.ledger.updateState(HotfixFixture.ID, HotfixState.ROLLED_BACK);
+
+      Plan rebuilt =
+          f.plans.rebuild(HotfixPlans.ROLLBACK, HotfixPlans.rollbackArgsJson(resolved.args()));
+
+      assertThat(HotfixFixture.ids(rebuilt)).isEqualTo(HotfixFixture.ids(resolved.plan()));
+      assertThat(rebuilt.steps().stream().map(Step::phase).toList())
+          .isEqualTo(resolved.plan().steps().stream().map(Step::phase).toList());
+      assertThatThrownBy(
+              () -> f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false)))
+          .isInstanceOf(HotfixException.class)
+          .hasMessageContaining("not installed");
+    }
+  }
+
+  @Test
+  void should_refuse_a_rebuild_when_a_chained_hotfix_left_the_ledger() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
+      HotfixPlans.RollbackArgs args =
+          new HotfixPlans.RollbackArgs(HotfixFixture.ID, false, List.of(HotfixFixture.ID));
+      f.ledger.delete(HotfixFixture.ID);
+
+      assertThatThrownBy(() -> f.plans.planRollback(args))
+          .isInstanceOf(HotfixException.class)
+          .hasMessageContaining("is no longer in the ledger");
+    }
   }
 }

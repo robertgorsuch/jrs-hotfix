@@ -1,6 +1,5 @@
 package com.jaspersoft.jrshotfix.app;
 
-import com.jaspersoft.jrshotfix.engine.Plan;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -31,9 +30,14 @@ final class RollbackCommand extends AppCommand {
   @Override
   public Integer call() {
     Bootstrap boot = open();
-    HotfixPlans.RollbackArgs args = new HotfixPlans.RollbackArgs(id, cascade);
-    Plan p = boot.plans().planRollback(args);
+    // the stored arguments carry the computed chain, so recovery rebuilds exactly this plan
+    HotfixPlans.ResolvedRollback resolved =
+        boot.plans().resolveRollback(new HotfixPlans.RollbackArgs(id, cascade));
     return executor(boot)
-        .execute(p, HotfixPlans.ROLLBACK, HotfixPlans.rollbackArgsJson(args), plan);
+        .execute(
+            resolved.plan(),
+            HotfixPlans.ROLLBACK,
+            HotfixPlans.rollbackArgsJson(resolved.args()),
+            plan);
   }
 }

@@ -2,11 +2,13 @@ package com.jaspersoft.jrshotfix.app;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jaspersoft.jrshotfix.engine.RunLock;
 import com.jaspersoft.jrshotfix.home.Home;
 import com.jaspersoft.jrshotfix.home.SettingsStore;
 import com.jaspersoft.jrshotfix.hotfix.HotfixFixture;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
+import com.jaspersoft.jrshotfix.json.Json;
 import com.jaspersoft.jrshotfix.pkg.Packages;
 import com.jaspersoft.jrshotfix.state.FileJournal;
 import com.jaspersoft.jrshotfix.state.RunPlans;
@@ -115,6 +117,33 @@ class CommandsTest {
     assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(8);
     assertThat(f.err()).contains("runs resume stuck").contains("runs rollback stuck");
     assertThat(f.run("runs", "rollback", "stuck", "--yes")).isEqualTo(0);
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
+  }
+
+  @Test
+  void
+      should_resume_a_rollback_run_that_ended_after_its_last_step_when_the_ledger_already_says_rolled_back()
+          throws Exception {
+    Fixture f = fixture();
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
+    assertThat(f.run("rollback", HotfixFixture.ID, "--yes")).isEqualTo(0);
+    assertThat(f.run("runs", "list")).isEqualTo(0);
+    String row =
+        f.out().lines().filter(l -> l.contains("hotfix.rollback")).findFirst().orElseThrow();
+    String runId = row.substring(0, row.indexOf(' '));
+    // the process died after the last step: every step SUCCEEDED, but no run end was recorded
+    Path runJson = f.home.runDir(runId).resolve("run.json");
+    ObjectNode run = (ObjectNode) Json.mapper().readTree(Files.readString(runJson));
+    run.remove(List.of("endedAt", "terminalState", "exitCode"));
+    Files.writeString(runJson, Json.write(run));
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(8);
+
+    assertThat(f.run("runs", "resume", runId, "--yes")).isEqualTo(0);
+
+    assertThat(new FileJournal(f.home, Clock.systemUTC()).run(runId).orElseThrow().pending())
+        .isFalse();
+    assertThat(f.run("runs", "list")).isEqualTo(0);
+    assertThat(f.out()).doesNotContain("PENDING");
     assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
   }
 
