@@ -85,6 +85,33 @@ public final class Packages {
     return zip(file, outer);
   }
 
+  /**
+   * A later hotfix for the same release: it replaces {@code foo-1.2.3.jar} again and deletes
+   * nothing, so it owns a file the standard package also owns.
+   */
+  public static Path later(Path file) throws IOException {
+    Map<String, byte[]> outer = new LinkedHashMap<>();
+    outer.put(
+        "readme.txt",
+        OUTER_README
+            .replace("[20260730_0457]", "[20260830_0100]")
+            .getBytes(StandardCharsets.UTF_8));
+    outer.put(
+        "jasperserver-pro.zip",
+        zipBytes(
+            Map.of(LIB + "foo-1.2.3.jar", "later foo"),
+            """
+            Modified files:
+            WEB-INF/lib/foo-1.2.3.jar
+            """));
+    return zip(file, outer);
+  }
+
+  /** The id {@link #later} builds to. */
+  public static String laterId() {
+    return "JRSHF-10.0.0-20260830-0100";
+  }
+
   /** A fake installation: tomcat under installDir, webapp with the jars a package expects. */
   public static PackagePaths install(Path installDir) throws IOException {
     Path tomcat = installDir.resolve("apache-tomcat");

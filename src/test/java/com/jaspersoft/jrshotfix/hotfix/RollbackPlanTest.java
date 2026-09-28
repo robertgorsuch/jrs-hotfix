@@ -1,0 +1,142 @@
+package com.jaspersoft.jrshotfix.hotfix;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.jaspersoft.jrshotfix.engine.Plan;
+import com.jaspersoft.jrshotfix.engine.RunOutcome;
+import com.jaspersoft.jrshotfix.engine.Step;
+import com.jaspersoft.jrshotfix.engine.StepResult;
+import com.jaspersoft.jrshotfix.event.EventSink;
+import com.jaspersoft.jrshotfix.platform.Trees;
+import com.jaspersoft.jrshotfix.state.HotfixState;
+import com.jaspersoft.jrshotfix.state.LedgerEntry;
+import com.jaspersoft.jrshotfix.state.Origin;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class RollbackPlanTest {
+
+  @TempDir Path tmp;
+
+  @Test
+  void should_restore_replaced_files_remove_added_and_put_back_deleted_when_rolled_back()
+      throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
+      Plan rb =
+          f.plans.planRollback(new HotfixPlans.RollbackArgs("JRSHF-10.0.0-20260730-0457", false));
+      assertThat(HotfixFixture.ids(rb))
+          .containsExactly(
+              "stop-service",
+              "restore-snapshot",
+              "start-service",
+              "wait-for-server",
+              "record-rolled-back");
+      assertThat(rb.planId()).startsWith("hotfix-rollback-");
+      assertThat(rb.summary().operation()).isEqualTo("hotfix.rollback");
+      assertThat(rb.fingerprint().inputs())
+          .containsKeys("settings", "hotfix:JRSHF-10.0.0-20260730-0457")
+          .containsKey("file:" + f.target(HotfixFixture.FOO));
+      assertThat(f.run(rb, "r2")).isInstanceOf(RunOutcome.Succeeded.class);
+      assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
+          .isEqualTo("old foo");
+      assertThat(f.target("webapps/jasperserver-pro/WEB-INF/lib/new-1.0.jar")).doesNotExist();
+      assertThat(f.target("webapps/jasperserver-pro/WEB-INF/lib/bar-0.9.jar")).exists();
+      assertThat(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.0.0.jar")).exists();
+      assertThat(Files.readString(f.target(HotfixFixture.TOOL))).isEqualTo("old tool");
+      assertThat(f.ledger.find("JRSHF-10.0.0-20260730-0457").orElseThrow().state())
+          .isEqualTo(HotfixState.ROLLED_BACK);
+    }
+  }
+
+  @Test
+  void should_refuse_when_the_snapshot_directory_was_deleted_by_hand() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
+      Trees.deleteRecursively(f.home.snapshots().resolve("r1"));
+      int callsBefore = f.platform.controller.calls().size();
+      RunOutcome out =
+          f.run(
+              f.plans.planRollback(
+                  new HotfixPlans.RollbackArgs("JRSHF-10.0.0-20260730-0457", false)),
+              "r2");
+      assertThat(out).isInstanceOf(RunOutcome.PrecheckFailed.class);
+      assertThat(((RunOutcome.PrecheckFailed) out).message()).contains("snapshot").contains("r1");
+      assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
+          .isEqualTo("patched foo");
+      // refused before the outage: the service was never stopped
+      assertThat(f.platform.controller.calls()).hasSize(callsBefore);
+    }
+  }
+
+  @Test
+  void should_refuse_a_recorded_entry_when_rolled_back() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      f.ledger.recordInstalled(
+          new LedgerEntry(
+              "JRSHF-10.0.0-20260101-0000",
+              "10.0.0",
+              "PRO",
+              "20260101_0000",
+              "by hand",
+              HotfixState.INSTALLED,
+              Origin.RECORDED,
+              "recorded",
+              Optional.empty(),
+              Instant.now(),
+              List.of()));
+      assertThatThrownBy(
+              () ->
+                  f.plans.planRollback(
+                      new HotfixPlans.RollbackArgs("JRSHF-10.0.0-20260101-0000", false)))
+          .isInstanceOf(HotfixException.class)
+          .hasMessageContaining("by hand");
+    }
+  }
+
+  @Test
+  void should_refuse_when_the_hotfix_is_unknown_or_not_installed() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      assertThatThrownBy(
+              () -> f.plans.planRollback(new HotfixPlans.RollbackArgs("JRSHF-nope", false)))
+          .isInstanceOf(HotfixException.class)
+          .hasMessageContaining("unknown hotfix");
+      f.run(f.plan(), "r1");
+      f.ledger.updateState(HotfixFixture.ID, HotfixState.ROLLED_BACK);
+      assertThatThrownBy(
+              () -> f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false)))
+          .isInstanceOf(HotfixException.class)
+          .hasMessageContaining("is not installed");
+    }
+  }
+
+  @Test
+  void should_stay_rolled_back_when_recorded_twice_and_flip_back_when_compensated()
+      throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      f.run(f.plan(), "r1");
+      Plan rb = f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false));
+      Step record = HotfixFixture.step(rb, "record-rolled-back");
+      assertThat(record.execute(f.ctx("r2"), EventSink.discard())).isEqualTo(StepResult.ok());
+      assertThat(record.execute(f.ctx("r2"), EventSink.discard())).isEqualTo(StepResult.ok());
+      assertThat(f.ledger.find(HotfixFixture.ID).orElseThrow().state())
+          .isEqualTo(HotfixState.ROLLED_BACK);
+      assertThat(record.compensate(f.ctx("r2"), EventSink.discard())).isEqualTo(StepResult.ok());
+      assertThat(record.compensate(f.ctx("r2"), EventSink.discard())).isEqualTo(StepResult.ok());
+      assertThat(f.ledger.find(HotfixFixture.ID).orElseThrow().state())
+          .isEqualTo(HotfixState.INSTALLED);
+    }
+  }
+
+  @Test
+  void should_round_trip_the_arguments_when_stored_as_json() {
+    HotfixPlans.RollbackArgs args = new HotfixPlans.RollbackArgs("JRSHF-x", true);
+    assertThat(HotfixPlans.rollbackArgs(HotfixPlans.rollbackArgsJson(args))).isEqualTo(args);
+  }
+}
