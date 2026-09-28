@@ -156,6 +156,7 @@ public final class FileJournal implements Journal {
       Durability.sync(tmp);
       Durability.move(
           tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+      Durability.syncDirectory(file.toAbsolutePath().getParent());
     } catch (IOException e) {
       throw new JournalException("cannot write " + file + ": " + e.getMessage(), e);
     }
