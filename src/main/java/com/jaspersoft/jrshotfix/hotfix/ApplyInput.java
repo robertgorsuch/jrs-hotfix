@@ -1,0 +1,47 @@
+package com.jaspersoft.jrshotfix.hotfix;
+
+import com.jaspersoft.jrshotfix.engine.Context;
+import com.jaspersoft.jrshotfix.pkg.FileTarget;
+import com.jaspersoft.jrshotfix.pkg.PackageContents;
+import com.jaspersoft.jrshotfix.pkg.PackagePaths;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+/**
+ * The resolved inputs of one apply plan. Invariants: targets are absolute and immutable; the
+ * package file is the one the operator named, absolute and normalised; a target's staged copy sits
+ * at its package path under the run's staging directory.
+ */
+public record ApplyInput(
+    Path packageFile, PackageContents contents, PackagePaths paths, List<FileTarget> targets) {
+
+  public ApplyInput {
+    packageFile = packageFile.toAbsolutePath().normalize();
+    Objects.requireNonNull(contents, "contents");
+    Objects.requireNonNull(paths, "paths");
+    targets = List.copyOf(targets);
+  }
+
+  public Path stagingDir(Context ctx) {
+    return ctx.home().stagingDir(ctx.runId());
+  }
+
+  // java.io.File.separatorChar is a constant, not file I/O
+  public Path staged(Context ctx, FileTarget t) {
+    return stagingDir(ctx).resolve(t.packagePath().replace('/', java.io.File.separatorChar));
+  }
+
+  public List<Path> snapshotPaths() {
+    List<Path> out = new ArrayList<>();
+    for (FileTarget t : targets) {
+      out.addAll(t.snapshotPaths());
+    }
+    return out;
+  }
+
+  public List<Path> touched() {
+    return targets.stream().map(FileTarget::target).toList();
+  }
+}
