@@ -5,9 +5,9 @@ import java.util.function.BiConsumer;
 
 /**
  * The platform layer's diagnostic sink, in place of a logging framework. Invariants: the default
- * sink discards; the front end installs one that writes the run log; a message is formatted only
- * when a sink is installed; {@code {}} placeholders are filled in order, slf4j style, and a
- * trailing Throwable argument is appended as its toString.
+ * sink discards; the front end installs one that writes the run log; a formatted message goes to
+ * the installed sink, and the default sink discards it; {@code {}} placeholders are filled in
+ * order, slf4j style, and a trailing Throwable argument is appended as its toString.
  */
 public final class Diag {
   public enum Level {
