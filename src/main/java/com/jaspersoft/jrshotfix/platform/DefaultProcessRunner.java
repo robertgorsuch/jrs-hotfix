@@ -16,8 +16,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * {@link ProcessRunner} backed by {@link ProcessBuilder}. Invariants: the command is passed as an
@@ -31,7 +29,6 @@ import org.slf4j.LoggerFactory;
  */
 public final class DefaultProcessRunner implements ProcessRunner {
 
-  private static final Logger LOG = LoggerFactory.getLogger(DefaultProcessRunner.class);
   private static final Duration PUMP_DRAIN_GRACE = Duration.ofSeconds(5);
 
   private final java.util.function.Supplier<Charset> outputCharset;
@@ -131,7 +128,7 @@ public final class DefaultProcessRunner implements ProcessRunner {
     try {
       if (!waitFor(process, request.timeout())) {
         timedOut = true;
-        LOG.warn(
+        Diag.warn(
             "{} did not finish within {}; destroying process tree",
             request.command().get(0),
             request.timeout());
@@ -199,12 +196,12 @@ public final class DefaultProcessRunner implements ProcessRunner {
             onLine.accept(output);
           } catch (RuntimeException e) {
             // keep draining so the child never blocks on a full pipe
-            LOG.warn("output consumer failed on {} line", stream, e);
+            Diag.warn("output consumer failed on {} line", stream, e);
           }
         }
       }
     } catch (IOException e) {
-      LOG.debug("{} pipe closed early", stream, e);
+      Diag.debug("{} pipe closed early", stream, e);
     }
   }
 }

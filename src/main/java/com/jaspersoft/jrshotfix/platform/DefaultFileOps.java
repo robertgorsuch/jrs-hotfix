@@ -14,8 +14,6 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Platform-neutral {@link FileOps}: streaming SHA-256, atomic replace with a same-directory
@@ -38,7 +36,6 @@ import org.slf4j.LoggerFactory;
  */
 public class DefaultFileOps implements FileOps {
 
-  private static final Logger LOG = LoggerFactory.getLogger(DefaultFileOps.class);
   static final int BUFFER_SIZE = 64 * 1024;
   static final String TEMP_SUFFIX = ".jrs-hotfix-tmp";
 
@@ -67,7 +64,7 @@ public class DefaultFileOps implements FileOps {
       Durability.move(
           source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     } catch (AtomicMoveNotSupportedException crossVolume) {
-      LOG.debug("atomic move refused for {} -> {}; staging beside target", source, target);
+      Diag.debug("atomic move refused for {} -> {}; staging beside target", source, target);
       Path staged = tempSibling(target);
       try {
         Durability.copy(source, staged);
@@ -172,7 +169,7 @@ public class DefaultFileOps implements FileOps {
       Files.delete(probe);
       return true;
     } catch (IOException | SecurityException e) {
-      LOG.debug("{} is not writable", dir, e);
+      Diag.debug("{} is not writable", dir, e);
       return false;
     }
   }
@@ -198,7 +195,7 @@ public class DefaultFileOps implements FileOps {
     } catch (UnsupportedOperationException e) {
       return true;
     } catch (IOException e) {
-      LOG.debug("cannot read the owner of {}", file, e);
+      Diag.debug("cannot read the owner of {}", file, e);
       return true;
     }
     Path dir = file.toAbsolutePath().getParent();
@@ -213,14 +210,14 @@ public class DefaultFileOps implements FileOps {
           Files.deleteIfExists(probe);
         }
       } catch (IOException | SecurityException e) {
-        LOG.debug("cannot probe the default owner in {}", dir, e);
+        Diag.debug("cannot probe the default owner in {}", dir, e);
       }
     }
     try {
       Files.setOwner(file, owner);
       return true;
     } catch (IOException | SecurityException e) {
-      LOG.debug("cannot assign owner {} on {}", owner.getName(), file, e);
+      Diag.debug("cannot assign owner {} on {}", owner.getName(), file, e);
       return false;
     }
   }
@@ -252,9 +249,9 @@ public class DefaultFileOps implements FileOps {
           path.getFileSystem().getUserPrincipalLookupService().lookupPrincipalByName(owner);
       Files.setOwner(path, wanted);
     } catch (UnsupportedOperationException e) {
-      LOG.debug("owner not supported on {}", path);
+      Diag.debug("owner not supported on {}", path);
     } catch (IOException e) {
-      LOG.warn("could not restore owner {} on {}: {}", owner, path, e.toString());
+      Diag.warn("could not restore owner {} on {}: {}", owner, path, e.toString());
     }
   }
 

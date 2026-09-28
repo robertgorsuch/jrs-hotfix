@@ -13,8 +13,6 @@ import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Optional;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Writes that survive a power cut, which is what makes a snapshot worth having (spec §6.5): a
@@ -32,7 +30,6 @@ import org.slf4j.LoggerFactory;
  */
 public final class Durability {
 
-  private static final Logger LOG = LoggerFactory.getLogger(Durability.class);
   private static final int MOVE_ATTEMPTS = 20;
   private static final long MOVE_RETRY_DELAY_MS = 50;
 
@@ -69,7 +66,7 @@ public final class Durability {
     try (FileChannel channel = FileChannel.open(dir, StandardOpenOption.READ)) {
       channel.force(true);
     } catch (IOException e) {
-      LOG.debug("{} cannot be synced ({}); relying on the file system's own journal", dir, e);
+      Diag.debug("{} cannot be synced ({}); relying on the file system's own journal", dir, e);
     }
   }
 
@@ -91,7 +88,7 @@ public final class Durability {
         if (attempt >= MOVE_ATTEMPTS || !pause()) {
           throw e;
         }
-        LOG.debug("rename {} -> {} failed (attempt {}); retrying: {}", source, target, attempt, e);
+        Diag.debug("rename {} -> {} failed (attempt {}); retrying: {}", source, target, attempt, e);
       }
     }
   }

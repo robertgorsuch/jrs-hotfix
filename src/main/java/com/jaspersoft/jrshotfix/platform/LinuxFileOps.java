@@ -13,8 +13,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * {@link FileOps} for Linux. Invariants: permissions are the POSIX mode bits plus owner and group,
@@ -25,7 +23,6 @@ import org.slf4j.LoggerFactory;
  */
 public final class LinuxFileOps extends DefaultFileOps {
 
-  private static final Logger LOG = LoggerFactory.getLogger(LinuxFileOps.class);
   private static final String POSIX_PREFIX = "posix:";
   private static final String GROUP_PREFIX = "group:";
   private static final Path PROC = Path.of("/proc");
@@ -63,7 +60,7 @@ public final class LinuxFileOps extends DefaultFileOps {
         }
       }
     } catch (IOException e) {
-      LOG.debug("cannot scan /proc", e);
+      Diag.debug("cannot scan /proc", e);
     }
     return Optional.empty();
   }
@@ -92,7 +89,7 @@ public final class LinuxFileOps extends DefaultFileOps {
         }
       }
     } catch (IOException e) {
-      LOG.debug("cannot scan /proc", e);
+      Diag.debug("cannot scan /proc", e);
       return Optional.of("cannot scan " + PROC + ": " + e.getMessage());
     }
     return unreadable == 0
@@ -158,7 +155,7 @@ public final class LinuxFileOps extends DefaultFileOps {
       } else if (entry.startsWith(GROUP_PREFIX)) {
         applyGroup(path, view, entry.substring(GROUP_PREFIX.length()));
       } else {
-        LOG.debug("ignoring foreign permission entry {} on {}", entry, path);
+        Diag.debug("ignoring foreign permission entry {} on {}", entry, path);
       }
     }
     applyOwner(path, permissions.owner());
@@ -173,7 +170,7 @@ public final class LinuxFileOps extends DefaultFileOps {
           path.getFileSystem().getUserPrincipalLookupService().lookupPrincipalByGroupName(group);
       view.setGroup(principal);
     } catch (IOException e) {
-      LOG.warn("could not restore group {} on {}: {}", group, path, e.toString());
+      Diag.warn("could not restore group {} on {}: {}", group, path, e.toString());
     }
   }
 

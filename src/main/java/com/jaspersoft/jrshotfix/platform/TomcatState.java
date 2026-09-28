@@ -5,8 +5,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Derives a {@link ServiceController.State} from running Tomcat processes. Invariants: {@code
@@ -20,8 +18,6 @@ import org.slf4j.LoggerFactory;
  * refuse instead of skipping a stop (issue #38, ADR-0014).
  */
 final class TomcatState {
-
-  private static final Logger LOG = LoggerFactory.getLogger(TomcatState.class);
 
   private TomcatState() {}
 
@@ -38,7 +34,7 @@ final class TomcatState {
     try {
       found = finder.find();
     } catch (TomcatScanException e) {
-      LOG.debug("process scan failed: {}", e.getMessage());
+      Diag.debug("process scan failed: {}", e.getMessage());
       return ServiceController.State.UNKNOWN;
     }
     boolean running =

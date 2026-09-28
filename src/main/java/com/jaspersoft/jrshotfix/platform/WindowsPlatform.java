@@ -9,8 +9,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * {@link Platform} for Windows. Invariants: the default home is {@code %ProgramData%\jrs-hotfix}
@@ -21,7 +19,6 @@ import org.slf4j.LoggerFactory;
  */
 public final class WindowsPlatform extends AbstractPlatform {
 
-  private static final Logger LOG = LoggerFactory.getLogger(WindowsPlatform.class);
   private static final Duration REGISTRY_TIMEOUT = Duration.ofSeconds(20);
   private static final Pattern INSTALL_LOCATION =
       Pattern.compile("^\\s*InstallLocation\\s+REG_(?:EXPAND_)?SZ\\s+(.+?)\\s*$");
@@ -94,7 +91,7 @@ public final class WindowsPlatform extends AbstractPlatform {
                 new ProcessRunner.Request(command, Optional.empty(), Map.of(), REGISTRY_TIMEOUT),
                 line -> parseInstallLocation(line.text()).ifPresent(found::add));
       } catch (RuntimeException e) {
-        LOG.debug("registry query failed for {}", key, e);
+        Diag.debug("registry query failed for {}", key, e);
       }
     }
     return found;

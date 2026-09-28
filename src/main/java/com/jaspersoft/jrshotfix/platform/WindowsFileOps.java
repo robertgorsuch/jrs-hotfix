@@ -21,8 +21,6 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * {@link FileOps} for Windows. Invariants: permissions are the file's owner plus every DACL entry
@@ -49,7 +47,6 @@ import org.slf4j.LoggerFactory;
  */
 public final class WindowsFileOps extends DefaultFileOps {
 
-  private static final Logger LOG = LoggerFactory.getLogger(WindowsFileOps.class);
   private static final String LOCK_PROBE_SUFFIX = ".jrs-hotfix-lockprobe";
   private static final String LOCK_GUARD_SUFFIX = ".jrs-hotfix-lockguard";
   private static final int RENAME_BACK_ATTEMPTS = 20;
@@ -78,7 +75,7 @@ public final class WindowsFileOps extends DefaultFileOps {
     try (FileChannel ignored = FileChannel.open(file, StandardOpenOption.WRITE)) {
       // opened for write: nobody denies write sharing
     } catch (IOException e) {
-      LOG.debug("{} refuses write access: {}", file, e.toString());
+      Diag.debug("{} refuses write access: {}", file, e.toString());
       return true;
     }
     return deniesRename(file);
@@ -99,7 +96,7 @@ public final class WindowsFileOps extends DefaultFileOps {
     try {
       Files.move(absolute, probe);
     } catch (IOException e) {
-      LOG.debug("{} refuses rename: {}", file, e.toString());
+      Diag.debug("{} refuses rename: {}", file, e.toString());
       return true;
     }
     restore(absolute, probe);
@@ -120,7 +117,7 @@ public final class WindowsFileOps extends DefaultFileOps {
       discard(probe);
       return;
     } catch (IOException | UnsupportedOperationException e) {
-      LOG.debug("cannot link {} back to {}: {}", file, probe, e.toString());
+      Diag.debug("cannot link {} back to {}: {}", file, probe, e.toString());
       last = e instanceof IOException io ? io : new IOException(e);
     }
     for (int attempt = 0; attempt < RENAME_BACK_ATTEMPTS; attempt++) {
@@ -142,7 +139,7 @@ public final class WindowsFileOps extends DefaultFileOps {
     try {
       Files.deleteIfExists(leftover);
     } catch (IOException e) {
-      LOG.debug("cannot remove lock probe leftover {}: {}", leftover, e.toString());
+      Diag.debug("cannot remove lock probe leftover {}: {}", leftover, e.toString());
     }
   }
 
@@ -177,11 +174,11 @@ public final class WindowsFileOps extends DefaultFileOps {
       }
       try {
         Files.move(leftover, absolute);
-        LOG.warn("restored {} from {} left by an interrupted lock probe", file, leftover);
+        Diag.warn("restored {} from {} left by an interrupted lock probe", file, leftover);
         leftovers.forEach(WindowsFileOps::discard);
         return;
       } catch (IOException e) {
-        LOG.error("cannot restore {} from {}", file, leftover, e);
+        Diag.warn("cannot restore {} from {}", file, leftover, e);
       }
     }
   }
@@ -193,7 +190,7 @@ public final class WindowsFileOps extends DefaultFileOps {
     try {
       tomcats = processes.find();
     } catch (TomcatScanException e) {
-      LOG.debug("cannot name the holder of {}: {}", file, e.getMessage());
+      Diag.debug("cannot name the holder of {}: {}", file, e.getMessage());
       return Optional.empty();
     }
     for (TomcatProcessFinder.TomcatProcess tomcat : tomcats) {
@@ -234,7 +231,7 @@ public final class WindowsFileOps extends DefaultFileOps {
       if (entry.isPresent()) {
         acl.add(entry.get());
       } else {
-        LOG.warn("dropping unresolvable ACL entry {} while restoring {}", serialised, path);
+        Diag.warn("dropping unresolvable ACL entry {} while restoring {}", serialised, path);
       }
     }
     if (!acl.isEmpty()) {
@@ -309,7 +306,7 @@ public final class WindowsFileOps extends DefaultFileOps {
       try {
         return Optional.of(lookup.lookupPrincipalByGroupName(name));
       } catch (IOException e2) {
-        LOG.debug("principal {} not found", name, e2);
+        Diag.debug("principal {} not found", name, e2);
         return Optional.empty();
       }
     }

@@ -8,8 +8,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Base for every {@link ServiceController}: issues the platform command, then polls {@link
@@ -22,7 +20,6 @@ import org.slf4j.LoggerFactory;
  */
 abstract class PollingServiceController implements ServiceController {
 
-  private static final Logger LOG = LoggerFactory.getLogger(PollingServiceController.class);
   static final Duration DEFAULT_POLL_INTERVAL = Duration.ofSeconds(1);
   static final Duration QUERY_TIMEOUT = Duration.ofSeconds(30);
 
@@ -113,7 +110,7 @@ abstract class PollingServiceController implements ServiceController {
               collect);
       return Optional.of(new Invocation(result, List.copyOf(lines)));
     } catch (RuntimeException e) {
-      LOG.warn("cannot run {}: {}", command.get(0), e.toString());
+      Diag.warn("cannot run {}: {}", command.get(0), e.toString());
       return Optional.empty();
     }
   }

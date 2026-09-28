@@ -15,8 +15,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Shared behaviour of {@link WindowsPlatform} and {@link LinuxPlatform}: controller selection by
@@ -27,7 +25,6 @@ import org.slf4j.LoggerFactory;
  */
 abstract class AbstractPlatform implements Platform {
 
-  private static final Logger LOG = LoggerFactory.getLogger(AbstractPlatform.class);
   private static final int ANCESTOR_LEVELS = 4;
 
   private final Arch arch;
@@ -171,7 +168,7 @@ abstract class AbstractPlatform implements Platform {
         }
       }
     } catch (IOException e) {
-      LOG.debug("cannot list {}", base, e);
+      Diag.debug("cannot list {}", base, e);
     }
     // field test 3: a Tomcat holding the webapp first, then the highest version by number (a string
     // sort ranks "apache-tomcat-9" above "apache-tomcat-10"), then the first path, so a plain
@@ -232,7 +229,7 @@ abstract class AbstractPlatform implements Platform {
     try {
       running = tomcats.find();
     } catch (TomcatScanException e) {
-      LOG.debug("no install dirs from running Tomcats: {}", e.getMessage());
+      Diag.debug("no install dirs from running Tomcats: {}", e.getMessage());
       return new FromProcesses(
           found,
           Optional.of(
@@ -288,7 +285,7 @@ abstract class AbstractPlatform implements Platform {
         }
       }
     } catch (IOException e) {
-      LOG.debug("cannot glob {} in {}", glob, parent, e);
+      Diag.debug("cannot glob {} in {}", glob, parent, e);
     }
     // highest version first by number, not by text (field test 3)
     found.sort(NaturalOrder.PATHS.reversed());
@@ -321,13 +318,13 @@ abstract class AbstractPlatform implements Platform {
   final Path homeOrFallback(Path base) {
     DefaultHome.Choice choice = DefaultHome.choose(base);
     if (choice.systemHomeUnwritable()) {
-      LOG.warn(
+      Diag.warn(
           "{} exists but is not writable by this user; {} would be used instead, with its own"
               + " state.db and run lock",
           choice.systemHome(),
           choice.home());
     } else if (choice.perUser()) {
-      LOG.warn(
+      Diag.warn(
           "no writable {}; using the per-user home {}, which no other operator's runs share",
           choice.systemHome(),
           choice.home());

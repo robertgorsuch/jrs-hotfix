@@ -10,8 +10,6 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * The code page Windows console programs write with. Invariant: {@code sc.exe}, {@code reg.exe} and
@@ -27,7 +25,6 @@ public final class WindowsCodePage {
   /** System property that overrides detection, for operators on an unusual code page. */
   public static final String PROPERTY = "jrs-hotfix.console.encoding";
 
-  private static final Logger LOG = LoggerFactory.getLogger(WindowsCodePage.class);
   private static final Pattern TRAILING_NUMBER = Pattern.compile(".*?(\\d{3,5})\\s*\\.?\\s*$");
   private static final long PROBE_TIMEOUT_SECONDS = 10;
 
@@ -76,7 +73,7 @@ public final class WindowsCodePage {
     try {
       process = new ProcessBuilder(List.of("chcp.com")).redirectErrorStream(true).start();
     } catch (IOException | RuntimeException e) {
-      LOG.debug("cannot run chcp.com", e);
+      Diag.debug("cannot run chcp.com", e);
       return Optional.empty();
     }
     try {
@@ -95,7 +92,7 @@ public final class WindowsCodePage {
       }
       return codePageOf(output);
     } catch (IOException | RuntimeException e) {
-      LOG.debug("cannot read chcp.com output", e);
+      Diag.debug("cannot read chcp.com output", e);
       return Optional.empty();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -131,7 +128,7 @@ public final class WindowsCodePage {
         // try the next spelling
       }
     }
-    LOG.debug("no charset for console code page {}", text);
+    Diag.debug("no charset for console code page {}", text);
     return Optional.empty();
   }
 }

@@ -9,8 +9,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.LongPredicate;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * {@link ServiceController} for installs controlled by a script: the bundled {@code ctlscript}
@@ -27,8 +25,6 @@ import org.slf4j.LoggerFactory;
  * ends nothing (ADR-0016, issue #42).
  */
 public final class ScriptServiceController extends PollingServiceController {
-
-  private static final Logger LOG = LoggerFactory.getLogger(ScriptServiceController.class);
 
   private static final String SCRIPT_REMEDIATION =
       "check that the script exists, is executable by this account, and stops or starts Tomcat"
@@ -174,7 +170,7 @@ public final class ScriptServiceController extends PollingServiceController {
     try {
       found = processes.find();
     } catch (TomcatScanException e) {
-      LOG.warn(
+      Diag.warn(
           "{} still running after the stop script, but the process scan failed; nothing was"
               + " ended: {}",
           describe(),
@@ -186,7 +182,7 @@ public final class ScriptServiceController extends PollingServiceController {
         continue;
       }
       boolean accepted = terminator.terminate(p.pid());
-      LOG.warn(
+      Diag.warn(
           "{} still running {}s after the stop script; {} process {}"
               + " (service.forceStopAfterSeconds)",
           describe(),
@@ -234,7 +230,7 @@ public final class ScriptServiceController extends PollingServiceController {
       StalePidFile.removeIfStale(tomcatDirs(), alive)
           .ifPresent(
               n ->
-                  LOG.warn(
+                  Diag.warn(
                       "removed stale {} naming {}; catalina.sh would have refused to start over it"
                           + " (installation guide p.237)",
                       n.file(),
@@ -242,7 +238,7 @@ public final class ScriptServiceController extends PollingServiceController {
                           .map(p -> "process " + p + ", which is not running")
                           .orElse("no process")));
     } catch (IOException e) {
-      LOG.warn("cannot remove a stale pid file under {}: {}", watchedDir, e.getMessage());
+      Diag.warn("cannot remove a stale pid file under {}: {}", watchedDir, e.getMessage());
     }
   }
 

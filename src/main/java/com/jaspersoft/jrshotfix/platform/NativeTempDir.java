@@ -7,8 +7,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Where the SQLite driver unpacks and runs its native library. Invariant: the directory is inside
@@ -22,7 +20,6 @@ public final class NativeTempDir {
   /** The driver property naming the directory the native library is unpacked into. */
   public static final String PROPERTY = "org.sqlite.tmpdir";
 
-  private static final Logger LOG = LoggerFactory.getLogger(NativeTempDir.class);
   private static final Path PROC_MOUNTS = Path.of("/proc/mounts");
   private static final Pattern FIELDS = Pattern.compile(" ");
   private static final Pattern OPTIONS = Pattern.compile(",");
@@ -44,7 +41,7 @@ public final class NativeTempDir {
       System.setProperty(PROPERTY, dir.toAbsolutePath().normalize().toString());
       return dir;
     } catch (IOException | RuntimeException e) {
-      LOG.debug("cannot use {} for the sqlite native library", dir, e);
+      Diag.debug("cannot use {} for the sqlite native library", dir, e);
       return current();
     }
   }
@@ -76,7 +73,7 @@ public final class NativeTempDir {
     try {
       lines = Files.readAllLines(procMounts, StandardCharsets.UTF_8);
     } catch (IOException | RuntimeException e) {
-      LOG.debug("cannot read {}", procMounts, e);
+      Diag.debug("cannot read {}", procMounts, e);
       return Optional.empty();
     }
     Path best = null;
