@@ -75,6 +75,18 @@ class RollbackChainTest {
   }
 
   @Test
+  void should_refuse_the_cascade_when_a_later_hotfix_was_only_recorded() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      assertThat(f.run(f.plan(), "r1")).isInstanceOf(RunOutcome.Succeeded.class);
+      f.plans.record(Packages.later(tmp.resolve("dl/later.zip")));
+      assertThatThrownBy(() -> f.plans.planRollback(new HotfixPlans.RollbackArgs(FIRST, true)))
+          .isInstanceOf(HotfixException.class)
+          .hasMessageContaining("by hand")
+          .hasMessageContaining(Packages.laterId());
+    }
+  }
+
+  @Test
   void should_roll_back_the_later_hotfix_alone_when_nothing_newer_owns_its_files()
       throws Exception {
     try (HotfixFixture f = twoApplied(tmp)) {

@@ -76,6 +76,21 @@ class RollbackPlanTest {
   }
 
   @Test
+  void should_touch_nothing_when_the_restore_finds_the_snapshot_missing() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
+      Plan rb =
+          f.plans.planRollback(new HotfixPlans.RollbackArgs("JRSHF-10.0.0-20260730-0457", false));
+      Trees.deleteRecursively(f.home.snapshots().resolve("r1"));
+      StepResult result =
+          HotfixFixture.step(rb, "restore-snapshot").execute(f.ctx("r2"), EventSink.discard());
+      assertThat(result).isNotInstanceOf(StepResult.Ok.class);
+      // the file the hotfix added is still there: a missing snapshot deletes nothing
+      assertThat(Files.readString(f.target(HotfixFixture.NEW))).isEqualTo("brand new");
+    }
+  }
+
+  @Test
   void should_refuse_a_recorded_entry_when_rolled_back() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       f.ledger.recordInstalled(

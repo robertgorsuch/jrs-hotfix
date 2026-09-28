@@ -40,6 +40,10 @@ final class RollbackSteps {
   static final String RECORD_ROLLED_BACK = "record-rolled-back";
   static final String PRE_ROLLBACK_PREFIX = "pre-rollback-";
 
+  private static final String SNAPSHOT_REMEDIATION =
+      "restore it from a backup of the jrs-hotfix home and run the rollback again, or remove the"
+          + " hotfix by hand following the vendor's readme";
+
   private RollbackSteps() {}
 
   /** One hotfix to roll back: its ledger entry, and the phase and id suffix of its steps. */
@@ -191,10 +195,7 @@ final class RollbackSteps {
       try {
         Optional<Snapshot> snapshot = snapshot();
         if (snapshot.isEmpty()) {
-          return CheckResult.fail(
-              "snapshot " + rt.home().snapshots().resolve(in.hotfix().runId()) + " is missing",
-              "restore it from a backup of the jrs-hotfix home, or remove the hotfix by hand"
-                  + " following the vendor's readme");
+          return CheckResult.fail(missingSnapshot(), SNAPSHOT_REMEDIATION);
         }
         rt.snapshots().verify(snapshot.get());
         return CheckResult.pass();
@@ -204,8 +205,7 @@ final class RollbackSteps {
                 + rt.home().snapshots().resolve(in.hotfix().runId())
                 + " is unusable: "
                 + Failures.describe(e),
-            "restore it from a backup of the jrs-hotfix home, or remove the hotfix by hand"
-                + " following the vendor's readme");
+            SNAPSHOT_REMEDIATION);
       }
     }
 
@@ -241,6 +241,12 @@ final class RollbackSteps {
     public StepResult execute(Context ctx, EventSink out) {
       FileOps files = rt.files();
       try {
+        // checked before anything is touched: a missing snapshot leaves the files as they are
+        Optional<Snapshot> snapshot = snapshot();
+        if (snapshot.isEmpty()) {
+          return Failures.recoverable(
+              missingSnapshot(), SNAPSHOT_REMEDIATION, in.touched(), backups());
+        }
         List<Path> current = in.touched().stream().filter(Files::isRegularFile).toList();
         Optional<Path> base =
             PackagePaths.commonAncestor(current.stream().map(Path::getParent).toList());
@@ -254,14 +260,6 @@ final class RollbackSteps {
             // the hotfix added it
             Files.deleteIfExists(f.path());
           }
-        }
-        Optional<Snapshot> snapshot = snapshot();
-        if (snapshot.isEmpty()) {
-          return Failures.recoverable(
-              "snapshot " + rt.home().snapshots().resolve(in.hotfix().runId()) + " is missing",
-              "restore it from a backup of the jrs-hotfix home, then run the rollback again",
-              in.touched(),
-              backups());
         }
         // verifies the snapshot first; puts back replaced and deleted files alike
         rt.snapshots().restore(snapshot.get());
@@ -312,6 +310,10 @@ final class RollbackSteps {
             in.touched(),
             List.of(rt.home().snapshots().resolve(ctx.runId()).resolve(in.preRollbackStepId())));
       }
+    }
+
+    private String missingSnapshot() {
+      return "snapshot " + rt.home().snapshots().resolve(in.hotfix().runId()) + " is missing";
     }
 
     private Optional<Snapshot> snapshot() throws IOException {

@@ -149,9 +149,9 @@ public final class HotfixPlans {
 
   /**
    * Per hotfix, newest first and the target last: stop, restore the snapshot, start, wait, mark
-   * rolled back. Refuses a recorded entry (nothing to restore) and, unless cascading, a hotfix
-   * whose files a later installed hotfix also owns. The first stop refuses before the outage when
-   * any snapshot of the chain is missing.
+   * rolled back. Refuses a recorded entry, as target or anywhere in the chain (nothing to restore),
+   * and, unless cascading, a hotfix whose files a later installed hotfix also owns. The first stop
+   * refuses before the outage when any snapshot of the chain is missing.
    */
   public Plan planRollback(RollbackArgs args) {
     Ledger ledger = rt.ledger();
@@ -170,15 +170,12 @@ public final class HotfixPlans {
           args.hotfixId() + " is not installed (state " + target.state() + ")",
           "run jrs-hotfix list");
     }
-    if (target.recorded()) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          args.hotfixId()
-              + " was applied by hand and only recorded; there is no snapshot to put back",
-          "remove the hotfix by hand following the vendor's readme; the entry stays as the"
-              + " inventory of this server");
-    }
+    refuseRecorded(target);
     List<String> chain = RollbackChain.of(ledger, target, args.cascade());
+    for (String id : chain) {
+      // a recorded entry owns files, so it can be a later blocker the cascade would take off
+      refuseRecorded(ledger.find(id).orElseThrow());
+    }
     List<RollbackSteps.Input> inputs = new ArrayList<>();
     List<RollbackSteps.RestoreSnapshot> restores = new ArrayList<>();
     for (String id : chain) {
@@ -240,6 +237,16 @@ public final class HotfixPlans {
         steps,
         summary,
         PlanFingerprint.of(fingerprint));
+  }
+
+  private static void refuseRecorded(LedgerEntry hotfix) {
+    if (hotfix.recorded()) {
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          hotfix.id() + " was applied by hand and only recorded; there is no snapshot to put back",
+          "remove the hotfix by hand following the vendor's readme; the entry stays as the"
+              + " inventory of this server");
+    }
   }
 
   /**
