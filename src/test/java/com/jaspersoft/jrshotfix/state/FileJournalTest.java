@@ -26,6 +26,7 @@ class FileJournalTest {
         "r1", "snapshot", "backup", Optional.of("RUNNING"), "SUCCEEDED", Optional.of("12 files"));
     j.recordRunEnd("r1", Instant.parse("2026-09-28T10:05:00Z"), TerminalState.SUCCEEDED, 0);
     assertThat(j.pendingRuns()).isEmpty();
+    assertThat(j.runs()).extracting("runId").containsExactly("r1");
     assertThat(j.run("r1").orElseThrow().exitCode()).contains(0);
     assertThat(j.transitions("r1")).hasSize(2);
     assertThat(j.transitions("r1").get(1).seq()).isEqualTo(2);

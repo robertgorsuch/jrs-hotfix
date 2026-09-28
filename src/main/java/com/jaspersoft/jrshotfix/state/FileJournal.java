@@ -105,6 +105,22 @@ public final class FileJournal implements Journal {
     return readRun(runId).map(FileJournal::toRecord);
   }
 
+  /** Every run in the home, pending or ended, oldest first (run ids sort by start time). */
+  public List<RunRecord> runs() {
+    if (!Files.isDirectory(home.runs())) {
+      return List.of();
+    }
+    List<RunRecord> out = new ArrayList<>();
+    try (Stream<Path> dirs = Files.list(home.runs())) {
+      dirs.filter(d -> Files.isRegularFile(d.resolve(RUN)))
+          .sorted()
+          .forEach(d -> run(d.getFileName().toString()).ifPresent(out::add));
+    } catch (IOException e) {
+      throw new JournalException("cannot list " + home.runs() + ": " + e.getMessage(), e);
+    }
+    return List.copyOf(out);
+  }
+
   @Override
   public List<RunRecord> pendingRuns() {
     if (!Files.isDirectory(home.runs())) {

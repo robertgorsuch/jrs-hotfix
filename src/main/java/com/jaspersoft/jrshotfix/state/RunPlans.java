@@ -21,10 +21,10 @@ import java.util.Optional;
 
 /**
  * The plan each run was started with, {@code runs/<runId>/plan.json} under the home: its id, the
- * operation and arguments it was built from, its fingerprint, its step ids and the summary the
- * operator confirmed. Invariants: a write replaces the file atomically after an fsync; an absent
- * file is "no plan stored"; the arguments round-trip, so recovery can rebuild the plan with {@code
- * HotfixPlans.rebuild} and compare fingerprints.
+ * operation and arguments it was built from, its fingerprint and the fingerprint's inputs, its step
+ * ids and the summary the operator confirmed. Invariants: a write replaces the file atomically
+ * after an fsync; an absent file is "no plan stored"; the arguments round-trip, so recovery can
+ * rebuild the plan with {@code HotfixPlans.rebuild} and compare fingerprints.
  */
 public final class RunPlans {
   private static final String FILE = "plan.json";
@@ -35,14 +35,23 @@ public final class RunPlans {
     this.home = Objects.requireNonNull(home, "home");
   }
 
-  /** What was stored for one run; {@code argsJson} is compact JSON. */
+  /**
+   * What was stored for one run; {@code argsJson} is compact JSON; {@code inputs} are the
+   * fingerprint's inputs, so recovery can compare the stable ones with a rebuilt plan's.
+   */
   public record Stored(
-      String planId, String operation, String argsJson, String fingerprint, List<String> stepIds) {
+      String planId,
+      String operation,
+      String argsJson,
+      String fingerprint,
+      Map<String, String> inputs,
+      List<String> stepIds) {
     public Stored {
       Objects.requireNonNull(planId, "planId");
       Objects.requireNonNull(operation, "operation");
       Objects.requireNonNull(argsJson, "argsJson");
       Objects.requireNonNull(fingerprint, "fingerprint");
+      inputs = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(inputs));
       stepIds = List.copyOf(stepIds);
     }
   }
@@ -55,6 +64,7 @@ public final class RunPlans {
       doc.put("operation", operation);
       doc.put("args", Json.mapper().readTree(argsJson));
       doc.put("fingerprint", plan.fingerprint().value());
+      doc.put("fingerprintInputs", plan.fingerprint().inputs());
       doc.put("stepIds", plan.steps().stream().map(Step::id).toList());
       doc.put("summary", plan.summary());
       Files.createDirectories(file.getParent());
@@ -80,12 +90,17 @@ public final class RunPlans {
       for (JsonNode id : n.path("stepIds")) {
         stepIds.add(id.asText());
       }
+      Map<String, String> inputs = new LinkedHashMap<>();
+      n.path("fingerprintInputs")
+          .properties()
+          .forEach(e -> inputs.put(e.getKey(), e.getValue().asText()));
       return Optional.of(
           new Stored(
               n.path("planId").asText(),
               n.path("operation").asText(),
               Json.write(n.path("args")),
               n.path("fingerprint").asText(),
+              inputs,
               stepIds));
     } catch (IOException e) {
       throw new UncheckedIOException("cannot read " + file, e);

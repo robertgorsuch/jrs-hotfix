@@ -12,10 +12,10 @@ import java.util.Map;
 
 /**
  * Renders a {@link Plan} for the operator before confirmation (spec §6.2): header, summary block,
- * steps grouped by phase and numbered the way the progress renderer numbers them, the fingerprint,
- * and the reminder that nothing has changed yet. Invariants: the JSON form is the document stored
- * in the {@code plans} table, so {@code --plan --json} output and the stored plan are identical;
- * step numbers are 1-based positions in {@code plan.steps()}; every text line is redacted.
+ * steps grouped by phase, numbered the way the progress renderer numbers them and named by the step
+ * id the journal and {@code runs show} use, the fingerprint, and the reminder that nothing has
+ * changed yet. Invariants: step numbers are 1-based positions in {@code plan.steps()}; every text
+ * line is redacted.
  */
 final class PlanPrinter {
 
@@ -74,7 +74,7 @@ final class PlanPrinter {
       headers.add(step.phase().equals(phase) ? "" : "  " + step.phase());
       phase = step.phase();
       String title = step.irreversible() ? step.title() + " (irreversible)" : step.title();
-      steps.row("  " + number(i), title, ansi.dim(step.detail()));
+      steps.row("  " + number(i), step.id(), title, ansi.dim(step.detail()));
     }
     List<String> stepLines = steps.lines();
     for (int i = 0; i < all.size(); i++) {

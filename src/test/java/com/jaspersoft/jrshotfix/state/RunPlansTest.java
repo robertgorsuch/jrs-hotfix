@@ -33,6 +33,7 @@ class RunPlansTest {
       assertThat(Json.mapper().readTree(s.argsJson())).isEqualTo(Json.mapper().readTree(argsJson));
       assertThat(HotfixPlans.applyArgs(s.argsJson())).isEqualTo(args);
       assertThat(s.fingerprint()).isEqualTo(plan.fingerprint().value());
+      assertThat(s.inputs()).isEqualTo(plan.fingerprint().inputs());
       assertThat(s.stepIds()).isEqualTo(plan.steps().stream().map(Step::id).toList());
     }
   }

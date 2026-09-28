@@ -39,6 +39,9 @@ public final class HotfixPlans {
   public static final String APPLY = "hotfix.apply";
   public static final String ROLLBACK = "hotfix.rollback";
 
+  /** The audit kind the front end writes to the run log when the package checksum is confirmed. */
+  public static final String AUDIT_CHECKSUM_CONFIRMED = ApplySteps.AUDIT_CHECKSUM_CONFIRMED;
+
   /** The run id of a ledger entry written by {@link #record}: no run installed it. */
   public static final String RECORDED_RUN_ID = "recorded";
 
@@ -262,6 +265,10 @@ public final class HotfixPlans {
           HotfixException.PRECHECK,
           file + " does not exist",
           "point jrs-hotfix record at the hotfix ZIP as support published it");
+    }
+    if (!OfficialPackage.looksOfficial(file)) {
+      throw new HotfixException(
+          HotfixException.UNSUPPORTED, file + OfficialPackage.NEITHER_SHAPE_SHORT, AS_PUBLISHED);
     }
     PackageContents c;
     try {
