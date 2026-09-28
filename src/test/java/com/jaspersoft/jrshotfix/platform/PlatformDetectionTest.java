@@ -14,7 +14,15 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-class PlatformDetectionTest {
+public class PlatformDetectionTest {
+
+  /**
+   * The {@link FileOps} this test's own {@code forTesting} platforms use; shared with other test
+   * packages.
+   */
+  public static FileOps files() {
+    return new DefaultFileOps();
+  }
 
   private static final String SERVER_XML =
       """

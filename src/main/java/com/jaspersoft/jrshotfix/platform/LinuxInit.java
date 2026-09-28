@@ -4,7 +4,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -91,6 +95,40 @@ public final class LinuxInit {
         Kind.OTHER,
         pid1,
         "process 1 is " + name + "; no service manager detected (no systemd, no " + etcInitD + ")");
+  }
+
+  private static final Duration LIST_TIMEOUT = Duration.ofSeconds(20);
+
+  /**
+   * The names {@code systemctl list-units} lists (service units, including inactive ones), each
+   * once, in listing order. Invariant: never throws; a host with no {@code systemctl} or a listing
+   * that fails yields an empty list, because a missing service manager is "no service found" for
+   * detection, not an error.
+   */
+  public static List<String> systemdUnits(ProcessRunner runner) {
+    List<String> names = new ArrayList<>();
+    try {
+      runner.run(
+          new ProcessRunner.Request(
+              List.of(
+                  "systemctl", "list-units", "--type=service", "--all", "--no-legend", "--plain"),
+              Optional.empty(),
+              Map.of(),
+              LIST_TIMEOUT),
+          line -> {
+            if (line.stream() != ProcessRunner.OutputLine.Stream.STDOUT) {
+              return;
+            }
+            String stripped = line.text().strip();
+            if (!stripped.isEmpty()) {
+              int space = stripped.indexOf(' ');
+              names.add(space < 0 ? stripped : stripped.substring(0, space));
+            }
+          });
+    } catch (RuntimeException e) {
+      // no listing, no units: detection continues without a systemd match
+    }
+    return names;
   }
 
   private static Optional<String> readComm(Path proc1Comm) {
