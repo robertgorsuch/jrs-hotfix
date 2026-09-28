@@ -79,7 +79,7 @@ public final class Recovery {
       return new RunOutcome.PrecheckFailed(
           firstRolledBack(journal),
           "run " + runId + " already began rolling back; resume is not available",
-          "run `jrsctl runs recover " + runId + " --rollback`");
+          "run `jrs-hotfix runs rollback " + runId + "`");
     }
     int start = resumeIndex(plan, journal);
     if (start < plan.steps().size()) {
@@ -94,9 +94,9 @@ public final class Recovery {
         return new RunOutcome.PrecheckFailed(
             step.id(),
             "precheck of interrupted step " + step.id() + " failed: " + fail.message(),
-            ("only rollback is available: run `jrsctl runs recover "
+            ("only rollback is available: run `jrs-hotfix runs rollback "
                     + runId
-                    + " --rollback`. "
+                    + "`. "
                     + fail.remediation())
                 .strip());
       }
@@ -140,7 +140,7 @@ public final class Recovery {
             + "); the installation or its configuration changed since the run started, so the"
             + " stored plan cannot be replayed",
         "put the installation back the way it was when the run started and recover again, or"
-            + " restore what `jrsctl runs show "
+            + " restore what `jrs-hotfix runs show "
             + runId
             + "` lists by hand");
   }

@@ -9,7 +9,7 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * Run identifiers of the form {@code r-YYYYMMDD-HHmmss-xxxx} (UTC timestamp plus four random hex
  * digits). Invariant: ids sort chronologically as strings and are file-system safe, so a run id
- * doubles as the name of its directory under {@code $JRSCTL_HOME/runs}.
+ * doubles as the name of its directory under {@code $JRS_HOTFIX_HOME/runs}.
  */
 public final class RunIds {
 

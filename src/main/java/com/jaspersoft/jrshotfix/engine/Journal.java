@@ -7,8 +7,8 @@ import java.util.Optional;
 /**
  * The run journal as the engine needs it: the six calls {@link Runner} and {@link Recovery} make,
  * and nothing else. Invariant: this is the engine's port, not the store's API. The engine names
- * what it needs and {@code core.state.StateStore} implements it, so the engine compiles without
- * knowing that the journal is SQLite, and a test can hand the Runner a journal that throws on the
+ * what it needs and {@code state.FileJournal} implements it, so the engine compiles without knowing
+ * that the journal is a set of files, and a test can hand the Runner a journal that throws on the
  * third write without a database anywhere near it (review finding 1.10 and roadmap item 16). Every
  * write is durable before it returns and an append is never reordered; a failure is a {@link
  * RuntimeException}, which the Runner turns into a failed run rather than letting it escape.

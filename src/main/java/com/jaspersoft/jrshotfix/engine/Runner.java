@@ -33,8 +33,8 @@ import java.util.function.Supplier;
  * as the cause. Every event, including those steps emit themselves, passes the redactor before any
  * subscriber sees it, so redaction is an engine guarantee rather than a per-sink convention. A
  * journal write that fails ends the run with a {@code Failed} outcome and a {@code RunFailed} event
- * naming {@code runs recover}, never with an escaping exception; cancellation is noticed inside a
- * retry backoff within one {@link Sleeper#SLICE}. {@link
+ * naming {@code runs resume} and {@code runs rollback}, never with an escaping exception;
+ * cancellation is noticed inside a retry backoff within one {@link Sleeper#SLICE}. {@link
  * com.jaspersoft.jrshotfix.engine.LockHeldException} propagates untouched so the CLI can map it to
  * exit code 9.
  */
@@ -77,13 +77,13 @@ public final class Runner {
         store.recordRunStart(
             ctx.runId(), plan.summary().operation(), Optional.of(plan.planId()), clock.instant());
       } catch (JournalException e) {
-        // Nothing has been mutated and there is no row for runs recover to find, so this is a
+        // Nothing has been mutated and there is no row for recovery to find, so this is a
         // refusal (exit 2), not the rollback-incomplete outcome a failure mid-run gets (item E5).
         return new RunOutcome.Failed(
             "the run journal could not be written: " + describe(e),
             false,
-            "run jrsctl doctor; state.db must be writable before anything can run; nothing was"
-                + " changed",
+            "run jrs-hotfix settings show and check the service; the home's runs/ directory must"
+                + " be writable before anything can run; nothing was changed",
             List.of());
       }
       Diag.info(
@@ -203,15 +203,16 @@ public final class Runner {
       String nextAction =
           "the state of run "
               + runId
-              + " is unknown until state.db is writable again; run jrsctl doctor, then"
-              + " jrsctl runs recover "
+              + " is unknown until the run journal is writable again; run jrs-hotfix settings"
+              + " show and check the service, then jrs-hotfix runs resume "
               + runId
-              + " --resume or --rollback";
+              + " or jrs-hotfix runs rollback "
+              + runId;
       RunOutcome.Failed outcome = new RunOutcome.Failed(cause, mutated, nextAction, List.of());
       try {
         ended(TerminalState.FAILED, outcome.exitCode());
       } catch (JournalException again) {
-        // the journal is what failed; the pending row is what runs recover will find
+        // the journal is what failed; the pending row is what recovery will find
       }
       emit(
           new Event.RunFailed(
@@ -280,7 +281,7 @@ public final class Runner {
                     + ": "
                     + rf.cause(),
                 true,
-                "restore the listed backups manually, then run `jrsctl doctor`",
+                "restore the listed backups manually, then run jrs-hotfix settings show and check the service",
                 rf.backups()));
       }
       String phase = steps.isEmpty() ? RUN_PHASE : steps.get(0).phase();
@@ -426,7 +427,7 @@ public final class Runner {
               Optional.of(step.id()),
               step.phase(),
               StepFailure.recoverable(
-                  "cancelled: " + why, "none; jrsctl compensates the step automatically")));
+                  "cancelled: " + why, "none; jrs-hotfix compensates the step automatically")));
       Optional<RollbackFailure> inFlight = step.mutating() ? compensateOne(step) : Optional.empty();
       return new StepOutcome.Cancelled(why, inFlight);
     }
@@ -481,7 +482,7 @@ public final class Runner {
                     + ": "
                     + rf.get().cause(),
                 true,
-                "restore the listed backups manually, then run `jrsctl doctor`",
+                "restore the listed backups manually, then run jrs-hotfix settings show and check the service",
                 rf.get().backups()));
       }
       return finishCancelled(reason);
@@ -600,7 +601,7 @@ public final class Runner {
       Optional<String> from = Optional.ofNullable(states.get(step.id())).map(StepState::name);
       store.appendTransition(runId, step.id(), step.phase(), from, to.name(), detail);
       states.put(step.id(), to);
-      // after the journal, like every event: the log is never ahead of state.db
+      // after the journal, like every event: the log is never ahead of the journal
       Diag.info(
           "step {} [{}] {} -> {}{}",
           step.id(),

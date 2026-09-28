@@ -16,7 +16,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * The exclusive run lock on {@code $JRSCTL_HOME/runs.lock} (spec §5.5). Invariants: the lock is an
+ * The exclusive run lock on {@code $JRS_HOTFIX_HOME/lock} (spec §5.5). Invariants: the lock is an
  * OS file lock so it is released even when the process dies; while held the file contains {@code
  * runId pid startedAt} so a contender can name the holder; the locked byte range lies far beyond
  * the content so the holder text stays readable by other processes; contention in another process

@@ -59,13 +59,13 @@ class JournalPortTest {
     assertThat(result.sink().events())
         .filteredOn(e -> e instanceof Event.RunFailed)
         .extracting(e -> ((Event.RunFailed) e).nextAction())
-        .anySatisfy(next -> assertThat(next).contains("runs recover"));
+        .anySatisfy(next -> assertThat(next).contains("runs resume").contains("runs rollback"));
   }
 
   /**
    * The first write is the run's own row. When it fails nothing has been mutated and there is no
-   * row for {@code runs recover} to find, so the outcome is a refusal (exit 2), not the
-   * rollback-incomplete failure a mid-run journal loss gets (assessment item E5).
+   * row for recovery to find, so the outcome is a refusal (exit 2), not the rollback-incomplete
+   * failure a mid-run journal loss gets (assessment item E5).
    */
   @Test
   void should_refuse_with_nothing_changed_when_the_journal_fails_on_run_start(@TempDir Path home) {
