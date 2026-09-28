@@ -1,0 +1,253 @@
+package com.jaspersoft.jrshotfix.app;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.jaspersoft.jrshotfix.engine.RunLock;
+import com.jaspersoft.jrshotfix.home.Home;
+import com.jaspersoft.jrshotfix.home.SettingsStore;
+import com.jaspersoft.jrshotfix.hotfix.HotfixFixture;
+import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
+import com.jaspersoft.jrshotfix.pkg.Packages;
+import com.jaspersoft.jrshotfix.state.FileJournal;
+import com.jaspersoft.jrshotfix.state.RunPlans;
+import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * The commands end to end, in process: {@link Main#commandLine} over a fixture installation whose
+ * platform is the hotfix tests' fake (real files, a recording service controller) and whose wait
+ * probe answers from a stub HTTP server.
+ */
+class CommandsTest {
+
+  @TempDir Path tmp;
+
+  private final List<Fixture> fixtures = new ArrayList<>();
+
+  @AfterEach
+  void stopServers() {
+    fixtures.forEach(Fixture::close);
+  }
+
+  @Test
+  void should_apply_verify_list_and_roll_back_through_the_commands() throws Exception {
+    Fixture f = fixture();
+    assertThat(f.run("verify", f.pkg.toString())).isEqualTo(0);
+    assertThat(f.out()).contains("JRSHF-10.0.0-20260730-0457").contains("replace");
+    assertThat(f.run("apply", f.pkg.toString(), "--plan")).isEqualTo(0);
+    assertThat(f.out()).contains("preflight").contains("atomic-swap");
+    assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
+        .isEqualTo("old foo");
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
+    assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
+        .isEqualTo("patched foo");
+    assertThat(f.run("list")).isEqualTo(0);
+    assertThat(f.out()).contains("INSTALLED");
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(2);
+    assertThat(f.run("rollback", "JRSHF-10.0.0-20260730-0457", "--yes")).isEqualTo(0);
+    assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
+        .isEqualTo("old foo");
+  }
+
+  @Test
+  void should_write_the_run_log_with_the_checksum_audit_when_applying() throws Exception {
+    Fixture f = fixture();
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
+    assertThat(f.run("runs", "list")).isEqualTo(0);
+    String row = f.out().lines().filter(l -> l.contains("hotfix.apply")).findFirst().orElseThrow();
+    String runId = row.substring(0, row.indexOf(' '));
+    String log = Files.readString(f.home.logFile(runId), StandardCharsets.UTF_8);
+    assertThat(log)
+        .contains(HotfixPlans.AUDIT_CHECKSUM_CONFIRMED + " skipped with --yes")
+        .contains("StepSucceeded [atomic-swap]");
+    assertThat(f.run("runs", "show", runId)).isEqualTo(0);
+    assertThat(f.out()).contains("SUCCEEDED").contains("record-installed");
+  }
+
+  @Test
+  void should_exit_2_without_touching_anything_when_confirmation_is_missing_non_interactively()
+      throws Exception {
+    Fixture f = fixture();
+    assertThat(f.run("apply", f.pkg.toString())).isEqualTo(2);
+    assertThat(f.err()).contains("--yes");
+    assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
+        .isEqualTo("old foo");
+    assertThat(new FileJournal(f.home, Clock.systemUTC()).runs()).isEmpty();
+  }
+
+  @Test
+  void should_exit_9_when_another_process_holds_the_lock() throws Exception {
+    Fixture f = fixture();
+    try (RunLock held = new RunLock(f.home, "other", Instant.now())) {
+      assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(9);
+      assertThat(f.err()).contains("other");
+    }
+  }
+
+  @Test
+  void should_exit_8_until_a_pending_run_is_recovered() throws Exception {
+    Fixture f = fixture();
+    new FileJournal(f.home, Clock.systemUTC())
+        .recordRunStart("stuck", "hotfix.apply", Optional.of("p"), Instant.now());
+    new RunPlans(f.home)
+        .store(
+            "stuck",
+            f.plans().planApply(new HotfixPlans.ApplyArgs(f.pkg, true)),
+            "hotfix.apply",
+            HotfixPlans.applyArgsJson(new HotfixPlans.ApplyArgs(f.pkg, true)));
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(8);
+    assertThat(f.err()).contains("runs resume stuck").contains("runs rollback stuck");
+    assertThat(f.run("runs", "rollback", "stuck", "--yes")).isEqualTo(0);
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
+  }
+
+  @Test
+  void should_refuse_recovery_when_the_package_changed_since_the_run_started() throws Exception {
+    Fixture f = fixture();
+    new FileJournal(f.home, Clock.systemUTC())
+        .recordRunStart("stuck", "hotfix.apply", Optional.of("p"), Instant.now());
+    new RunPlans(f.home)
+        .store(
+            "stuck",
+            f.plans().planApply(new HotfixPlans.ApplyArgs(f.pkg, true)),
+            "hotfix.apply",
+            HotfixPlans.applyArgsJson(new HotfixPlans.ApplyArgs(f.pkg, true)));
+    Packages.later(f.pkg);
+
+    assertThat(f.run("runs", "resume", "stuck", "--yes")).isEqualTo(2);
+    assertThat(f.err()).contains("package");
+  }
+
+  @Test
+  void should_show_and_set_settings_when_asked() throws Exception {
+    Fixture f = fixture();
+    assertThat(f.run("settings", "set", "service.stopTimeoutSeconds", "42")).isEqualTo(0);
+    assertThat(f.run("settings", "show")).isEqualTo(0);
+    assertThat(f.out()).contains("service.stopTimeoutSeconds").contains("42");
+    assertThat(f.run("settings", "set", "nope", "1")).isEqualTo(1);
+  }
+
+  @Test
+  void should_exit_6_when_the_zip_is_not_a_package() throws Exception {
+    Fixture f = fixture();
+    Path other = Packages.zip(tmp.resolve("dl/other.zip"), Map.of("a.txt", new byte[] {1}));
+    assertThat(f.run("apply", other.toString(), "--yes")).isEqualTo(6);
+    assertThat(f.run("verify", other.toString())).isEqualTo(6);
+    assertThat(f.run("record", other.toString())).isEqualTo(6);
+    assertThat(f.err()).doesNotContain("\tat ");
+  }
+
+  @Test
+  void should_exit_2_with_the_remediation_when_there_are_no_settings() throws Exception {
+    Fixture f = fixture();
+    Files.delete(f.home.settingsFile());
+    assertThat(f.run("list")).isEqualTo(2);
+    assertThat(f.err()).contains("no settings yet").contains("settings detect");
+  }
+
+  @Test
+  void should_exit_1_on_a_usage_error_or_without_a_subcommand() throws Exception {
+    Fixture f = fixture();
+    assertThat(f.run("apply")).isEqualTo(1);
+    assertThat(f.run()).isEqualTo(1);
+    assertThat(f.run("--version")).isEqualTo(0);
+    assertThat(f.out()).contains("jrs-hotfix").contains("Jaspersoft");
+  }
+
+  @Test
+  void should_prune_nothing_that_is_still_needed_after_an_apply() throws Exception {
+    Fixture f = fixture();
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
+    assertThat(f.run("runs", "prune", "--older-than", "0")).isEqualTo(0);
+    assertThat(f.run("rollback", "JRSHF-10.0.0-20260730-0457", "--yes")).isEqualTo(0);
+  }
+
+  private Fixture fixture() throws IOException {
+    Fixture f = Fixture.create(tmp);
+    fixtures.add(f);
+    return f;
+  }
+
+  /** A fake installation with settings in its home, a stub server, and captured streams. */
+  static final class Fixture implements AutoCloseable {
+    final HotfixFixture hf;
+    final Home home;
+    final Path pkg;
+    private final HttpServer server;
+    private StringWriter out = new StringWriter();
+    private StringWriter err = new StringWriter();
+
+    private Fixture(HotfixFixture hf, HttpServer server) throws IOException {
+      this.hf = hf;
+      this.home = hf.home;
+      this.server = server;
+      this.pkg = hf.packageFile();
+      URI base =
+          URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/jasperserver-pro");
+      SettingsStore.save(home, hf.settings.withKey("baseUrl", base.toString()));
+    }
+
+    static Fixture create(Path tmp) throws IOException {
+      HttpServer server =
+          HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+      server.createContext(
+          "/",
+          exchange -> {
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+          });
+      server.start();
+      return new Fixture(HotfixFixture.create(tmp), server);
+    }
+
+    int run(String... args) {
+      out = new StringWriter();
+      err = new StringWriter();
+      List<String> all = new ArrayList<>(List.of(args));
+      if (args.length > 0 && !args[0].startsWith("--")) {
+        all.addAll(List.of("--home", home.root().toString(), "--non-interactive"));
+      }
+      Bootstrap.Opener opener = Bootstrap.opener(prompt -> hf.platform, Map.of());
+      return Main.commandLine(new PrintWriter(out, true), new PrintWriter(err, true), opener)
+          .execute(all.toArray(String[]::new));
+    }
+
+    String out() {
+      return out.toString();
+    }
+
+    String err() {
+      return err.toString();
+    }
+
+    Path target(String packagePath) {
+      return hf.target(packagePath);
+    }
+
+    HotfixPlans plans() {
+      return hf.plans;
+    }
+
+    @Override
+    public void close() {
+      server.stop(0);
+    }
+  }
+}
