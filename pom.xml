@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.jaspersoft.jrshotfix</groupId>
+  <artifactId>jrs-hotfix</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <name>jrs-hotfix</name>
+  <description>Apply, verify, record and roll back official Jaspersoft hotfix packages on JasperReports Server 10.x</description>
+  <licenses><license><name>GPL-3.0-only</name><url>https://www.gnu.org/licenses/gpl-3.0.txt</url></license></licenses>
+
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.build.outputTimestamp>2026-09-28T00:00:00Z</project.build.outputTimestamp>
+    <picocli.version>4.7.7</picocli.version>
+    <jackson.version>2.22.2</jackson.version>
+    <jline.version>3.30.17</jline.version>
+    <junit.version>5.14.4</junit.version>
+    <assertj.version>3.27.7</assertj.version>
+    <errorprone.version>2.50.0</errorprone.version>
+    <google-java-format.version>1.22.0</google-java-format.version>
+    <spotless.version>2.43.0</spotless.version>
+    <surefire.version>3.2.5</surefire.version>
+    <jacoco.version>0.8.15</jacoco.version>
+    <jacoco.line.minimum>0.70</jacoco.line.minimum>
+    <acceptance.skip>false</acceptance.skip>
+  </properties>
+
+  <dependencies>
+    <dependency><groupId>info.picocli</groupId><artifactId>picocli</artifactId><version>${picocli.version}</version></dependency>
+    <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId><version>${jackson.version}</version></dependency>
+    <dependency><groupId>com.fasterxml.jackson.datatype</groupId><artifactId>jackson-datatype-jsr310</artifactId><version>${jackson.version}</version></dependency>
+    <dependency><groupId>com.fasterxml.jackson.datatype</groupId><artifactId>jackson-datatype-jdk8</artifactId><version>${jackson.version}</version></dependency>
+    <dependency><groupId>org.jline</groupId><artifactId>jline-terminal</artifactId><version>${jline.version}</version></dependency>
+    <dependency><groupId>org.jline</groupId><artifactId>jline-reader</artifactId><version>${jline.version}</version></dependency>
+    <dependency><groupId>org.jline</groupId><artifactId>jline-terminal-jni</artifactId><version>${jline.version}</version></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>${junit.version}</version><scope>test</scope></dependency>
+    <dependency><groupId>org.assertj</groupId><artifactId>assertj-core</artifactId><version>${assertj.version}</version><scope>test</scope></dependency>
+  </dependencies>
+
+  <build>
+    <resources>
+      <resource><directory>src/main/resources</directory><filtering>true</filtering><includes><include>jrs-hotfix-version.properties</include></includes></resource>
+      <resource><directory>src/main/resources</directory><filtering>false</filtering><excludes><exclude>jrs-hotfix-version.properties</exclude></excludes></resource>
+    </resources>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version>
+        <configuration>
+          <release>21</release>
+          <compilerArgs>
+            <arg>-XDcompilePolicy=simple</arg>
+            <arg>--should-stop=ifError=FLOW</arg>
+            <!-- Error Prone 2.37+ refuses to run on JDK 21 without it -->
+            <arg>-XDaddTypeAnnotationsToSymbol=true</arg>
+            <arg>-Xplugin:ErrorProne -XepDisableWarningsInGeneratedCode -Xep:StringConcatToTextBlock:OFF</arg>
+            <arg>-Werror</arg>
+          </compilerArgs>
+          <annotationProcessorPaths>
+            <path><groupId>com.google.errorprone</groupId><artifactId>error_prone_core</artifactId><version>${errorprone.version}</version></path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>${surefire.version}</version>
+        <configuration><excludes><exclude>**/acceptance/**</exclude></excludes></configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId><artifactId>maven-shade-plugin</artifactId><version>3.6.2</version>
+        <executions><execution><phase>package</phase><goals><goal>shade</goal></goals>
+          <configuration>
+            <finalName>jrs-hotfix</finalName>
+            <createDependencyReducedPom>false</createDependencyReducedPom>
+            <filters><filter><artifact>*:*</artifact><excludes><exclude>META-INF/*.SF</exclude><exclude>META-INF/*.DSA</exclude><exclude>META-INF/*.RSA</exclude><exclude>module-info.class</exclude></excludes></filter></filters>
+            <transformers>
+              <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                <mainClass>com.jaspersoft.jrshotfix.app.Main</mainClass>
+                <manifestEntries><Multi-Release>true</Multi-Release></manifestEntries>
+              </transformer>
+              <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+            </transformers>
+          </configuration>
+        </execution></executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId><artifactId>maven-failsafe-plugin</artifactId><version>${surefire.version}</version>
+        <configuration>
+          <skip>${acceptance.skip}</skip>
+          <includes><include>**/acceptance/*Test.java</include></includes>
+          <forkCount>2</forkCount><reuseForks>false</reuseForks>
+          <systemPropertyVariables><jrshotfix.jar>${project.build.directory}/jrs-hotfix.jar</jrshotfix.jar></systemPropertyVariables>
+        </configuration>
+        <executions><execution><goals><goal>integration-test</goal><goal>verify</goal></goals></execution></executions>
+      </plugin>
+      <plugin>
+        <groupId>com.diffplug.spotless</groupId><artifactId>spotless-maven-plugin</artifactId><version>${spotless.version}</version>
+        <configuration><java><googleJavaFormat><version>${google-java-format.version}</version></googleJavaFormat></java></configuration>
+        <executions><execution><id>spotless-check</id><phase>validate</phase><goals><goal>check</goal></goals></execution></executions>
+      </plugin>
+      <plugin>
+        <groupId>org.jacoco</groupId><artifactId>jacoco-maven-plugin</artifactId><version>${jacoco.version}</version>
+        <executions>
+          <execution><id>prepare-agent</id><goals><goal>prepare-agent</goal></goals></execution>
+          <execution><id>report</id><phase>test</phase><goals><goal>report</goal></goals></execution>
+          <execution><id>check</id><phase>verify</phase><goals><goal>check</goal></goals>
+            <configuration><rules><rule><element>BUNDLE</element><limits><limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>${jacoco.line.minimum}</minimum></limit></limits></rule></rules>
+              <excludes><exclude>com/jaspersoft/jrshotfix/acceptance/**</exclude></excludes></configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
