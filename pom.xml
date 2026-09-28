@@ -16,6 +16,7 @@
     <picocli.version>4.7.7</picocli.version>
     <jackson.version>2.22.2</jackson.version>
     <jline.version>3.30.17</jline.version>
+    <slf4j.version>2.0.19</slf4j.version>
     <junit.version>5.14.4</junit.version>
     <assertj.version>3.27.7</assertj.version>
     <errorprone.version>2.50.0</errorprone.version>
@@ -35,6 +36,7 @@
     <dependency><groupId>org.jline</groupId><artifactId>jline-terminal</artifactId><version>${jline.version}</version></dependency>
     <dependency><groupId>org.jline</groupId><artifactId>jline-reader</artifactId><version>${jline.version}</version></dependency>
     <dependency><groupId>org.jline</groupId><artifactId>jline-terminal-jni</artifactId><version>${jline.version}</version></dependency>
+    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><version>${slf4j.version}</version></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>${junit.version}</version><scope>test</scope></dependency>
     <dependency><groupId>org.assertj</groupId><artifactId>assertj-core</artifactId><version>${assertj.version}</version><scope>test</scope></dependency>
   </dependencies>
