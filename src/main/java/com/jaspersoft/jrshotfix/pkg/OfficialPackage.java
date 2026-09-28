@@ -70,7 +70,7 @@ public final class OfficialPackage {
   /** A line of the readme that names one file, with or without a {@code *} in its last segment. */
   private static final Pattern LISTED_PATH = Pattern.compile("^[A-Za-z0-9._*/-]+$");
 
-  static final String NEITHER_SHAPE_SHORT =
+  public static final String NEITHER_SHAPE_SHORT =
       " is not an official Jaspersoft hotfix package (readme.txt beside jasperserver[-pro].zip,"
           + " js-install.zip or an unpacked jasperserver[-pro]/ tree)";
 
