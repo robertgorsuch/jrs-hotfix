@@ -8,6 +8,7 @@ import com.jaspersoft.jrshotfix.engine.Plan;
 import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.engine.StepResult;
 import com.jaspersoft.jrshotfix.event.EventSink;
+import com.jaspersoft.jrshotfix.platform.ServiceController;
 import com.jaspersoft.jrshotfix.state.HotfixState;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -271,6 +272,21 @@ class ApplyIdempotencyTest {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       assertReexecutionConverges(f, "r-stop", "stop-service");
       assertThat(f.platform.controller.calls()).containsExactly("stop");
+      assertThat(f.platform.controller.state()).isEqualTo(ServiceController.State.STOPPED);
+    }
+  }
+
+  @Test
+  void should_start_once_when_stop_service_compensates_twice() throws IOException {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      Plan plan = f.plan();
+      Context ctx = f.ctx("r-stop-c");
+      runUpTo(plan, ctx, "stop-service");
+      Step stop = HotfixFixture.step(plan, "stop-service");
+      compensateOk(stop, ctx);
+      compensateOk(stop, ctx);
+      assertThat(f.platform.controller.calls()).containsExactly("stop", "start");
+      assertThat(f.platform.controller.state()).isEqualTo(ServiceController.State.RUNNING);
     }
   }
 
@@ -279,6 +295,16 @@ class ApplyIdempotencyTest {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       assertReexecutionConverges(f, "r-start", "start-service");
       assertThat(f.platform.controller.calls()).containsExactly("stop", "start");
+      assertThat(f.platform.controller.state()).isEqualTo(ServiceController.State.RUNNING);
+    }
+  }
+
+  @Test
+  void should_stop_once_when_start_service_compensates_twice() throws IOException {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      assertCompensationConverges(f, "r-start-c", "start-service");
+      assertThat(f.platform.controller.calls()).containsExactly("stop", "start", "stop");
+      assertThat(f.platform.controller.state()).isEqualTo(ServiceController.State.STOPPED);
     }
   }
 }

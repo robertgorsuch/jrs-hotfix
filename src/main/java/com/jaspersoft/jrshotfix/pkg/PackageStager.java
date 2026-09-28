@@ -20,8 +20,9 @@ import java.util.zip.ZipInputStream;
  * Invariants: an entry is found by the same {@code (source, entryName)} pair {@link
  * OfficialPackage#read} recorded, the outer name normalised to {@code /} and the inner name raw; an
  * inner archive is only opened when it holds a wanted file; bytes are streamed, never held whole;
- * every file written is forced to disk before the pass goes on; nothing but the destinations is
- * written. It does not check hashes: the caller compares what landed with the plan.
+ * every file written, and its directory, is forced to disk before the pass goes on; nothing but the
+ * destinations is written, and a destination outside the staging root is refused before any write.
+ * It does not check hashes: the caller compares what landed with the plan.
  */
 public final class PackageStager {
 
@@ -30,15 +31,18 @@ public final class PackageStager {
   /**
    * Copies every entry of {@code contents} whose package path is in {@code paths} to {@code
    * destination.apply(path)}, creating parents and replacing what is there. A wanted path the
-   * package does not hold is simply not written.
+   * package does not hold is simply not written. Every destination must lie under {@code
+   * stagingRoot}.
    */
   public static void stage(
       Path zip,
       PackageContents contents,
       Set<String> paths,
+      Path stagingRoot,
       Function<String, Path> destination,
       CancellationToken cancel)
       throws IOException {
+    Path root = stagingRoot.toAbsolutePath().normalize();
     // outer name (normalised) -> inner raw entry name -> package path
     Map<String, Map<String, String>> inner = new HashMap<>();
     // raw outer entry name -> package path, for files shipped unpacked
@@ -73,13 +77,13 @@ public final class PackageStager {
           case WEBAPP_ZIP, INSTALL_ZIP -> {
             Map<String, String> wanted = inner.get(name);
             if (wanted != null) {
-              stageInner(outer, wanted, destination, cancel);
+              stageInner(outer, wanted, root, destination, cancel);
             }
           }
           case WEBAPP_FILE -> {
             String path = direct.get(entry.getName());
             if (path != null) {
-              write(outer, destination.apply(path));
+              write(outer, root, path, destination);
             }
           }
           case README, IGNORE -> {}
@@ -94,6 +98,7 @@ public final class PackageStager {
   private static void stageInner(
       InputStream source,
       Map<String, String> wanted,
+      Path root,
       Function<String, Path> destination,
       CancellationToken cancel)
       throws IOException {
@@ -106,17 +111,22 @@ public final class PackageStager {
       }
       String path = wanted.get(entry.getName());
       if (path != null) {
-        write(zip, destination.apply(path));
+        write(zip, root, path, destination);
       }
     }
   }
 
-  private static void write(InputStream in, Path target) throws IOException {
-    Path parent = target.getParent();
-    if (parent != null) {
-      Files.createDirectories(parent);
+  private static void write(
+      InputStream in, Path root, String path, Function<String, Path> destination)
+      throws IOException {
+    Path target = destination.apply(path).toAbsolutePath().normalize();
+    if (!target.startsWith(root)) {
+      throw new IOException("refusing to stage outside " + root + ": " + path);
     }
+    Path parent = target.getParent();
+    Files.createDirectories(parent);
     Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
     Durability.sync(target);
+    Durability.syncDirectory(parent);
   }
 }

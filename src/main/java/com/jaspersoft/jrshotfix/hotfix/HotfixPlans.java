@@ -104,7 +104,8 @@ public final class HotfixPlans {
     rollbackPoints.put(ApplySteps.BACKUP, "snapshot written, server untouched");
     rollbackPoints.put(ApplySteps.APPLY, "restore " + snapshotDir + ", restart service");
     rollbackPoints.put(
-        ApplySteps.RECORD, "restore " + snapshotDir + ", restart service, no ledger entry");
+        ApplySteps.RECORD,
+        "restore " + snapshotDir + ", restart service, ledger entry marked rolled back");
     PlanSummary summary =
         new PlanSummary(
             APPLY,

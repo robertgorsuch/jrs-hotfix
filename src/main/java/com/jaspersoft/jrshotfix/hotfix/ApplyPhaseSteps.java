@@ -95,6 +95,7 @@ final class ApplyPhaseSteps {
             in.packageFile(),
             in.contents(),
             wanted.keySet(),
+            in.stagingDir(ctx),
             path -> in.staged(ctx, wanted.get(path)),
             ctx.cancel());
         for (FileTarget t : wanted.values()) {
