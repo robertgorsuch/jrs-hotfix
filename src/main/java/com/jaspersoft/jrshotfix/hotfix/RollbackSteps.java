@@ -74,13 +74,16 @@ final class RollbackSteps {
 
   /**
    * The stop step of a rollback, refusing before the outage when a snapshot the rollback restores
-   * is missing or damaged. Everything but the precheck is the wrapped stop step's.
+   * is missing or damaged, or when the service runs but {@code baseUrl} does not answer. Everything
+   * but the precheck is the wrapped stop step's.
    */
   static final class CheckedStop implements Step {
+    private final HotfixRuntime rt;
     private final Step stop;
     private final List<RestoreSnapshot> restores;
 
-    CheckedStop(Step stop, List<RestoreSnapshot> restores) {
+    CheckedStop(HotfixRuntime rt, Step stop, List<RestoreSnapshot> restores) {
+      this.rt = Objects.requireNonNull(rt, "rt");
       this.stop = Objects.requireNonNull(stop, "stop");
       this.restores = List.copyOf(restores);
     }
@@ -133,7 +136,8 @@ final class RollbackSteps {
           return snapshot;
         }
       }
-      return stop.precheck(ctx);
+      CheckResult check = stop.precheck(ctx);
+      return check instanceof CheckResult.Fail ? check : ApplySteps.baseUrlCheck(rt);
     }
 
     @Override

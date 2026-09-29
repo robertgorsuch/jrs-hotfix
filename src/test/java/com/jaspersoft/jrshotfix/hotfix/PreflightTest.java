@@ -5,10 +5,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.jaspersoft.jrshotfix.engine.CheckResult;
 import com.jaspersoft.jrshotfix.engine.Context;
 import com.jaspersoft.jrshotfix.engine.Plan;
+import com.jaspersoft.jrshotfix.engine.Sleeper;
 import com.jaspersoft.jrshotfix.event.EventSink;
+import com.jaspersoft.jrshotfix.platform.ServiceController;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -75,6 +80,52 @@ class PreflightTest {
       assertThat(failure(HotfixFixture.step(plan, "atomic-swap").precheck(ctx)))
           .contains("still locked")
           .contains("foo-1.2.3.jar");
+    }
+  }
+
+  /** The fixture's runtime with a probe that reports {@code problem} and counts its calls. */
+  static HotfixPlans withProbe(HotfixFixture f, String problem, AtomicInteger calls) {
+    return new HotfixPlans(
+        new HotfixRuntime(
+            f.home,
+            f.settings,
+            f.platform,
+            f.ledger,
+            f.snapshots,
+            Clock.systemUTC(),
+            Sleeper.none(),
+            () -> {
+              calls.incrementAndGet();
+              return Optional.of(problem);
+            }));
+  }
+
+  @Test
+  void should_refuse_when_the_base_url_does_not_answer_while_the_service_runs() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      AtomicInteger calls = new AtomicInteger();
+      Plan plan =
+          withProbe(f, "connection refused", calls)
+              .planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true));
+      assertThat(failure(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r"))))
+          .contains("baseUrl " + f.settings.baseUrl())
+          .contains("does not answer while the service is running: connection refused")
+          .contains("jrs-hotfix settings set baseUrl");
+      assertThat(calls).hasValue(1);
+    }
+  }
+
+  @Test
+  void should_not_consult_the_base_url_when_the_service_is_stopped() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      f.platform.controller.state(ServiceController.State.STOPPED);
+      AtomicInteger calls = new AtomicInteger();
+      Plan plan =
+          withProbe(f, "connection refused", calls)
+              .planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true));
+      assertThat(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r")))
+          .isNotInstanceOf(CheckResult.Fail.class);
+      assertThat(calls).hasValue(0);
     }
   }
 }

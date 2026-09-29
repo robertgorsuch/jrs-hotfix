@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -191,6 +192,27 @@ class RollbackPlanTest {
       assertThatThrownBy(() -> f.plans.planRollback(args))
           .isInstanceOf(HotfixException.class)
           .hasMessageContaining("is no longer in the ledger");
+    }
+  }
+
+  @Test
+  void should_refuse_before_the_stop_when_the_base_url_does_not_answer() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
+      Plan rb =
+          PreflightTest.withProbe(f, "HTTP 404", new AtomicInteger())
+              .planRollback(new HotfixPlans.RollbackArgs("JRSHF-10.0.0-20260730-0457", false));
+      int callsBefore = f.platform.controller.calls().size();
+      RunOutcome out = f.run(rb, "r2");
+      assertThat(out).isInstanceOf(RunOutcome.PrecheckFailed.class);
+      assertThat(((RunOutcome.PrecheckFailed) out).message())
+          .contains("does not answer while the service is running: HTTP 404");
+      assertThat(
+              f.platform
+                  .controller
+                  .calls()
+                  .subList(callsBefore, f.platform.controller.calls().size()))
+          .doesNotContain("stop");
     }
   }
 }

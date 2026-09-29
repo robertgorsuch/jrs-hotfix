@@ -261,7 +261,7 @@ public final class HotfixPlans {
       LedgerEntry hotfix = in.hotfix();
       Step stop = ServiceSteps.stop(rt, in.phase(), ServiceSteps.STOP + in.suffix());
       // the first stop is the start of the outage: every snapshot the chain needs is checked first
-      steps.add(i == 0 ? new RollbackSteps.CheckedStop(stop, restores) : stop);
+      steps.add(i == 0 ? new RollbackSteps.CheckedStop(rt, stop, restores) : stop);
       steps.add(restores.get(i));
       steps.add(ServiceSteps.start(rt, in.phase(), ServiceSteps.START + in.suffix()));
       steps.add(ServiceSteps.waitForServer(rt, in.phase(), ServiceSteps.WAIT + in.suffix()));

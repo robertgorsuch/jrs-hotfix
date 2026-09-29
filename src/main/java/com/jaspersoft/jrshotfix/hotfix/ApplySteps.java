@@ -7,6 +7,7 @@ import com.jaspersoft.jrshotfix.engine.StepResult;
 import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
 import com.jaspersoft.jrshotfix.platform.DiskSpace;
+import com.jaspersoft.jrshotfix.platform.ServiceController;
 import com.jaspersoft.jrshotfix.service.ServiceSteps;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -41,6 +42,36 @@ final class ApplySteps {
   static final String AUDIT_ROLLED_BACK = "hotfix.rolled-back";
 
   private ApplySteps() {}
+
+  /**
+   * Refuses before the outage when the service is running but {@code baseUrl} does not answer:
+   * otherwise the wait after the start fails only after its full timeout and the whole run is
+   * compensated with the service down all along. A stopped service, or one whose state cannot be
+   * read (the controller check reports that), is not probed.
+   */
+  static CheckResult baseUrlCheck(HotfixRuntime rt) {
+    ServiceController.State state;
+    try {
+      state = rt.controller().state();
+    } catch (RuntimeException e) {
+      return CheckResult.pass();
+    }
+    if (state != ServiceController.State.RUNNING) {
+      return CheckResult.pass();
+    }
+    Optional<String> problem = rt.probe().problem();
+    if (problem.isEmpty()) {
+      return CheckResult.pass();
+    }
+    String url = rt.settings().baseUrl().toString();
+    return CheckResult.fail(
+        "baseUrl "
+            + url
+            + " does not answer while the service is running: "
+            + problem.get()
+            + "; fix it with `jrs-hotfix settings set baseUrl <url>`",
+        "correct baseUrl, then run again; nothing was changed");
+  }
 
   /** Read-only base for the verify phase. */
   abstract static class ReadOnly implements Step {
@@ -135,7 +166,8 @@ final class ApplySteps {
             String.join("; ", problems),
             "fix the listed problems, then run again; nothing was changed");
       }
-      return ServiceSteps.controllerCheck(rt);
+      CheckResult controller = ServiceSteps.controllerCheck(rt);
+      return controller instanceof CheckResult.Fail ? controller : baseUrlCheck(rt);
     }
 
     private long snapshotBytes(List<String> problems) {
