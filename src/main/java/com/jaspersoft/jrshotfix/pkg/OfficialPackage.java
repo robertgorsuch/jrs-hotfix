@@ -88,6 +88,14 @@ public final class OfficialPackage {
    * applied through jrs-hotfix share an id and cannot both be in the ledger.
    */
   public static Described describe(Path zip) throws IOException {
+    try {
+      return describeChecked(zip);
+    } catch (IllegalArgumentException e) {
+      throw unusable(e.getMessage(), Optional.of(e));
+    }
+  }
+
+  private static Described describeChecked(Path zip) throws IOException {
     Shape shape =
         shape(zip)
             .orElseThrow(
@@ -224,6 +232,35 @@ public final class OfficialPackage {
    */
   public static PackageContents read(
       Path source, PackagePaths paths, String webappName, FileOps files) throws IOException {
+    try {
+      return readChecked(source, paths, webappName);
+    } catch (IllegalArgumentException e) {
+      // an InvalidPathException among them: a name this file system cannot hold
+      throw unusable(e.getMessage(), Optional.of(e));
+    }
+  }
+
+  /** The package holds a path jrs-hotfix cannot use: unsupported input, exit 6. */
+  private static HotfixException unusable(String what, Optional<Throwable> cause) {
+    String message = "the package holds an unusable path: " + printable(what);
+    String remediation = "obtain the package again; it is not the layout jrs-hotfix knows";
+    return cause
+        .map(c -> new HotfixException(HotfixException.UNSUPPORTED, message, remediation, c))
+        .orElseGet(() -> new HotfixException(HotfixException.UNSUPPORTED, message, remediation));
+  }
+
+  /** {@code s} with every control character shown as {@code ?}, fit for one line of output. */
+  private static String printable(String s) {
+    StringBuilder out = new StringBuilder(s.length());
+    for (int i = 0; i < s.length(); i++) {
+      char c = s.charAt(i);
+      out.append(c < 0x20 || c == 0x7f ? '?' : c);
+    }
+    return out.toString();
+  }
+
+  private static PackageContents readChecked(Path source, PackagePaths paths, String webappName)
+      throws IOException {
     Shape shape =
         shape(source)
             .orElseThrow(
@@ -360,10 +397,7 @@ public final class OfficialPackage {
       Set<String> added)
       throws IOException {
     if (!PackagePaths.pathProblems(path).isEmpty()) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          "the package holds an unusable path: " + entryName,
-          "obtain the package again; it is not the layout jrs-hotfix knows");
+      throw unusable(entryName, Optional.empty());
     }
     MessageDigest md = sha256();
     try (OutputStream digest = new DigestOutputStream(OutputStream.nullOutputStream(), md)) {
@@ -385,12 +419,22 @@ public final class OfficialPackage {
     List<PackageContents.Entry> out = new ArrayList<>();
     Set<String> seen = new LinkedHashSet<>();
     for (String path : readme.deleted()) {
+      List<String> problems = PackagePaths.pathProblems(path);
+      if (!problems.isEmpty()) {
+        notes.add(skipped(path, problems));
+        continue;
+      }
       if (!added.contains(path) && seen.add(path) && Files.isRegularFile(paths.resolve(path))) {
         out.add(deletion(path));
       }
     }
     int fromGlobs = 0;
     for (String glob : readme.globs()) {
+      List<String> problems = PackagePaths.pathProblems(glob.replace('*', '_'));
+      if (!problems.isEmpty()) {
+        notes.add(skipped(glob, problems));
+        continue;
+      }
       for (String path : expand(glob, paths)) {
         if (!added.contains(path) && seen.add(path)) {
           out.add(deletion(path));
@@ -405,6 +449,15 @@ public final class OfficialPackage {
               + " requires; they are in the snapshot and a rollback puts them back");
     }
     return out;
+  }
+
+  /** The note for a readme deletion jrs-hotfix will not act on. */
+  private static String skipped(String path, List<String> problems) {
+    return "the package readme lists "
+        + printable(path)
+        + " for deletion; skipped, it is not a usable path ("
+        + String.join("; ", problems)
+        + "): delete it by hand if it applies";
   }
 
   private static PackageContents.Entry deletion(String path) {
@@ -434,6 +487,7 @@ public final class OfficialPackage {
       list.filter(Files::isRegularFile)
           .map(p -> p.getFileName().toString())
           .filter(f -> pattern.matcher(f).matches())
+          .filter(f -> PackagePaths.pathProblems(dir + "/" + f).isEmpty())
           .sorted()
           .forEach(f -> out.add(dir + "/" + f));
     } catch (IOException e) {

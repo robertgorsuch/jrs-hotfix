@@ -29,4 +29,13 @@ class PackagePathsTest {
   void should_report_a_problem_when_the_path_climbs_out() {
     assertThat(PackagePaths.pathProblems("../x")).isNotEmpty();
   }
+
+  @Test
+  void should_report_a_problem_when_the_path_holds_a_control_character() {
+    assertThat(PackagePaths.pathProblems("webapps/a\nb.jar"))
+        .containsExactly("path must not contain control characters");
+    assertThat(PackagePaths.pathProblems("webapps/a" + (char) 0x7f + "b.jar"))
+        .containsExactly("path must not contain control characters");
+    assertThat(PackagePaths.pathProblems("webapps/a (1)+b.jar")).isEmpty();
+  }
 }

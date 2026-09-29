@@ -12,8 +12,8 @@ import java.util.regex.Pattern;
  * Maps package paths onto the server's file system: paths starting with {@code webapps/} are
  * relative to the Tomcat directory, everything else to the install directory. Invariants: both base
  * directories are absolute and normalised; a resolved path always stays inside its base (a path
- * with {@code ..}, a drive letter or a colon is refused); the WEB-INF test is purely textual, so it
- * needs no live layout.
+ * with {@code ..}, a drive letter, a colon or a control character is refused); the WEB-INF test is
+ * purely textual, so it needs no live layout.
  */
 public record PackagePaths(Path installDir, Path tomcatDir) {
 
@@ -66,6 +66,12 @@ public record PackagePaths(Path installDir, Path tomcatDir) {
   public static List<String> pathProblems(String packagePath) {
     if (packagePath == null || packagePath.isBlank()) {
       return List.of("path is blank");
+    }
+    for (int i = 0; i < packagePath.length(); i++) {
+      char c = packagePath.charAt(i);
+      if (c < 0x20 || c == 0x7f) {
+        return List.of("path must not contain control characters");
+      }
     }
     String p = packagePath.replace('\\', '/');
     if (p.startsWith("/")) {

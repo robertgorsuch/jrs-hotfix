@@ -133,4 +133,33 @@ class OfficialPackageTest {
     assertThat(c.notes()).contains("step 1", "step 60").doesNotContain("step 61");
     assertThat(c.notes()).contains("… (see readme.txt for the rest)");
   }
+
+  @Test
+  void should_skip_a_readme_deletion_that_climbs_out_with_a_note() throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    PackageContents c =
+        OfficialPackage.read(
+            packageWith(
+                "climb.zip",
+                Map.of(Packages.LIB + "foo-1.2.3.jar", "x"),
+                "Deleted files:\n../x\nIMPORTANT\n../*.jar\n"),
+            paths,
+            "jasperserver-pro",
+            files);
+    assertThat(c.deletes()).isEmpty();
+    assertThat(c.notes()).anySatisfy(n -> assertThat(n).contains("../x").contains("skipped"));
+    assertThat(c.notes()).anySatisfy(n -> assertThat(n).contains("../*.jar").contains("skipped"));
+  }
+
+  @Test
+  void should_refuse_as_unsupported_when_an_entry_name_holds_a_control_character()
+      throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    Path zip =
+        packageWith("ctrl.zip", Map.of(Packages.LIB + "foo\n-1.2.3.jar", "x"), "Added files:\n");
+    assertThatThrownBy(() -> OfficialPackage.read(zip, paths, "jasperserver-pro", files))
+        .isInstanceOfSatisfying(
+            HotfixException.class, e -> assertThat(e.kind()).isEqualTo(HotfixException.UNSUPPORTED))
+        .hasMessageContaining("unusable path");
+  }
 }
