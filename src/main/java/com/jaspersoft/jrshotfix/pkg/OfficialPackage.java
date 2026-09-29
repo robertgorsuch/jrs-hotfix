@@ -60,6 +60,9 @@ public final class OfficialPackage {
 
   private static final String README = "readme.txt";
 
+  /** Lines of one readme section carried into the notes; the rest is left to readme.txt. */
+  static final int MAX_NOTE_LINES = 60;
+
   // Case-insensitive, and "Product:" as well as "Product Name:": readmes differ in capitalisation.
   private static final Pattern PRODUCT = Pattern.compile("(?i)^Product(?: Name)?:\\s*(.+?)\\s*$");
   private static final Pattern RELEASE = Pattern.compile("(?i)^Release Version:\\s*([0-9.]+)\\s*$");
@@ -537,7 +540,11 @@ public final class OfficialPackage {
     }
   }
 
-  /** The parts of an inner readme jrs-hotfix acts on: what to delete, and what to do by hand. */
+  /**
+   * The parts of an inner readme jrs-hotfix acts on: what to delete, and what to do by hand. The
+   * notes are a summary sentence per section followed by the section's own non-empty lines,
+   * verbatim, at most {@link #MAX_NOTE_LINES} of them.
+   */
   private record Readme(List<String> deleted, List<String> globs, List<String> notes) {
 
     static Readme empty() {
@@ -547,8 +554,8 @@ public final class OfficialPackage {
     static Readme parse(String prefix, List<String> lines) {
       List<String> deleted = new ArrayList<>();
       List<String> globs = new ArrayList<>();
-      int manual = 0;
-      boolean conditions = false;
+      List<String> manual = new ArrayList<>();
+      List<String> conditions = new ArrayList<>();
       Section section = Section.NONE;
       for (String line : lines) {
         Section heading = Section.of(line);
@@ -574,25 +581,37 @@ public final class OfficialPackage {
             if (path && line.contains("*")) {
               globs.add(prefix + line);
             } else {
-              conditions = true;
+              conditions.add(line);
             }
           }
-          case NOTES -> manual++;
+          case NOTES -> manual.add(line);
           case NONE -> {}
         }
       }
       List<String> notes = new ArrayList<>();
-      if (conditions) {
+      if (!conditions.isEmpty()) {
         notes.add(
             "the package readme's Important section names conditions to check by hand (an earlier"
                 + " build, source map files); read readme.txt in the package");
+        notes.addAll(capped(conditions));
       }
-      if (manual > 0) {
+      if (!manual.isEmpty()) {
         notes.add(
             "the package readme's Additional Notes section describes manual steps, such as SQL for"
                 + " some databases and optional properties; jrs-hotfix runs none of them");
+        notes.addAll(capped(manual));
       }
       return new Readme(deleted, globs, notes);
+    }
+
+    /** The section's lines as the readme has them, at most {@link #MAX_NOTE_LINES}. */
+    private static List<String> capped(List<String> lines) {
+      if (lines.size() <= MAX_NOTE_LINES) {
+        return lines;
+      }
+      List<String> out = new ArrayList<>(lines.subList(0, MAX_NOTE_LINES));
+      out.add("… (see readme.txt for the rest)");
+      return out;
     }
 
     private enum Section {

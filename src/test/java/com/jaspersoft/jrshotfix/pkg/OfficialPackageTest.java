@@ -44,6 +44,22 @@ class OfficialPackageTest {
     assertThat(c.sha256()).isEqualTo(files.sha256(tmp.resolve("dl/hotfix.zip")));
     assertThat(c.notes()).anySatisfy(n -> assertThat(n).contains("Additional Notes"));
     assertThat(c.notes()).anySatisfy(n -> assertThat(n).contains("left by an earlier hotfix"));
+    // the readme's own lines, verbatim, after the summary sentence of their section
+    assertThat(c.notes())
+        .contains(
+            "For PostgreSQL run the SQL in js-install/sql/postgresql.sql",
+            "If an earlier hotfix is installed delete");
+    assertThat(c.notes().indexOf("For PostgreSQL run the SQL in js-install/sql/postgresql.sql"))
+        .isGreaterThan(indexContaining(c.notes(), "Additional Notes"));
+  }
+
+  private static int indexContaining(java.util.List<String> notes, String text) {
+    for (int i = 0; i < notes.size(); i++) {
+      if (notes.get(i).contains(text)) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   @Test
@@ -90,5 +106,31 @@ class OfficialPackageTest {
             () -> OfficialPackage.describe(Packages.zip(tmp.resolve("dl/nobuild.zip"), outer)))
         .isInstanceOf(HotfixException.class)
         .hasMessageContaining("build");
+  }
+
+  /** A package whose webapp archive holds {@code payload} and {@code innerReadme}. */
+  private Path packageWith(String name, Map<String, String> payload, String innerReadme)
+      throws Exception {
+    Map<String, byte[]> outer = new LinkedHashMap<>();
+    outer.put("readme.txt", Packages.OUTER_README.getBytes(StandardCharsets.UTF_8));
+    outer.put("jasperserver-pro.zip", Packages.zipBytes(payload, innerReadme));
+    return Packages.zip(tmp.resolve("dl/" + name), outer);
+  }
+
+  @Test
+  void should_keep_at_most_60_readme_note_lines_when_the_section_is_longer() throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    StringBuilder readme = new StringBuilder("Additional Notes:\n");
+    for (int i = 1; i <= 70; i++) {
+      readme.append("step ").append(i).append('\n');
+    }
+    PackageContents c =
+        OfficialPackage.read(
+            packageWith("long.zip", Map.of(Packages.LIB + "foo-1.2.3.jar", "x"), readme.toString()),
+            paths,
+            "jasperserver-pro",
+            files);
+    assertThat(c.notes()).contains("step 1", "step 60").doesNotContain("step 61");
+    assertThat(c.notes()).contains("… (see readme.txt for the rest)");
   }
 }

@@ -181,18 +181,22 @@ class ScenarioTest {
   void s9_should_print_the_manual_notes_when_planning_and_after_the_run() throws Exception {
     try (Fixture f = Fixture.create(tmp)) {
       Cli.Result plan = f.cli.run("apply", f.pkg().toString(), "--plan").assertExit(0);
-      assertThat(plan.stdout()).contains("Additional Notes");
+      assertThat(plan.stdout())
+          .contains("Additional Notes")
+          .contains("For PostgreSQL run the SQL in js-install/sql/postgresql.sql");
 
       Cli.Result run = f.cli.run("apply", f.pkg().toString(), "--yes").assertExit(0);
       assertThat(run.stdout())
           .contains("Additional Notes")
           .contains("Manual steps from the package readme")
+          .contains("For PostgreSQL run the SQL in js-install/sql/postgresql.sql")
           .contains("notes.txt");
 
       List<Path> notes = runFiles(f, "notes.txt");
       assertThat(notes).hasSize(1);
       assertThat(Files.readString(notes.get(0), StandardCharsets.UTF_8))
-          .contains("Additional Notes");
+          .contains("Additional Notes")
+          .contains("For PostgreSQL run the SQL in js-install/sql/postgresql.sql");
     }
   }
 

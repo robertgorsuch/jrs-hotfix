@@ -74,18 +74,22 @@ class CommandsTest {
     Fixture f = fixture();
     assertThat(f.run("apply", f.pkg.toString(), "--plan")).isEqualTo(0);
     assertThat(f.out()).contains("Additional Notes");
+    assertThat(f.out()).contains("For PostgreSQL run the SQL in js-install/sql/postgresql.sql");
   }
 
   @Test
   void should_save_and_reprint_the_readme_notes_when_a_run_ends() throws Exception {
     Fixture f = fixture();
     assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
-    assertThat(f.out()).contains("Manual steps from the package readme");
+    assertThat(f.out())
+        .contains("Manual steps from the package readme")
+        .contains("For PostgreSQL run the SQL in js-install/sql/postgresql.sql");
     assertThat(f.run("runs", "list")).isEqualTo(0);
     String row = f.out().lines().filter(l -> l.contains("hotfix.apply")).findFirst().orElseThrow();
     String runId = row.substring(0, row.indexOf(' '));
     assertThat(Files.readString(f.home.notesFile(runId), StandardCharsets.UTF_8))
-        .contains("Additional Notes");
+        .contains("Additional Notes")
+        .contains("For PostgreSQL run the SQL in js-install/sql/postgresql.sql");
   }
 
   @Test
