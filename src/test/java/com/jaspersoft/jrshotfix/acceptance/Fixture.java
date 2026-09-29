@@ -253,7 +253,9 @@ final class Fixture implements AutoCloseable {
               + "MARKER=\"-Dcatalina.base=$TC\"\n"
               + "case \"$1\" in\n"
               + "  start) nohup sh -c \"sleep 900 # $MARKER\" >/dev/null 2>&1 </dev/null & ;;\n"
-              + "  stop) pkill -f -- \"$MARKER\" || true ;;\n"
+              // the marked shell's sleep child would outlive it as an orphan: end both
+              + "  stop) for p in $(pgrep -f -- \"$MARKER\"); do pkill -P \"$p\"; kill \"$p\";"
+              + " done 2>/dev/null; true ;;\n"
               + "esac\n"
               + "exit 0\n");
     }
