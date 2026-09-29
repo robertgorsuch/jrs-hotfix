@@ -4,10 +4,13 @@ import com.jaspersoft.jrshotfix.Version;
 import com.jaspersoft.jrshotfix.engine.RunRecord;
 import com.jaspersoft.jrshotfix.home.JrsVersion;
 import com.jaspersoft.jrshotfix.home.Settings;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.IVersionProvider;
 import picocli.CommandLine.Mixin;
@@ -18,7 +21,8 @@ import picocli.CommandLine.Spec;
 /**
  * The {@code jrs-hotfix} command. Invariants: without a subcommand, an operator at a terminal (and
  * without {@code --non-interactive}) gets the {@link Menu}, whose entries run in this process
- * through a command line built with the same opener; anyone else gets the usage and exit 1.
+ * through a command line built with the same opener and are handed the home the menu resolved once;
+ * anyone else gets the usage and exit 1.
  */
 @Command(
     name = "jrs-hotfix",
@@ -53,52 +57,32 @@ final class RootCommand implements Callable<Integer> {
       return ExitCodes.SUCCESS;
     }
     if (!global.nonInteractive() && Terminal.present()) {
-      return new Menu(
-              spec.commandLine().getOut(),
-              passOn(global),
-              this::runCommand,
-              this::pendingRuns,
-              this::settings,
-              this::installedRelease)
-          .run();
+      return menu(spec.commandLine().getOut(), this::runCommand).run();
     }
     spec.commandLine().usage(spec.commandLine().getErr());
     return ExitCodes.USAGE;
   }
 
+  /**
+   * The menu over one {@link Session}: the bootstrap is opened once, not per entry, and every
+   * command the menu runs is handed the home it resolved.
+   */
+  Menu menu(PrintWriter out, Function<String[], Integer> runner) {
+    Session session = new Session(opener, global);
+    return new Menu(
+        out,
+        session::args,
+        passOn(global),
+        runner,
+        session::pendingRuns,
+        session::settings,
+        session::installedRelease,
+        session::refresh);
+  }
+
   private int runCommand(String[] args) {
     return Main.commandLine(spec.commandLine().getOut(), spec.commandLine().getErr(), opener)
         .execute(args);
-  }
-
-  /** Ids of runs that need recovery; empty when the home or its journal cannot be read. */
-  private List<String> pendingRuns() {
-    try {
-      return new RunService(opener.open(global))
-          .pendingRuns().stream().map(RunRecord::runId).toList();
-    } catch (RuntimeException e) {
-      return List.of();
-    }
-  }
-
-  /** The settings as they are now; empty when there are none or they cannot be read. */
-  private Optional<Settings> settings() {
-    try {
-      return opener.open(global).settings();
-    } catch (RuntimeException e) {
-      return Optional.empty();
-    }
-  }
-
-  /** The configured webapp's release and edition, e.g. {@code 10.0.0 PRO}, for the menu header. */
-  private String installedRelease() {
-    return settings()
-        .map(
-            s ->
-                JrsVersion.ofWebapp(s.webappDir()).orElse("unknown")
-                    + " "
-                    + (s.webappName().endsWith("-pro") ? "PRO" : "CE"))
-        .orElse("unknown");
   }
 
   /** The global options given with a bare {@code jrs-hotfix}, passed on to every menu command. */
@@ -115,6 +99,87 @@ final class RootCommand implements Callable<Integer> {
       args.add("--ascii");
     }
     return args;
+  }
+
+  /**
+   * What the menu knows about the installation, read once and again only after the settings may
+   * have changed. Invariants: the opener runs at most once between two {@link #refresh} calls, so
+   * the menu costs one install scan, not one per entry; a bootstrap that cannot be opened reads as
+   * no settings and no pending runs.
+   */
+  static final class Session {
+    private final Bootstrap.Opener opener;
+    private final GlobalOptions global;
+    private boolean opened;
+    private Optional<Bootstrap> boot = Optional.empty();
+    private Optional<String> release = Optional.empty();
+
+    Session(Bootstrap.Opener opener, GlobalOptions global) {
+      this.opener = Objects.requireNonNull(opener, "opener");
+      this.global = Objects.requireNonNull(global, "global");
+    }
+
+    private Optional<Bootstrap> boot() {
+      if (!opened) {
+        opened = true;
+        try {
+          boot = Optional.of(opener.open(global));
+        } catch (RuntimeException e) {
+          boot = Optional.empty();
+        }
+      }
+      return boot;
+    }
+
+    /** Reads the settings and the home again on next use. */
+    void refresh() {
+      opened = false;
+      boot = Optional.empty();
+      release = Optional.empty();
+    }
+
+    /** The options to pass on, naming the resolved home once there are settings in it. */
+    List<String> args() {
+      List<String> args = passOn(global);
+      if (global.home().isEmpty()) {
+        boot()
+            .filter(b -> b.settings().isPresent())
+            .ifPresent(b -> args.addAll(0, List.of("--home", b.home().root().toString())));
+      }
+      return args;
+    }
+
+    /** Ids of runs that need recovery; empty when the home or its journal cannot be read. */
+    List<String> pendingRuns() {
+      try {
+        return boot()
+            .map(b -> new RunService(b).pendingRuns().stream().map(RunRecord::runId).toList())
+            .orElse(List.of());
+      } catch (RuntimeException e) {
+        return List.of();
+      }
+    }
+
+    /** The settings as they are now; empty when there are none or they cannot be read. */
+    Optional<Settings> settings() {
+      return boot().flatMap(Bootstrap::settings);
+    }
+
+    /** The configured webapp's release and edition, e.g. {@code 10.0.0 PRO}, for the header. */
+    String installedRelease() {
+      if (release.isEmpty()) {
+        release =
+            Optional.of(
+                settings()
+                    .map(
+                        s ->
+                            JrsVersion.ofWebapp(s.webappDir()).orElse("unknown")
+                                + " "
+                                + (s.webappName().endsWith("-pro") ? "PRO" : "CE"))
+                    .orElse("unknown"));
+      }
+      return release.get();
+    }
   }
 
   /** {@code --version}: the product, its version and the vendor line. */

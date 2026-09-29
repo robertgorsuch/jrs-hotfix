@@ -17,21 +17,24 @@ import java.util.function.Supplier;
  * Invariants: every job is carried out by running the ordinary command line through {@code runner},
  * so plans, confirmations, the run lock and exit codes are exactly the CLI's; the command line is
  * printed before it runs; the global options the menu was started with are passed on to every
- * command; without settings the wizard ({@code settings detect}) runs before the menu is shown;
- * while a run is pending, every entry that would change the installation or the settings refuses
- * and points at entry 6; an empty answer where one is required returns to the menu; end of input
- * quits with exit 0; nothing is written by the menu itself.
+ * command, with the home the menu resolved (except to the wizard, which places settings itself);
+ * without settings the wizard ({@code settings detect}) runs before the menu is shown; while a run
+ * is pending, every entry that would change the installation or the settings refuses and points at
+ * entry 6; an empty answer where one is required returns to the menu; end of input quits with exit
+ * 0; nothing is written by the menu itself.
  */
 final class Menu {
 
   static final String PENDING_REFUSAL = "finish or undo the interrupted job first (entry 6)";
 
   private final PrintWriter out;
-  private final List<String> globalArgs;
+  private final Supplier<List<String>> globalArgs;
+  private final List<String> detectArgs;
   private final Function<String[], Integer> runner;
   private final Supplier<List<String>> pendingRuns;
   private final Supplier<Optional<Settings>> settings;
   private final Supplier<String> installedRelease;
+  private final Runnable settingsChanged;
 
   /**
    * {@code settings} gives the current settings, empty when there are none yet; {@code
@@ -45,18 +48,47 @@ final class Menu {
       Supplier<List<String>> pendingRuns,
       Supplier<Optional<Settings>> settings,
       Supplier<String> installedRelease) {
+    this(
+        out,
+        () -> globalArgs,
+        globalArgs,
+        runner,
+        pendingRuns,
+        settings,
+        installedRelease,
+        () -> {});
+  }
+
+  /**
+   * As above, with the global options read from {@code globalArgs} before every command (they name
+   * the home the menu resolved), {@code detectArgs} for {@code settings detect} (the options as the
+   * operator gave them, so the wizard places new settings beside the installation it picks), and
+   * {@code settingsChanged} run after the wizard or entry 7, so the header and the home are read
+   * again.
+   */
+  Menu(
+      PrintWriter out,
+      Supplier<List<String>> globalArgs,
+      List<String> detectArgs,
+      Function<String[], Integer> runner,
+      Supplier<List<String>> pendingRuns,
+      Supplier<Optional<Settings>> settings,
+      Supplier<String> installedRelease,
+      Runnable settingsChanged) {
     this.out = Objects.requireNonNull(out, "out");
-    this.globalArgs = List.copyOf(globalArgs);
+    this.globalArgs = Objects.requireNonNull(globalArgs, "globalArgs");
+    this.detectArgs = List.copyOf(detectArgs);
     this.runner = Objects.requireNonNull(runner, "runner");
     this.pendingRuns = Objects.requireNonNull(pendingRuns, "pendingRuns");
     this.settings = Objects.requireNonNull(settings, "settings");
     this.installedRelease = Objects.requireNonNull(installedRelease, "installedRelease");
+    this.settingsChanged = Objects.requireNonNull(settingsChanged, "settingsChanged");
   }
 
   /** Runs the wizard when there are no settings, then shows the menu until the operator quits. */
   int run() {
     if (settings.get().isEmpty()) {
-      execute("settings", "detect");
+      detect();
       out.println();
     }
     Optional<Settings> current = settings.get();
@@ -168,6 +200,14 @@ final class Menu {
   }
 
   private void settingsEntry() {
+    try {
+      settingsMenu();
+    } finally {
+      settingsChanged.run();
+    }
+  }
+
+  private void settingsMenu() {
     execute("settings", "show");
     out.println();
     out.println("  1) Change a value");
@@ -185,7 +225,7 @@ final class Menu {
       }
       case "2" -> {
         if (notPending()) {
-          execute("settings", "detect");
+          detect();
         }
       }
       default -> {
@@ -196,9 +236,19 @@ final class Menu {
 
   // ---- helpers ----------------------------------------------------------------------------------
 
+  /** The wizard, with the options as given, then the settings and the home are read again. */
+  private void detect() {
+    run(List.of("settings", "detect"), detectArgs);
+    settingsChanged.run();
+  }
+
   private int execute(String... command) {
-    List<String> args = new ArrayList<>(List.of(command));
-    args.addAll(globalArgs);
+    return run(List.of(command), globalArgs.get());
+  }
+
+  private int run(List<String> command, List<String> global) {
+    List<String> args = new ArrayList<>(command);
+    args.addAll(global);
     out.println();
     out.println("Running: jrs-hotfix " + String.join(" ", args));
     out.flush();

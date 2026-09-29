@@ -2,7 +2,10 @@ package com.jaspersoft.jrshotfix.app;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jaspersoft.jrshotfix.home.LastHome;
 import com.jaspersoft.jrshotfix.home.Settings;
+import com.jaspersoft.jrshotfix.home.SettingsStore;
+import com.jaspersoft.jrshotfix.hotfix.HotfixFixture;
 import com.jaspersoft.jrshotfix.platform.ServiceConfig;
 import java.io.PrintWriter;
 import java.io.StringReader;
@@ -12,7 +15,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -246,5 +251,30 @@ class MenuTest {
     g.nonInteractive = true;
     assertThat(RootCommand.passOn(g))
         .containsExactly("--home", tmp.toString(), "--no-color", "--ascii");
+  }
+
+  @Test
+  void should_open_once_and_hand_every_command_the_resolved_home_when_the_menu_runs()
+      throws Exception {
+    HotfixFixture hf = HotfixFixture.create(tmp.resolve("fx"));
+    SettingsStore.save(hf.home, hf.settings);
+    Map<String, String> env = Map.of("XDG_CONFIG_HOME", tmp.resolve("config").toString());
+    LastHome.write(LastHome.file(env, false), hf.home);
+    AtomicInteger opens = new AtomicInteger();
+    Bootstrap.Opener real = Bootstrap.opener(prompt -> hf.platform, env);
+    RootCommand root = new RootCommand();
+    root.global = new GlobalOptions();
+    root.opener =
+        options -> {
+          opens.incrementAndGet();
+          return real.open(options);
+        };
+    Prompter.override(new StringReader("4\n6\n4\nq\n"));
+    assertThat(root.menu(out, this::recorder).run()).isZero();
+    assertThat(opens).hasValue(1);
+    assertThat(ran).hasSize(3);
+    for (String[] argv : ran) {
+      assertThat(String.join(" ", argv)).contains("--home " + hf.home.root());
+    }
   }
 }
