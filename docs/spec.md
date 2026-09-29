@@ -117,19 +117,24 @@ when the host lists one, following the vendor's start order as jrsctl does (ADR-
 
 ## 3. Ledger, journal and snapshots
 
-Layout under the home:
+Layout under the home (corrected after implementation: the run record and the stop marker live in
+the run directory, and each snapshot sits in a directory named after the step that took it):
 
 ```
 settings.json
 ledger.json
 lock                          pid + start time of the running command
+runs/<runId>/run.json         the run's record: operation, start, end, state, exit code
 runs/<runId>/plan.json        the fingerprinted plan as built
 runs/<runId>/journal.jsonl    one line per step transition, appended, fsynced
 runs/<runId>/run.log
 runs/<runId>/notes.txt        the readme's manual steps for this package
 runs/<runId>/staging/         payload extracted before the outage; removed at the end
-snapshots/<runId>/manifest.json
-snapshots/<runId>/files/...   replaced and deleted files, at their relative paths
+runs/<runId>/stop-service.stopped   marker: this run stopped the service
+snapshots/<runId>/snapshot/manifest.json              apply: the files before the hotfix
+snapshots/<runId>/snapshot/payload/...                replaced and deleted files, at their relative paths
+snapshots/<rollbackRunId>/pre-rollback-<id>/manifest.json   rollback: the files before the rollback
+snapshots/<rollbackRunId>/pre-rollback-<id>/payload/...
 ```
 
 `ledger.json` is the only registry. One entry per hotfix:
@@ -277,7 +282,7 @@ not obvious.
 | 3 | failed and rolled back |
 | 4 | failed, rollback incomplete (the message names the files and the snapshot) |
 | 5 | cancelled |
-| 6 | unsupported (not 10.x, not Tomcat, a container, an unknown package shape) |
+| 6 | unsupported input (not an official package, not a 10.x install); corrected after implementation, which detects neither containers nor other servers |
 | 8 | recovery required |
 | 9 | lock held |
 

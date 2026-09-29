@@ -88,7 +88,7 @@ printed in the plan preview, printed again after the run finishes, and saved to
 | 3 | failed and rolled back |
 | 4 | failed, rollback incomplete (the message names the files and the snapshot) |
 | 5 | cancelled |
-| 6 | unsupported (not 10.x, not Tomcat, a container, an unknown package shape) |
+| 6 | unsupported input (not an official package, not a 10.x install) |
 | 8 | recovery required |
 | 9 | lock held |
 
@@ -100,6 +100,9 @@ never pruned while the hotfix it belongs to is installed; the snapshot of a run
 that failed with exit 4 is kept too, unless `runs prune --include-failed`.
 `jrs-hotfix runs show <id>` prints the run's record, every step transition, and
 the stored plan's steps, so you can see exactly where it stopped.
+
+After Ctrl-C, run `jrs-hotfix runs list`; a run left pending is finished with
+`runs resume` or undone with `runs rollback`.
 
 A run interrupted while the service was down, at an installation outside the
 default paths, is found again through the home jrs-hotfix remembers it used
@@ -115,13 +118,17 @@ Everything jrs-hotfix keeps lives under its home, `<installDir>/jrs-hotfix/`
 settings.json
 ledger.json
 lock                          pid + start time of the running command
+runs/<runId>/run.json         the run's record: operation, start, end, state, exit code
 runs/<runId>/plan.json        the fingerprinted plan as built
 runs/<runId>/journal.jsonl    one line per step transition, appended, fsynced
 runs/<runId>/run.log
 runs/<runId>/notes.txt        the readme's manual steps for this package
 runs/<runId>/staging/         payload extracted before the outage; removed at the end
-snapshots/<runId>/manifest.json
-snapshots/<runId>/files/...   replaced and deleted files, at their relative paths
+runs/<runId>/stop-service.stopped   marker: this run stopped the service
+snapshots/<runId>/snapshot/manifest.json              apply: the files before the hotfix
+snapshots/<runId>/snapshot/payload/...                replaced and deleted files, at their relative paths
+snapshots/<rollbackRunId>/pre-rollback-<id>/manifest.json   rollback: the files before the rollback
+snapshots/<rollbackRunId>/pre-rollback-<id>/payload/...
 ```
 
 ## Settings
