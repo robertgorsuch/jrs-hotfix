@@ -20,7 +20,9 @@ import picocli.CommandLine.Spec;
 /**
  * {@code jrs-hotfix settings}: what the tool knows about this installation. Invariants: {@code
  * show} is read-only; {@code set} changes one known key and refuses anything else with exit 1 and
- * the key list; {@code detect} never replaces existing settings without {@code --yes}.
+ * the key list; {@code detect} never replaces existing settings without {@code --yes} or, at a
+ * terminal, the operator's yes, and at a terminal asks for every value through {@link
+ * SettingsWizard}.
  */
 @Command(
     name = "settings",
@@ -129,6 +131,9 @@ final class SettingsCommand implements Callable<Integer> {
     }
 
     private int detect(Bootstrap boot) {
+      if (boot.interactive()) {
+        return wizard(boot);
+      }
       if (boot.settings().isPresent() && !global.yes()) {
         return ExitCodes.fail(
             err(),
@@ -137,7 +142,7 @@ final class SettingsCommand implements Callable<Integer> {
             Optional.of(
                 "pass --yes to replace them, or change one with `jrs-hotfix settings set`"));
       }
-      // Task 13 brings the interactive wizard; until then a terminal gets the same first match
+      // without a person to ask, the first candidate that yields defaults is taken as detected
       InstallScan scan = Detection.candidates(boot.platform());
       for (Path candidate : scan.candidates()) {
         Optional<Settings> found = Detection.defaults(boot.platform(), candidate);
@@ -155,6 +160,27 @@ final class SettingsCommand implements Callable<Integer> {
           "no JasperReports Server installation found"
               + scan.processScanLimit().map(l -> " (" + l + ")").orElse(""),
           Optional.of("run jrs-hotfix on the server where JasperReports Server is installed"));
+    }
+
+    /**
+     * A person at the terminal: existing settings are replaced only after they agree (there is no
+     * {@code --yes} at a terminal, since it implies {@code --non-interactive}), then the wizard
+     * asks for every value.
+     */
+    private int wizard(Bootstrap boot) {
+      if (boot.settings().isPresent()
+          && !Prompter.yes(
+              out(),
+              "Settings exist already in " + boot.home().root() + ". Replace them? [y/N] ",
+              false)) {
+        out().println("Nothing was changed.");
+        out().flush();
+        return ExitCodes.CANCELLED;
+      }
+      return new SettingsWizard(out(), boot.platform(), boot::homeFor)
+          .run()
+          .map(saved -> ExitCodes.SUCCESS)
+          .orElse(ExitCodes.CANCELLED);
     }
   }
 }

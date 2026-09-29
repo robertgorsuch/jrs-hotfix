@@ -76,6 +76,8 @@ public final class Main {
       K instance = CommandLine.defaultFactory().create(cls);
       if (instance instanceof AppCommand command) {
         command.opener = opener;
+      } else if (instance instanceof RootCommand root) {
+        root.opener = opener;
       }
       return instance;
     }
