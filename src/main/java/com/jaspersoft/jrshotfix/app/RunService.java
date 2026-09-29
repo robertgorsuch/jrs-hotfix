@@ -12,6 +12,7 @@ import com.jaspersoft.jrshotfix.engine.RunRecord;
 import com.jaspersoft.jrshotfix.engine.Runner;
 import com.jaspersoft.jrshotfix.engine.Sleeper;
 import com.jaspersoft.jrshotfix.event.EventSink;
+import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
 import com.jaspersoft.jrshotfix.platform.Durability;
 import com.jaspersoft.jrshotfix.platform.Trees;
@@ -173,7 +174,12 @@ final class RunService {
           tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
       Durability.syncDirectory(file.toAbsolutePath().getParent());
     } catch (IOException e) {
-      throw new UncheckedIOException("cannot write " + file, e);
+      // before any step has run: a precheck-class refusal (exit 2), not an unexplained exit 4
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          "cannot write " + file + ": " + e.getMessage(),
+          "check that the run directory is writable; nothing was changed",
+          e);
     }
   }
 

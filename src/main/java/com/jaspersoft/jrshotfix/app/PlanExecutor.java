@@ -400,7 +400,8 @@ final class PlanExecutor {
     }
     renderer.outcome(ctx.runId(), outcome);
     List<String> notes = HotfixPlans.notesOf(plan);
-    if (!notes.isEmpty()) {
+    // a rolled-back or failed run never installed the hotfix, so its manual steps do not apply
+    if (!notes.isEmpty() && outcome instanceof RunOutcome.Succeeded) {
       out.println();
       out.println(
           redactor.redact(

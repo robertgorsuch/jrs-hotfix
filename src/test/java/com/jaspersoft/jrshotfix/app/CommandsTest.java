@@ -88,6 +88,16 @@ class CommandsTest {
   }
 
   @Test
+  void should_not_reprint_the_readme_notes_when_the_run_rolls_back() throws Exception {
+    Fixture f = fixture();
+    // NEW is an added file with nothing to restore, so the swap fails but the rollback that
+    // follows (restoring the other, snapshotted files) is clean: exit 3, not 4.
+    f.hf.platform.failAtomicReplaceFor(f.target(HotfixFixture.NEW));
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(3);
+    assertThat(f.out()).doesNotContain("Manual steps from the package readme");
+  }
+
+  @Test
   void should_write_the_run_log_with_the_checksum_audit_when_applying() throws Exception {
     Fixture f = fixture();
     assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
