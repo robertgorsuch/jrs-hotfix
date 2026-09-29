@@ -40,6 +40,11 @@ public record Home(Path root) {
     return runDir(runId).resolve("run.log");
   }
 
+  /** The readme's manual steps for the package this run applied, never executed. */
+  public Path notesFile(String runId) {
+    return runDir(runId).resolve("notes.txt");
+  }
+
   public Path snapshots() {
     return root.resolve("snapshots");
   }

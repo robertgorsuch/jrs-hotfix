@@ -399,6 +399,18 @@ final class PlanExecutor {
       return code;
     }
     renderer.outcome(ctx.runId(), outcome);
+    List<String> notes = HotfixPlans.notesOf(plan);
+    if (!notes.isEmpty()) {
+      out.println();
+      out.println(
+          redactor.redact(
+              "Manual steps from the package readme (also saved to "
+                  + boot.home().notesFile(ctx.runId())
+                  + "):"));
+      for (String note : notes) {
+        out.println(redactor.redact("  " + note));
+      }
+    }
     out.flush();
     // a rollback the operator asked for that completes is what they wanted: success
     int code =

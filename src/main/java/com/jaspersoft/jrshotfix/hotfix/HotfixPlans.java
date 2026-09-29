@@ -45,6 +45,12 @@ public final class HotfixPlans {
   /** The run id of a ledger entry written by {@link #record}: no run installed it. */
   public static final String RECORDED_RUN_ID = "recorded";
 
+  /**
+   * Marks a plan summary warning as one of the package readme's manual steps, so {@link
+   * #notesOf(Plan)} can find it again without a new field on the copied {@link PlanSummary}.
+   */
+  public static final String NOTE_PREFIX = "readme: ";
+
   private static final String AS_PUBLISHED =
       "point jrs-hotfix at the hotfix ZIP as support published it";
 
@@ -98,7 +104,9 @@ public final class HotfixPlans {
             + contents.sha256()
             + "); compare it with the checksum on the support portal"
             + (args.checksumConfirmed() ? " (confirmed)" : ""));
-    warnings.addAll(contents.notes());
+    for (String note : contents.notes()) {
+      warnings.add(NOTE_PREFIX + note);
+    }
     warnings.add(
         "the service is stopped for the swap; this node only, other cluster nodes are not touched");
 
@@ -480,6 +488,21 @@ public final class HotfixPlans {
   /** Every ledger entry, installed and rolled back alike, in install order. */
   public List<LedgerEntry> list() {
     return rt.ledger().all();
+  }
+
+  /**
+   * The package readme's manual steps carried in {@code plan}'s summary warnings, in order, with
+   * {@link #NOTE_PREFIX} stripped; empty for a rollback plan, which never adds any. Never executed
+   * by this tool.
+   */
+  public static List<String> notesOf(Plan plan) {
+    List<String> notes = new ArrayList<>();
+    for (String warning : plan.summary().warnings()) {
+      if (warning.startsWith(NOTE_PREFIX)) {
+        notes.add(warning.substring(NOTE_PREFIX.length()));
+      }
+    }
+    return notes;
   }
 
   /**

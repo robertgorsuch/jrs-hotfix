@@ -69,6 +69,25 @@ class CommandsTest {
   }
 
   @Test
+  void should_print_the_readme_notes_in_the_plan_preview_when_planning() throws Exception {
+    Fixture f = fixture();
+    assertThat(f.run("apply", f.pkg.toString(), "--plan")).isEqualTo(0);
+    assertThat(f.out()).contains("Additional Notes");
+  }
+
+  @Test
+  void should_save_and_reprint_the_readme_notes_when_a_run_ends() throws Exception {
+    Fixture f = fixture();
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
+    assertThat(f.out()).contains("Manual steps from the package readme");
+    assertThat(f.run("runs", "list")).isEqualTo(0);
+    String row = f.out().lines().filter(l -> l.contains("hotfix.apply")).findFirst().orElseThrow();
+    String runId = row.substring(0, row.indexOf(' '));
+    assertThat(Files.readString(f.home.notesFile(runId), StandardCharsets.UTF_8))
+        .contains("Additional Notes");
+  }
+
+  @Test
   void should_write_the_run_log_with_the_checksum_audit_when_applying() throws Exception {
     Fixture f = fixture();
     assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);

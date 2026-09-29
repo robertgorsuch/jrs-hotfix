@@ -76,7 +76,7 @@ Some hotfixes list manual steps in their readme: SQL for a given database,
 properties to add, or settings to re-apply in a configuration file the hotfix
 overwrites. jrs-hotfix never runs any of this. The readme's manual steps are
 printed in the plan preview, printed again after the run finishes, and saved to
-`runs/<id>/notes.txt` for you to act on by hand.
+`runs/<runId>/notes.txt` for you to act on by hand.
 
 ## If something goes wrong
 

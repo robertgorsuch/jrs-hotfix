@@ -12,6 +12,8 @@ import com.jaspersoft.jrshotfix.engine.RunRecord;
 import com.jaspersoft.jrshotfix.engine.Runner;
 import com.jaspersoft.jrshotfix.engine.Sleeper;
 import com.jaspersoft.jrshotfix.event.EventSink;
+import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
+import com.jaspersoft.jrshotfix.platform.Durability;
 import com.jaspersoft.jrshotfix.platform.Trees;
 import com.jaspersoft.jrshotfix.redact.RedactingEventSink;
 import com.jaspersoft.jrshotfix.snapshot.Snapshot;
@@ -23,7 +25,10 @@ import com.jaspersoft.jrshotfix.state.LedgerEntry;
 import com.jaspersoft.jrshotfix.state.RunPlans;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -124,6 +129,7 @@ final class RunService {
       String argsJson,
       List<String> audit) {
     plans.store(ctx.runId(), plan, operation, argsJson);
+    writeNotes(ctx.runId(), plan);
     return logged(
         ctx.runId(),
         operation + " " + argsJson,
@@ -145,6 +151,30 @@ final class RunService {
         "rollback requested by the operator",
         List.of(),
         () -> new Recovery(journal, runner).rollback(plan, runId, ctx));
+  }
+
+  /**
+   * Saves the package readme's manual steps beside the plan, {@code runs/<runId>/notes.txt}, one
+   * per line, UTF-8; writes nothing when {@code plan} has none. Never executed by this tool.
+   */
+  private void writeNotes(String runId, Plan plan) {
+    List<String> notes = HotfixPlans.notesOf(plan);
+    if (notes.isEmpty()) {
+      return;
+    }
+    Path file = boot.home().notesFile(runId);
+    try {
+      Files.createDirectories(file.getParent());
+      Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+      String text = String.join(System.lineSeparator(), notes) + System.lineSeparator();
+      Files.writeString(tmp, text, StandardCharsets.UTF_8);
+      Durability.sync(tmp);
+      Durability.move(
+          tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+      Durability.syncDirectory(file.toAbsolutePath().getParent());
+    } catch (IOException e) {
+      throw new UncheckedIOException("cannot write " + file, e);
+    }
   }
 
   private RunOutcome logged(
