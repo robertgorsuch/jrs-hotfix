@@ -5,6 +5,7 @@ import java.io.PrintWriter;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.Optional;
 import picocli.CommandLine;
 
 /**
@@ -51,9 +52,43 @@ public final class Main {
             .setCaseInsensitiveEnumValuesAllowed(true)
             .setUsageHelpAutoWidth(true)
             .setExecutionExceptionHandler(new ExitCodes.Handler())
-            .setParameterExceptionHandler(new ExitCodes.ParameterHandler());
+            .setParameterExceptionHandler(new ExitCodes.ParameterHandler())
+            .setExecutionStrategy(
+                parsed -> {
+                  inheritGlobalOptions(parsed);
+                  return new CommandLine.RunLast().execute(parsed);
+                });
     usageErrorsExitOne(cl);
     return cl;
+  }
+
+  /**
+   * Hands the global options given before a subcommand's name down to it: each command mixes the
+   * options in on its own, so without this {@code --home} before {@code apply} reached only the
+   * root command and the leaf silently resolved another home.
+   */
+  private static void inheritGlobalOptions(CommandLine.ParseResult parsed) {
+    Optional<GlobalOptions> above = Optional.empty();
+    CommandLine.ParseResult level = parsed;
+    while (true) {
+      Optional<GlobalOptions> here = globalOptionsOf(level.commandSpec());
+      if (here.isPresent()) {
+        above.ifPresent(here.get()::inheritFrom);
+        above = here;
+      }
+      if (!level.hasSubcommand()) {
+        return;
+      }
+      level = level.subcommand();
+    }
+  }
+
+  private static Optional<GlobalOptions> globalOptionsOf(CommandLine.Model.CommandSpec spec) {
+    return spec.mixins().values().stream()
+        .map(CommandLine.Model.CommandSpec::userObject)
+        .filter(GlobalOptions.class::isInstance)
+        .map(GlobalOptions.class::cast)
+        .findFirst();
   }
 
   private static void usageErrorsExitOne(CommandLine cl) {

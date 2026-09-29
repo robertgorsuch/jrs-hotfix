@@ -73,4 +73,21 @@ public final class GlobalOptions {
   public boolean ascii() {
     return ascii;
   }
+
+  /**
+   * Takes what {@code outer} (the same options given before this command's name) set and this
+   * command did not: {@code jrs-hotfix --home <dir> apply ...} must mean the same as {@code
+   * jrs-hotfix apply ... --home <dir>}. A value given on this command wins; a flag set on either is
+   * set.
+   */
+  void inheritFrom(GlobalOptions outer) {
+    if (home == null) {
+      home = outer.home;
+    }
+    yes |= outer.yes;
+    nonInteractive |= outer.nonInteractive;
+    noColor |= outer.noColor;
+    noPager |= outer.noPager;
+    ascii |= outer.ascii;
+  }
 }
