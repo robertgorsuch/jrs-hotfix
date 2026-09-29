@@ -10,7 +10,8 @@ import picocli.CommandLine.Command;
 @Command(
     name = "list",
     mixinStandardHelpOptions = true,
-    description = "List the hotfixes this tool installed or recorded.")
+    description = "List the hotfixes this tool installed or recorded.",
+    footer = {"", "Example:", "  jrs-hotfix list"})
 final class ListCommand extends AppCommand {
 
   @Override

@@ -13,7 +13,8 @@ import picocli.CommandLine.Parameters;
 @Command(
     name = "rollback",
     mixinStandardHelpOptions = true,
-    description = "Roll an installed hotfix back from its snapshot.")
+    description = "Roll an installed hotfix back from its snapshot.",
+    footer = {"", "Example:", "  jrs-hotfix rollback JRSHF-10.0.0-20260730-0457 --cascade"})
 final class RollbackCommand extends AppCommand {
 
   @Parameters(index = "0", paramLabel = "<id>", description = "The hotfix id, as `list` shows it.")

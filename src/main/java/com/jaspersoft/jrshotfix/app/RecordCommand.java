@@ -13,7 +13,8 @@ import picocli.CommandLine.Parameters;
     name = "record",
     mixinStandardHelpOptions = true,
     description =
-        "Record a hotfix applied by hand, so the ledger lists it; changes nothing on the server.")
+        "Record a hotfix applied by hand, so the ledger lists it; changes nothing on the server.",
+    footer = {"", "Example:", "  jrs-hotfix record <zip>"})
 final class RecordCommand extends AppCommand {
 
   @Parameters(index = "0", paramLabel = "<package.zip>", description = "The hotfix ZIP.")

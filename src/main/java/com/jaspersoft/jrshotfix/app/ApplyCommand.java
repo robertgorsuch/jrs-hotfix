@@ -21,7 +21,12 @@ import picocli.CommandLine.Parameters;
 @Command(
     name = "apply",
     mixinStandardHelpOptions = true,
-    description = "Apply an official hotfix package: snapshot, stop, swap, start, record.")
+    description = "Apply an official hotfix package: snapshot, stop, swap, start, record.",
+    footer = {
+      "",
+      "Example:",
+      "  jrs-hotfix apply C:\\Downloads\\hotfix_JRSPro10.0.0_20260730.zip --plan"
+    })
 final class ApplyCommand extends AppCommand {
 
   @Parameters(index = "0", paramLabel = "<package.zip>", description = "The hotfix ZIP.")

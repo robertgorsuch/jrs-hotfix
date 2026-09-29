@@ -18,7 +18,8 @@ import picocli.CommandLine.Parameters;
 @Command(
     name = "verify",
     mixinStandardHelpOptions = true,
-    description = "Check a hotfix package against this installation; changes nothing.")
+    description = "Check a hotfix package against this installation; changes nothing.",
+    footer = {"", "Example:", "  jrs-hotfix verify <zip>"})
 final class VerifyCommand extends AppCommand {
 
   @Parameters(index = "0", paramLabel = "<package.zip>", description = "The hotfix ZIP.")

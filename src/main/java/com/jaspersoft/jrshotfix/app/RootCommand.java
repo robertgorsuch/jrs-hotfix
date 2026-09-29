@@ -12,6 +12,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.IVersionProvider;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
+import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
 
 /**
@@ -39,11 +40,18 @@ final class RootCommand implements Callable<Integer> {
 
   @Mixin GlobalOptions global;
 
+  @Option(names = "--docs", description = "Print the documentation page.")
+  boolean docs;
+
   /** Set by {@link Main}'s factory, so the menu's commands open the same way this one would. */
   Bootstrap.Opener opener = Bootstrap.DEFAULT;
 
   @Override
   public Integer call() {
+    if (docs) {
+      Pager.print(EmbeddedDoc.text(), spec.commandLine().getOut(), !global.noPager());
+      return ExitCodes.SUCCESS;
+    }
     if (!global.nonInteractive() && Terminal.present()) {
       return new Menu(
               spec.commandLine().getOut(),

@@ -45,7 +45,11 @@ final class RunsCommand implements Callable<Integer> {
   }
 
   /** {@code runs list}. */
-  @Command(name = "list", mixinStandardHelpOptions = true, description = "List every run.")
+  @Command(
+      name = "list",
+      mixinStandardHelpOptions = true,
+      description = "List every run.",
+      footer = {"", "Example:", "  jrs-hotfix runs list"})
   static final class ListRuns extends AppCommand {
     @Override
     public Integer call() {
@@ -80,7 +84,8 @@ final class RunsCommand implements Callable<Integer> {
   @Command(
       name = "show",
       mixinStandardHelpOptions = true,
-      description = "Show one run: its record, its step transitions and its stored plan.")
+      description = "Show one run: its record, its step transitions and its stored plan.",
+      footer = {"", "Example:", "  jrs-hotfix runs show <id>"})
   static final class Show extends AppCommand {
     @Parameters(index = "0", paramLabel = "<id>", description = "The run id.")
     String runId;
@@ -138,7 +143,8 @@ final class RunsCommand implements Callable<Integer> {
   @Command(
       name = "resume",
       mixinStandardHelpOptions = true,
-      description = "Continue an interrupted run from the step it stopped at.")
+      description = "Continue an interrupted run from the step it stopped at.",
+      footer = {"", "Example:", "  jrs-hotfix runs resume <id>"})
   static final class Resume extends AppCommand {
     @Parameters(index = "0", paramLabel = "<id>", description = "The pending run id.")
     String runId;
@@ -153,7 +159,8 @@ final class RunsCommand implements Callable<Integer> {
   @Command(
       name = "rollback",
       mixinStandardHelpOptions = true,
-      description = "Undo an interrupted run: compensate every step it completed, newest first.")
+      description = "Undo an interrupted run: compensate every step it completed, newest first.",
+      footer = {"", "Example:", "  jrs-hotfix runs rollback <id>"})
   static final class Rollback extends AppCommand {
     @Parameters(index = "0", paramLabel = "<id>", description = "The pending run id.")
     String runId;
@@ -170,7 +177,8 @@ final class RunsCommand implements Callable<Integer> {
       mixinStandardHelpOptions = true,
       description =
           "Remove ended runs and snapshots older than the cut-off; the snapshot of an installed"
-              + " hotfix and anything of a pending run are kept.")
+              + " hotfix and anything of a pending run are kept.",
+      footer = {"", "Example:", "  jrs-hotfix runs prune --older-than 30"})
   static final class Prune extends AppCommand {
     @Option(
         names = "--older-than",

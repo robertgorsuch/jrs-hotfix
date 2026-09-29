@@ -69,7 +69,11 @@ final class SettingsCommand implements Callable<Integer> {
   }
 
   /** {@code settings show}. */
-  @Command(name = "show", mixinStandardHelpOptions = true, description = "Show every setting.")
+  @Command(
+      name = "show",
+      mixinStandardHelpOptions = true,
+      description = "Show every setting.",
+      footer = {"", "Example:", "  jrs-hotfix settings show"})
   static final class Show extends AppCommand {
     @Override
     public Integer call() {
@@ -80,7 +84,11 @@ final class SettingsCommand implements Callable<Integer> {
   }
 
   /** {@code settings set <key> <value>}. */
-  @Command(name = "set", mixinStandardHelpOptions = true, description = "Change one setting.")
+  @Command(
+      name = "set",
+      mixinStandardHelpOptions = true,
+      description = "Change one setting.",
+      footer = {"", "Example:", "  jrs-hotfix settings set service.stopTimeoutSeconds 300"})
   static final class Set extends AppCommand {
     @Parameters(
         index = "0",
@@ -122,7 +130,8 @@ final class SettingsCommand implements Callable<Integer> {
   @Command(
       name = "detect",
       mixinStandardHelpOptions = true,
-      description = "Find the JasperReports Server installation and write settings for it.")
+      description = "Find the JasperReports Server installation and write settings for it.",
+      footer = {"", "Example:", "  jrs-hotfix settings detect"})
   static final class Detect extends AppCommand {
     @Override
     public Integer call() {

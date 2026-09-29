@@ -134,16 +134,3 @@ snapshots/<runId>/files/...   replaced and deleted files, at their relative path
 | `service.stopTimeoutSeconds` | how long a stop may take | 180 |
 | `service.forceStopAfterSeconds` | end the JVM if the script outlives this (scripts only, off when absent) | absent |
 | `baseUrl` | used only by the wait-for-server probe | `http://localhost:<port from server.xml>/<webappName>` |
-
-## Build
-
-Build through `scripts/mvn.sh verify` (JDK 21 pinned). While iterating:
-`scripts/fast.sh test <TestClass[,TestClass]>` compiles with Error Prone and
-`-Werror` and runs just those unit tests; `scripts/fast.sh fmt` formats with
-google-java-format before committing.
-
-## Install
-
-(placeholder; filled in when the release archives exist)
-
-`docs/spec.md` is the design.
