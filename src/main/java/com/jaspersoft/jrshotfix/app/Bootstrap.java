@@ -34,10 +34,11 @@ import java.util.function.Function;
  * then {@code ./jrs-hotfix} when it holds settings, then the home used last ({@link LastHome})
  * while its settings still exist, then the one detected installation whose {@code jrs-hotfix/}
  * holds settings (more than one is refused, naming each, until {@code --home} chooses), else {@code
- * ./jrs-hotfix}; a home with settings is remembered as the last one; the home directory exists once
- * {@link #open} returns and native temporary files go below it; the platform is bound to the
- * configured install directory when there are settings; a command that needs the hotfix runtime
- * without settings fails with a precheck telling the operator how to create them.
+ * ./jrs-hotfix}; a home with settings is remembered as the last one; {@link #open} creates nothing
+ * in the home, which is created (with native temporary files below it) only by {@link #ensureHome},
+ * when the hotfix runtime is built or a run starts; the platform is bound to the configured install
+ * directory when there are settings; a command that needs the hotfix runtime without settings fails
+ * with a precheck telling the operator how to create them.
  */
 final class Bootstrap {
 
@@ -134,16 +135,6 @@ final class Bootstrap {
     if (settings.isPresent()) {
       LastHome.write(pointer, home);
     }
-    try {
-      Files.createDirectories(home.root());
-    } catch (IOException e) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          "cannot create the home " + home.root() + ": " + e.getMessage(),
-          "check permissions or pass --home",
-          e);
-    }
-    NativeTempDir.use(home.nativeTemp());
     Platform platform = settings.map(s -> detected.withInstallDir(s.installDir())).orElse(detected);
     return new Bootstrap(
         home, settings, platform, Redactor.global(), clock, interactive, explicit, pointer);
@@ -187,12 +178,32 @@ final class Bootstrap {
     LastHome.write(lastHome, h);
   }
 
+  /**
+   * Creates the home and points native temporary files below it; called only where something is
+   * about to be written there (the hotfix runtime, a run), so a command that finds no settings
+   * leaves no directory behind.
+   */
+  Home ensureHome() {
+    try {
+      Files.createDirectories(home.root());
+    } catch (IOException e) {
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          "cannot create the home " + home.root() + ": " + e.getMessage(),
+          "check permissions or pass --home",
+          e);
+    }
+    NativeTempDir.use(home.nativeTemp());
+    return home;
+  }
+
   HotfixRuntime runtime() {
     Settings s =
         settings.orElseThrow(
             () ->
                 new HotfixException(
                     HotfixException.PRECHECK, NO_SETTINGS, NO_SETTINGS_REMEDIATION));
+    ensureHome();
     return new HotfixRuntime(
         home,
         s,

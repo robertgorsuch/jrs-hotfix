@@ -163,6 +163,7 @@ final class RunService {
       String operation,
       String argsJson,
       List<String> audit) {
+    boot.ensureHome();
     plans.store(ctx.runId(), plan, operation, argsJson);
     writeNotes(ctx.runId(), plan);
     return logged(
@@ -219,6 +220,7 @@ final class RunService {
 
   private RunOutcome logged(
       String runId, String what, List<String> audit, Supplier<RunOutcome> body) {
+    boot.ensureHome();
     try (LogFile file = LogFile.open(boot.home(), runId)) {
       file.line("run " + runId + ": " + boot.redactor().redact(what));
       for (String line : audit) {

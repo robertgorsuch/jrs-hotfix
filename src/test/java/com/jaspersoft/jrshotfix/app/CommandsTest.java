@@ -11,6 +11,7 @@ import com.jaspersoft.jrshotfix.hotfix.HotfixFixture;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
 import com.jaspersoft.jrshotfix.json.Json;
 import com.jaspersoft.jrshotfix.pkg.Packages;
+import com.jaspersoft.jrshotfix.platform.Trees;
 import com.jaspersoft.jrshotfix.state.FileJournal;
 import com.jaspersoft.jrshotfix.state.RunPlans;
 import com.sun.net.httpserver.HttpServer;
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -323,6 +325,34 @@ class CommandsTest {
   }
 
   @Test
+  void should_create_no_home_when_a_command_finds_no_settings() throws Exception {
+    Fixture f = fixture();
+    Path elsewhere = tmp.resolve("elsewhere/jrs-hotfix");
+    Map<String, String> env = Map.of("JRS_HOTFIX_HOME", elsewhere.toString());
+    assertThat(f.runExactly(env, List.of("list", "--non-interactive"))).isEqualTo(2);
+    assertThat(f.runExactly(env, List.of("verify", f.pkg.toString(), "--non-interactive")))
+        .isEqualTo(2);
+    assertThat(f.runExactly(env, List.of("runs", "list", "--non-interactive"))).isEqualTo(0);
+    assertThat(elsewhere).doesNotExist();
+    assertThat(elsewhere.getParent()).doesNotExist();
+  }
+
+  @Test
+  void should_create_no_jrs_hotfix_directory_in_the_working_directory_without_settings()
+      throws Exception {
+    Path cwdHome = Path.of("jrs-hotfix").toAbsolutePath();
+    Assumptions.assumeFalse(Files.exists(cwdHome), "the working directory has a jrs-hotfix");
+    Fixture f = fixture();
+    try {
+      // no --home, no JRS_HOTFIX_HOME, no pointer and nothing the scan can see
+      assertThat(f.runExactly(List.of("list", "--non-interactive"))).isEqualTo(2);
+      assertThat(cwdHome).doesNotExist();
+    } finally {
+      Trees.deleteRecursively(cwdHome);
+    }
+  }
+
+  @Test
   void should_find_the_last_home_when_no_home_is_given_and_no_scan_sees_it() throws Exception {
     Fixture f = fixture();
     assertThat(f.run("list")).isEqualTo(0);
@@ -400,9 +430,16 @@ class CommandsTest {
 
     /** Runs {@code args} as given, without the {@code --home} {@link #run} adds. */
     int runExactly(List<String> args) {
+      return runExactly(Map.of(), args);
+    }
+
+    /** As {@link #runExactly(List)}, with {@code extra} added to the environment. */
+    int runExactly(Map<String, String> extra, List<String> args) {
       out = new StringWriter();
       err = new StringWriter();
-      Bootstrap.Opener opener = Bootstrap.opener(prompt -> hf.platform, env());
+      Map<String, String> env = new java.util.HashMap<>(env());
+      env.putAll(extra);
+      Bootstrap.Opener opener = Bootstrap.opener(prompt -> hf.platform, env);
       return Main.commandLine(new PrintWriter(out, true), new PrintWriter(err, true), opener)
           .execute(args.toArray(String[]::new));
     }
