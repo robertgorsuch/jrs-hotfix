@@ -11,6 +11,7 @@ import com.jaspersoft.jrshotfix.engine.RunOutcome;
 import com.jaspersoft.jrshotfix.engine.RunRecord;
 import com.jaspersoft.jrshotfix.engine.Runner;
 import com.jaspersoft.jrshotfix.engine.Sleeper;
+import com.jaspersoft.jrshotfix.engine.TerminalState;
 import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
@@ -49,7 +50,8 @@ import java.util.function.Supplier;
  * taken by the {@link Runner} for exactly the duration of a run, resume or rollback; while one of
  * those executes, every event the runner emits (already redacted) is also written to the run's own
  * log, {@code runs/<id>/run.log}, together with the platform's diagnostics; {@link #prune} never
- * removes a pending run, the snapshot of a pending run, or the snapshot of an installed hotfix.
+ * removes a pending run, the snapshot of a pending run, or the snapshot of an installed hotfix, and
+ * keeps a failed run (exit 4) and its snapshot unless asked to include them.
  */
 final class RunService {
 
@@ -235,16 +237,26 @@ final class RunService {
 
   /**
    * Removes what is older than {@code olderThan}: the directories of ended runs; snapshots, except
-   * those of pending runs and of hotfixes the ledger has installed; and rolled-back ledger entries
-   * whose snapshot is gone.
+   * those of pending runs, of failed runs and of hotfixes the ledger has installed; and rolled-back
+   * ledger entries whose snapshot is gone.
    */
   PruneResult prune(Duration olderThan) {
+    return prune(olderThan, false);
+  }
+
+  /**
+   * As {@link #prune(Duration)}; a run that ended {@link TerminalState#FAILED} (exit 4, its
+   * rollback incomplete) keeps its directory and its snapshot, which its message told the operator
+   * to restore from, unless {@code includeFailed}.
+   */
+  PruneResult prune(Duration olderThan, boolean includeFailed) {
     Instant cutoff = boot.clock().instant().minus(olderThan);
     List<String> runsRemoved = new ArrayList<>();
     Set<String> pending = new HashSet<>();
     try {
       for (RunRecord run : journal.runs()) {
-        if (run.pending()) {
+        if (run.pending()
+            || (!includeFailed && run.terminalState().equals(Optional.of(TerminalState.FAILED)))) {
           pending.add(run.runId());
           continue;
         }

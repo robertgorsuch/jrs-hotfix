@@ -19,7 +19,8 @@ import picocli.CommandLine.Spec;
  * {@code jrs-hotfix runs}: the run history, recovery of an interrupted run, and retention.
  * Invariants: {@code list} and {@code show} are read-only; {@code resume} and {@code rollback} act
  * only on a pending run and only after its rebuilt plan matches what was stored; {@code prune}
- * never removes a pending run or the snapshot of an installed hotfix.
+ * never removes a pending run or the snapshot of an installed hotfix, and keeps a failed run and
+ * its snapshot unless {@code --include-failed} is given.
  */
 @Command(
     name = "runs",
@@ -178,7 +179,8 @@ final class RunsCommand implements Callable<Integer> {
       mixinStandardHelpOptions = true,
       description =
           "Remove ended runs and snapshots older than the cut-off; the snapshot of an installed"
-              + " hotfix and anything of a pending run are kept.",
+              + " hotfix, anything of a pending run and, without --include-failed, anything of a"
+              + " failed run are kept.",
       footer = {"", "Example:", "  jrs-hotfix runs prune --older-than 30"})
   static final class Prune extends AppCommand {
     @Option(
@@ -186,6 +188,13 @@ final class RunsCommand implements Callable<Integer> {
         paramLabel = "<days>",
         description = "Age cut-off in days (default: ${DEFAULT-VALUE}).")
     int days = 30;
+
+    @Option(
+        names = "--include-failed",
+        description =
+            "Also remove failed runs (exit 4) and their snapshots; by default they are kept, since"
+                + " the files may still have to be restored from them.")
+    boolean includeFailed;
 
     @Override
     public Integer call() {
@@ -199,7 +208,7 @@ final class RunsCommand implements Callable<Integer> {
     }
 
     private int prune(Bootstrap boot) {
-      RunService.PruneResult r = new RunService(boot).prune(Duration.ofDays(days));
+      RunService.PruneResult r = new RunService(boot).prune(Duration.ofDays(days), includeFailed);
       PrintWriter out = out();
       out.println("runs removed        " + list(r.runsRemoved()));
       out.println("snapshots removed   " + list(r.snapshotsRemoved()));

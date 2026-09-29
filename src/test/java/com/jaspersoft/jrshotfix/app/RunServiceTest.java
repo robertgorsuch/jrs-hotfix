@@ -64,6 +64,33 @@ class RunServiceTest {
     assertThat(hf.ledger.find("HF-INSTALLED")).isPresent();
   }
 
+  @Test
+  void should_keep_a_failed_run_and_its_snapshot_unless_failed_runs_are_included()
+      throws Exception {
+    HotfixFixture hf = HotfixFixture.create(tmp);
+    Instant now = Instant.parse("2026-09-28T12:00:00Z");
+    Instant old = now.minus(Duration.ofDays(60));
+    Clock oldClock = Clock.fixed(old, ZoneOffset.UTC);
+    FileJournal journal = new FileJournal(hf.home, oldClock);
+    // exit 4: the rollback did not complete and the message pointed at this snapshot
+    journal.recordRunStart("r-failed", "hotfix.apply", Optional.empty(), old);
+    journal.recordRunEnd("r-failed", old, TerminalState.FAILED, 4);
+    new SnapshotStore(hf.home, hf.platform.files(), oldClock)
+        .create(
+            "r-failed", "snapshot", List.of(hf.target(HotfixFixture.FOO)), hf.paths.installDir());
+    Bootstrap boot = boot(hf, Clock.fixed(now, ZoneOffset.UTC));
+
+    RunService.PruneResult kept = new RunService(boot).prune(Duration.ofDays(30), false);
+    assertThat(kept.runsRemoved()).isEmpty();
+    assertThat(kept.snapshotsRemoved()).isEmpty();
+    assertThat(hf.snapshots.find("r-failed", "snapshot")).isPresent();
+    assertThat(Files.exists(hf.home.runDir("r-failed"))).isTrue();
+
+    RunService.PruneResult removed = new RunService(boot).prune(Duration.ofDays(30), true);
+    assertThat(removed.runsRemoved()).containsExactly("r-failed");
+    assertThat(removed.snapshotsRemoved()).containsExactly("r-failed/snapshot");
+  }
+
   static Bootstrap boot(HotfixFixture hf, Clock clock) {
     GlobalOptions g = new GlobalOptions();
     g.home = hf.home.root();

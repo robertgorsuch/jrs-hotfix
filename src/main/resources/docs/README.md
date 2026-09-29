@@ -26,7 +26,7 @@ jrs-hotfix rollback <id> [--cascade] [--plan] [--yes]
 jrs-hotfix verify <package.zip>
 jrs-hotfix list
 jrs-hotfix record <package.zip>
-jrs-hotfix runs [list | show <id> | resume <id> | rollback <id> | prune --older-than <days>]
+jrs-hotfix runs [list | show <id> | resume <id> | rollback <id> | prune --older-than <days> [--include-failed]]
 jrs-hotfix settings [show | set <key> <value> | detect]
 jrs-hotfix --docs | --version | --help
 ```
@@ -96,9 +96,10 @@ A run whose journal has no terminal state blocks every mutating command with
 exit 8 until `jrs-hotfix runs resume <id>` finishes it or
 `jrs-hotfix runs rollback <id>` undoes it; the menu's entry 6 offers both first.
 Its snapshot lives under `snapshots/<runId>` in the home (see Files below) and is
-never pruned while the hotfix it belongs to is installed. `jrs-hotfix runs show
-<id>` prints the run's record, every step transition, and the stored plan's
-steps, so you can see exactly where it stopped.
+never pruned while the hotfix it belongs to is installed; the snapshot of a run
+that failed with exit 4 is kept too, unless `runs prune --include-failed`.
+`jrs-hotfix runs show <id>` prints the run's record, every step transition, and
+the stored plan's steps, so you can see exactly where it stopped.
 
 A run interrupted while the service was down, at an installation outside the
 default paths, is found again through the home jrs-hotfix remembers it used
