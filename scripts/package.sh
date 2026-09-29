@@ -18,6 +18,11 @@ echo "jlink modules: $MODULES,jdk.crypto.ec,jdk.charsets"
 cp dist/bin/jrs-hotfix dist/bin/jrs-hotfix.cmd "$OUT/bin/"; chmod +x "$OUT/bin/jrs-hotfix"
 cp README.md LICENSE "$OUT/"
 cd target/dist
-if [ "$PLATFORM" = "windows-x64" ]; then powershell -NoProfile -Command "Compress-Archive -Path '$NAME' -DestinationPath '$NAME-$PLATFORM.zip'"; else tar -czf "$NAME-$PLATFORM.tar.gz" "$NAME"; fi
+if [ "$PLATFORM" = "windows-x64" ]; then
+  # jar, not PowerShell 5.1's Compress-Archive: that one writes backslashes into entry names
+  "$JAVA_HOME/bin/jar" --create --no-manifest --file "$NAME-$PLATFORM.zip" "$NAME"
+else
+  tar -czf "$NAME-$PLATFORM.tar.gz" "$NAME"
+fi
 sha256sum "$NAME-$PLATFORM".* > "SHA256SUMS-$PLATFORM"
 cat "SHA256SUMS-$PLATFORM"
