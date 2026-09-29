@@ -11,6 +11,7 @@ import com.jaspersoft.jrshotfix.engine.RunOutcome;
 import com.jaspersoft.jrshotfix.engine.RunRecord;
 import com.jaspersoft.jrshotfix.engine.Runner;
 import com.jaspersoft.jrshotfix.engine.Sleeper;
+import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
@@ -62,6 +63,11 @@ final class RunService {
     }
   }
 
+  /** Test-only environment variable: the step id a run pauses before; see {@link #pauseIfAt}. */
+  static final String PAUSE_AT = "JRS_HOTFIX_TEST_PAUSE_AT";
+
+  private static final Duration PAUSE = Duration.ofMinutes(2);
+
   private final Bootstrap boot;
   private final FileJournal journal;
   private final RunPlans plans;
@@ -100,6 +106,9 @@ final class RunService {
 
   /** A runner whose events go to {@code sink} and, while a run executes, to its log. */
   Runner runner(EventSink sink) {
+    // test-only: the acceptance crash tests hold a run before a chosen step; inert when unset
+    Optional<String> pauseAt =
+        Optional.ofNullable(Env.vars().get(PAUSE_AT)).map(String::strip).filter(s -> !s.isEmpty());
     EventSink tee =
         event -> {
           sink.emit(event);
@@ -107,6 +116,7 @@ final class RunService {
           if (current != null) {
             current.sink().emit(event);
           }
+          pauseAt.ifPresent(step -> pauseIfAt(step, event));
         };
     return new Runner(
         journal,
@@ -114,6 +124,28 @@ final class RunService {
         boot.clock(),
         Sleeper.system(),
         boot.redactor());
+  }
+
+  /**
+   * Test-only (acceptance crash tests): after {@code event} has been delivered, when it is the
+   * {@link Event.StepRunning} of {@code stepId}, writes {@code runs/<runId>/paused} and sleeps so
+   * the test can kill the process before the step executes. An interrupt ends the sleep early.
+   */
+  private void pauseIfAt(String stepId, Event event) {
+    if (!(event instanceof Event.StepRunning running)
+        || !running.stepId().equals(Optional.of(stepId))) {
+      return;
+    }
+    Path marker = boot.home().runDir(running.runId()).resolve("paused");
+    try {
+      Files.createDirectories(marker.getParent());
+      Files.writeString(marker, stepId, StandardCharsets.UTF_8);
+      Thread.sleep(PAUSE.toMillis());
+    } catch (IOException e) {
+      throw new UncheckedIOException("cannot write " + marker, e);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   /** Stores the plan, then runs it. The runner takes the run lock. */
