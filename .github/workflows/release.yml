@@ -1,0 +1,130 @@
+name: release
+
+# A v* tag builds the portable archive on each OS (shaded jar + jlink runtime + launchers,
+# ADR 0002), smoke-tests it unpacked, and publishes a GitHub release with the archives, the jar
+# and SHA256SUMS. The release notes are written by hand before tagging: docs/releases/<tag>.md.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: package (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: windows-latest
+            platform: windows-x64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # bash on both runners: pwsh splits a dotted -D property at the dot
+      - name: Use the tag as the version
+        shell: bash
+        run: ./mvnw -B -q org.codehaus.mojo:versions-maven-plugin:2.22.0:set -DnewVersion="${GITHUB_REF_NAME#v}" -DgenerateBackupPoms=false
+      - name: Build the shaded jar
+        shell: bash
+        run: ./mvnw -B -DskipTests package
+      - name: Build the portable archive
+        shell: bash
+        run: bash scripts/package.sh "${GITHUB_REF_NAME#v}" ${{ matrix.platform }}
+      - name: Unpack the archive for the smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="jrs-hotfix-${GITHUB_REF_NAME#v}"
+          mkdir -p "$RUNNER_TEMP/smoke"
+          if [ "${{ matrix.platform }}" = "windows-x64" ]; then
+            powershell -NoProfile -Command "Expand-Archive -Path 'target/dist/$name-${{ matrix.platform }}.zip' -DestinationPath '$RUNNER_TEMP/smoke'"
+          else
+            tar -xzf "target/dist/$name-${{ matrix.platform }}.tar.gz" -C "$RUNNER_TEMP/smoke"
+          fi
+          (cd target/dist && sha256sum -c "SHA256SUMS-${{ matrix.platform }}")
+          echo "SMOKE_HOME=$RUNNER_TEMP/smoke/$name" >> "$GITHUB_ENV"
+      # No JDK on PATH and no JAVA_HOME: the launcher must find its bundled runtime.
+      - name: Smoke test the Linux launcher
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset JAVA_HOME
+          export PATH=/usr/bin:/bin
+          "$SMOKE_HOME/bin/jrs-hotfix" --version
+          "$SMOKE_HOME/bin/jrs-hotfix" --docs --no-pager > "$RUNNER_TEMP/docs.txt"
+          head -3 "$RUNNER_TEMP/docs.txt"
+          grep -q '^# jrs-hotfix' "$RUNNER_TEMP/docs.txt"
+      - name: Smoke test the Windows launcher from cmd.exe
+        if: matrix.platform == 'windows-x64'
+        shell: cmd
+        run: |
+          set JAVA_HOME=
+          set PATH=%SystemRoot%\System32;%SystemRoot%
+          call "%SMOKE_HOME%\bin\jrs-hotfix.cmd" --version || exit /b 1
+          call "%SMOKE_HOME%\bin\jrs-hotfix.cmd" --docs --no-pager > "%RUNNER_TEMP%\docs.txt" || exit /b 1
+          findstr /b /c:"# jrs-hotfix" "%RUNNER_TEMP%\docs.txt" || exit /b 1
+      - name: Add the platform-independent jar (Linux leg only)
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: cp target/jrs-hotfix.jar target/dist/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            target/dist/*.tar.gz
+            target/dist/*.zip
+            target/dist/SHA256SUMS-*
+            target/dist/jrs-hotfix.jar
+
+  release:
+    name: publish the GitHub release
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Require the release notes
+        shell: bash
+        run: |
+          test -f "docs/releases/$GITHUB_REF_NAME.md" || { echo "::error::docs/releases/$GITHUB_REF_NAME.md is missing; write the release notes before tagging"; exit 1; }
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: dist-*
+          path: target/dist
+          merge-multiple: true
+      - name: Check the archives and write SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          cd target/dist
+          ls -l
+          test -f "jrs-hotfix-$version-linux-x64.tar.gz" || { echo "::error::no Linux archive for $version"; exit 1; }
+          test -f "jrs-hotfix-$version-windows-x64.zip" || { echo "::error::no Windows archive for $version"; exit 1; }
+          test -f jrs-hotfix.jar || { echo "::error::no jar"; exit 1; }
+          sha256sum -c SHA256SUMS-linux-x64 SHA256SUMS-windows-x64
+          # one file, plain "hash  name" lines, so sha256sum -c works on any OS
+          { sed 's/ \*/  /' SHA256SUMS-linux-x64 SHA256SUMS-windows-x64; sha256sum jrs-hotfix.jar; } > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" target/dist/*.tar.gz target/dist/*.zip target/dist/jrs-hotfix.jar target/dist/SHA256SUMS \
+            --title "$GITHUB_REF_NAME" --notes-file "docs/releases/$GITHUB_REF_NAME.md"
