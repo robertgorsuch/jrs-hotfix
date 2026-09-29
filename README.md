@@ -144,6 +144,23 @@ google-java-format before committing.
 
 ## Install
 
-(placeholder; filled in when the release archives exist)
+Each release on GitHub carries one archive per OS, `jrs-hotfix-<version>-linux-x64.tar.gz`
+and `jrs-hotfix-<version>-windows-x64.zip`, with its own Java runtime inside: the server's
+Java is neither used nor changed, and no JDK or `JAVA_HOME` is needed.
+
+1. Download the archive for the OS and `SHA256SUMS` from the release page, and check the
+   download: `sha256sum -c --ignore-missing SHA256SUMS` (`SHA256SUMS` lists every file of
+   the release; on Windows without Git Bash, compare `Get-FileHash <archive>` with its line).
+2. Unpack it anywhere, next to the installation or not:
+   `tar -xzf jrs-hotfix-<version>-linux-x64.tar.gz` on Linux, Extract All (or
+   `Expand-Archive`) on Windows. The directory `jrs-hotfix-<version>` holds `bin/`, `lib/`,
+   `runtime/`, this README and the licence.
+3. Run `bin/jrs-hotfix` (Windows: `bin\jrs-hotfix.cmd`) as the account that owns the
+   installation: the user that installed JasperReports Server and runs its Tomcat on Linux
+   (root when a systemd unit controls it), an Administrator prompt on Windows.
+
+The release also carries `jrs-hotfix.jar` for a host that already has Java 21:
+`java -jar jrs-hotfix.jar`. To upgrade, unpack the new archive and use it instead of the
+old one; what jrs-hotfix keeps lives under the installation (see Files), not in the archive.
 
 `docs/spec.md` is the design.
