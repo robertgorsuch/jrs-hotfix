@@ -25,6 +25,7 @@
     <jacoco.version>0.8.15</jacoco.version>
     <jacoco.line.minimum>0.70</jacoco.line.minimum>
     <acceptance.skip>false</acceptance.skip>
+    <surefire.skip>false</surefire.skip>
   </properties>
 
   <dependencies>
@@ -64,7 +65,7 @@
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>${surefire.version}</version>
-        <configuration><excludes><exclude>**/acceptance/**</exclude></excludes></configuration>
+        <configuration><skip>${surefire.skip}</skip><excludes><exclude>**/acceptance/**</exclude></excludes></configuration>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId><artifactId>maven-shade-plugin</artifactId><version>3.6.2</version>
