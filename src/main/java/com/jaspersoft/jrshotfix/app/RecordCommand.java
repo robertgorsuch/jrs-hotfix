@@ -22,15 +22,20 @@ final class RecordCommand extends AppCommand {
   @Override
   public Integer call() {
     Bootstrap boot = open();
-    LedgerEntry entry = boot.plans().record(file);
-    out()
-        .println(
-            "recorded "
-                + entry.id()
-                + " ("
-                + entry.files().size()
-                + " files); nothing was changed");
-    out().flush();
-    return ExitCodes.SUCCESS;
+    return executor(boot)
+        .mutate(
+            "record",
+            () -> {
+              LedgerEntry entry = boot.plans().record(file);
+              out()
+                  .println(
+                      "recorded "
+                          + entry.id()
+                          + " ("
+                          + entry.files().size()
+                          + " files); nothing was changed on the server");
+              out().flush();
+              return ExitCodes.SUCCESS;
+            });
   }
 }

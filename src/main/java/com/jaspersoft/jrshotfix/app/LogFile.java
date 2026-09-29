@@ -4,6 +4,7 @@ import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
 import com.jaspersoft.jrshotfix.home.Home;
 import com.jaspersoft.jrshotfix.platform.Diag;
+import com.jaspersoft.jrshotfix.redact.Redactor;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.UncheckedIOException;
@@ -17,9 +18,9 @@ import java.time.Instant;
  * The per-run text log, in place of jrsctl's logback setup. Invariants: one file per run, {@code
  * home.logFile(runId)}, opened for append in UTF-8 with its parent directories created; while it is
  * open the platform's {@link Diag} sink writes into it, and closing it resets that sink; every line
- * is flushed as it is written, so a crash leaves the log complete up to the last event; nothing
- * secret is written here because every event reaching {@link #sink} has already passed the
- * redacting sink.
+ * is flushed as it is written, so a crash leaves the log complete up to the last event; every line,
+ * whether an event, a platform diagnostic or a note from the run service, passes {@link
+ * Redactor#global()} before it is written, so nothing reaches the file unredacted.
  */
 final class LogFile implements AutoCloseable {
 
@@ -47,7 +48,8 @@ final class LogFile implements AutoCloseable {
                   StandardOpenOption.WRITE),
               true);
       LogFile log = new LogFile(w);
-      Diag.install((level, message) -> log.line(level.name() + " " + message));
+      Diag.install(
+          (level, message) -> log.line(level.name() + " " + Redactor.global().redact(message)));
       return log;
     } catch (IOException e) {
       throw new UncheckedIOException("cannot open the run log " + file, e);
@@ -64,7 +66,7 @@ final class LogFile implements AutoCloseable {
   }
 
   synchronized void line(String text) {
-    writer.println(Instant.now() + " " + text);
+    writer.println(Instant.now() + " " + Redactor.global().redact(text));
     writer.flush();
   }
 

@@ -164,6 +164,71 @@ class CommandsTest {
     assertThat(f.err()).contains("package");
   }
 
+  /** The mutating commands outside the engine, each with the arguments that would otherwise run. */
+  private static List<List<String>> gatedCommands(Fixture f) {
+    return List.of(
+        List.of("runs", "prune", "--older-than", "0", "--yes"),
+        List.of("record", f.pkg.toString()),
+        List.of("settings", "set", "service.stopTimeoutSeconds", "42"),
+        List.of("settings", "detect", "--yes"));
+  }
+
+  @Test
+  void should_exit_9_for_every_mutating_command_when_the_lock_is_held() throws Exception {
+    Fixture f = fixture();
+    try (RunLock held = new RunLock(f.home, "other", Instant.now())) {
+      for (List<String> command : gatedCommands(f)) {
+        assertThat(f.run(command.toArray(String[]::new))).as(command.toString()).isEqualTo(9);
+      }
+    }
+    assertThat(f.hf.ledger.all()).isEmpty();
+    assertThat(SettingsStore.load(f.home).orElseThrow().stopTimeoutSeconds()).isNotEqualTo(42);
+  }
+
+  @Test
+  void should_exit_8_for_every_mutating_command_while_a_run_is_pending() throws Exception {
+    Fixture f = fixture();
+    new FileJournal(f.home, Clock.systemUTC())
+        .recordRunStart("stuck", "hotfix.apply", Optional.of("p"), Instant.now());
+    for (List<String> command : gatedCommands(f)) {
+      assertThat(f.run(command.toArray(String[]::new))).as(command.toString()).isEqualTo(8);
+      assertThat(f.err()).contains("runs resume stuck");
+    }
+    assertThat(f.hf.ledger.all()).isEmpty();
+    assertThat(SettingsStore.load(f.home).orElseThrow().stopTimeoutSeconds()).isNotEqualTo(42);
+  }
+
+  @Test
+  void should_prune_nothing_while_a_run_is_pending() throws Exception {
+    Fixture f = fixture();
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
+    List<String> before;
+    try (var dirs = Files.list(f.home.runs())) {
+      before = dirs.map(p -> p.getFileName().toString()).sorted().toList();
+    }
+    new FileJournal(f.home, Clock.systemUTC())
+        .recordRunStart("stuck", "hotfix.apply", Optional.of("p"), Instant.now());
+
+    assertThat(f.run("runs", "prune", "--older-than", "0", "--yes")).isEqualTo(8);
+
+    try (var dirs = Files.list(f.home.runs())) {
+      assertThat(dirs.map(p -> p.getFileName().toString()).sorted().toList())
+          .containsAll(before)
+          .contains("stuck");
+    }
+    assertThat(f.hf.snapshots.list()).isNotEmpty();
+  }
+
+  @Test
+  void should_recheck_a_rollback_against_the_ledger_as_it_is_now_not_the_stored_chain() {
+    String stored =
+        HotfixPlans.rollbackArgsJson(new HotfixPlans.RollbackArgs("A", true, List.of("B", "A")));
+
+    assertThat(HotfixPlans.rollbackArgs(PlanExecutor.freshArgs(HotfixPlans.ROLLBACK, stored)))
+        .isEqualTo(new HotfixPlans.RollbackArgs("A", true));
+    assertThat(PlanExecutor.freshArgs(HotfixPlans.APPLY, "{\"x\":1}")).isEqualTo("{\"x\":1}");
+  }
+
   @Test
   void should_show_and_set_settings_when_asked() throws Exception {
     Fixture f = fixture();

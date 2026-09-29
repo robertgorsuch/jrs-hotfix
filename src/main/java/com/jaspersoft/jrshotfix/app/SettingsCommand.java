@@ -92,6 +92,10 @@ final class SettingsCommand implements Callable<Integer> {
     @Override
     public Integer call() {
       Bootstrap boot = open();
+      return executor(boot).mutate("settings-set", () -> set(boot));
+    }
+
+    private int set(Bootstrap boot) {
       Settings current = required(boot);
       Settings updated;
       try {
@@ -121,6 +125,10 @@ final class SettingsCommand implements Callable<Integer> {
     @Override
     public Integer call() {
       Bootstrap boot = open();
+      return executor(boot).mutate("settings-detect", () -> detect(boot));
+    }
+
+    private int detect(Bootstrap boot) {
       if (boot.settings().isPresent() && !global.yes()) {
         return ExitCodes.fail(
             err(),

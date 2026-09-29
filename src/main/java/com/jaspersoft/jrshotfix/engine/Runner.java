@@ -194,9 +194,9 @@ public final class Runner {
     /**
      * The journal is the run's source of truth; when it cannot be written the run cannot go on and
      * cannot even record that it stopped. The outcome says so, names the run for {@code runs
-     * recover}, and counts as rollback-incomplete whenever a mutating step already ran, because
-     * nothing was undone. The terminal row is still attempted, since the failure may have been a
-     * single write.
+     * resume} and {@code runs rollback}, and counts as rollback-incomplete whenever a mutating step
+     * already ran, because nothing was undone. The terminal row is still attempted, since the
+     * failure may have been a single write.
      */
     private RunOutcome journalFailed(JournalException e) {
       String cause = "the run journal could not be written: " + describe(e);

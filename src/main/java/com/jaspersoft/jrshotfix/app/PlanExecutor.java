@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.IntSupplier;
 
 /**
  * The one path every mutating command takes from a {@link Plan} to a process exit code. Invariants:
@@ -82,7 +83,7 @@ final class PlanExecutor {
     // rebuilt after the answer: inputs that changed while the prompt waited are refused
     PlanFingerprint recomputed;
     try {
-      recomputed = boot.plans().rebuild(operation, argsJson).fingerprint();
+      recomputed = boot.plans().rebuild(operation, freshArgs(operation, argsJson)).fingerprint();
     } catch (HotfixException e) {
       return ExitCodes.fail(
           err,
@@ -100,6 +101,41 @@ final class PlanExecutor {
     String runId = runs.newRunId();
     Context ctx = runs.context(runId);
     return run(plan, ctx, runner -> runs.run(runner, plan, ctx, operation, argsJson, audit), false);
+  }
+
+  /**
+   * The arguments the pre-run recheck plans with: a rollback's stored chain is for recovery only,
+   * so the recheck recomputes the chain from the ledger as it is now, and a hotfix rolled back
+   * elsewhere while this prompt waited is refused.
+   */
+  static String freshArgs(String operation, String argsJson) {
+    if (!operation.equals(HotfixPlans.ROLLBACK)) {
+      return argsJson;
+    }
+    HotfixPlans.RollbackArgs stored = HotfixPlans.rollbackArgs(argsJson);
+    return HotfixPlans.rollbackArgsJson(
+        new HotfixPlans.RollbackArgs(stored.hotfixId(), stored.cascade()));
+  }
+
+  /**
+   * Runs a mutation outside the engine (prune, record, settings) under the same gates as a run:
+   * exit 9 when the run lock is held, exit 8 while a run is pending; the run lock is held for the
+   * whole of {@code body}, so no run can start in between.
+   */
+  int mutate(String what, IntSupplier body) {
+    Optional<Integer> blocked = blocked(true);
+    if (blocked.isPresent()) {
+      return blocked.get();
+    }
+    try (RunLock unused = new RunLock(boot.home(), what, boot.clock().instant())) {
+      return body.getAsInt();
+    } catch (LockHeldException held) {
+      return ExitCodes.fail(
+          err,
+          ExitCodes.LOCK_HELD,
+          "the run lock is held by run " + held.holderRunId() + " (pid " + held.holderPid() + ")",
+          Optional.of("wait for that jrs-hotfix process to finish, then run this again"));
+    }
   }
 
   /**

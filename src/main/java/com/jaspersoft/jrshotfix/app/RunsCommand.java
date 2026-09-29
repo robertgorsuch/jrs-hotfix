@@ -184,7 +184,13 @@ final class RunsCommand implements Callable<Integer> {
         return ExitCodes.fail(
             err(), ExitCodes.USAGE, "--older-than must not be negative", Optional.empty());
       }
-      RunService.PruneResult r = new RunService(open()).prune(Duration.ofDays(days));
+      Bootstrap boot = open();
+      // refused while any run is pending: a pending rollback's chain needs other runs' snapshots
+      return executor(boot).mutate("prune", () -> prune(boot));
+    }
+
+    private int prune(Bootstrap boot) {
+      RunService.PruneResult r = new RunService(boot).prune(Duration.ofDays(days));
       PrintWriter out = out();
       out.println("runs removed        " + list(r.runsRemoved()));
       out.println("snapshots removed   " + list(r.snapshotsRemoved()));

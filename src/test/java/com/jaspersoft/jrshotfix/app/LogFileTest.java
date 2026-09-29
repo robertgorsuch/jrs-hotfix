@@ -26,11 +26,13 @@ class LogFileTest {
       log.sink()
           .emit(new Event.StepRunning(Instant.now(), "r1", Optional.of("preflight"), "p", "Check"));
       Diag.info("platform said {}", "hello");
+      Diag.debug("connecting with password=hunter2");
     }
     Diag.info("after close");
 
     String text = Files.readString(home.logFile("r1"), StandardCharsets.UTF_8);
     assertThat(text).contains("StepRunning [preflight] Check").contains("INFO platform said hello");
     assertThat(text).doesNotContain("after close");
+    assertThat(text).contains("password=[redacted]").doesNotContain("hunter2");
   }
 }
