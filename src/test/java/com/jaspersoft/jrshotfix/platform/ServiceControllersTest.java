@@ -15,6 +15,14 @@ import org.junit.jupiter.api.io.TempDir;
 class ServiceControllersTest {
 
   private static final Duration POLL = Duration.ofMillis(10);
+
+  // Hermetic: the real process scan would see any Tomcat running on the build machine (a JRS on
+  // the Linux test laptop kept these units in STOPPING until the timeout).
+  private static SystemdServiceController systemd(ProcessRunner runner, String unit) {
+    return new SystemdServiceController(
+        runner, unit, new FakeTomcatProcessFinder(List.of()), Optional.empty(), POLL);
+  }
+
   private static final Duration TIMEOUT = Duration.ofSeconds(5);
   private static final String SERVICE = "jasperreportsTomcat";
   private static final List<String> SC_QUERY = List.of("sc.exe", "query", SERVICE);
@@ -60,8 +68,7 @@ class ServiceControllersTest {
                     4,
                     "Failed to start jasperreports.service: Access denied",
                     "See system logs and 'systemctl status jasperreports.service' for details."));
-    SystemdServiceController controller =
-        new SystemdServiceController(runner, "jasperreports", POLL);
+    SystemdServiceController controller = systemd(runner, "jasperreports");
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.start(TIMEOUT))
         .isInstanceOf(ServiceControlException.class)
@@ -196,8 +203,7 @@ class ServiceControllersTest {
                 Response.failing(3, "deactivating"),
                 Response.failing(3, "inactive"))
             .on(List.of("systemctl", "stop", "jasperserver"), Response.ok());
-    SystemdServiceController controller =
-        new SystemdServiceController(runner, "jasperserver", POLL);
+    SystemdServiceController controller = systemd(runner, "jasperserver");
 
     assertThat(controller.stop(TIMEOUT)).isEqualTo(State.STOPPED);
     assertThat(runner.countOf(List.of("systemctl", "stop", "jasperserver"))).isEqualTo(1);
@@ -216,8 +222,7 @@ class ServiceControllersTest {
                 Response.ok("active"))
             .on(List.of("systemctl", "start", "jasperserver"), Response.ok());
 
-    assertThat(new SystemdServiceController(runner, "jasperserver", POLL).start(TIMEOUT))
-        .isEqualTo(State.RUNNING);
+    assertThat(systemd(runner, "jasperserver").start(TIMEOUT)).isEqualTo(State.RUNNING);
   }
 
   @Test

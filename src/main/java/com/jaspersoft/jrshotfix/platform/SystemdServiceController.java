@@ -32,10 +32,6 @@ public final class SystemdServiceController extends PollingServiceController {
     this(runner, unit, TomcatProcesses.INSTANCE, Optional.empty(), DEFAULT_POLL_INTERVAL);
   }
 
-  SystemdServiceController(ProcessRunner runner, String unit, Duration pollInterval) {
-    this(runner, unit, TomcatProcesses.INSTANCE, Optional.empty(), pollInterval);
-  }
-
   SystemdServiceController(
       ProcessRunner runner,
       String unit,

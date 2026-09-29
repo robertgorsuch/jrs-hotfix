@@ -21,6 +21,14 @@ import org.junit.jupiter.api.io.TempDir;
 class SystemdSocketAndPidFileTest {
 
   private static final Duration POLL = Duration.ofMillis(10);
+
+  // Hermetic: the real process scan would see any Tomcat running on the build machine (a JRS on
+  // the Linux test laptop kept these units in STOPPING until the timeout).
+  private static SystemdServiceController systemd(ProcessRunner runner, String unit) {
+    return new SystemdServiceController(
+        runner, unit, new FakeTomcatProcessFinder(List.of()), Optional.empty(), POLL);
+  }
+
   private static final Duration TIMEOUT = Duration.ofSeconds(5);
   private static final List<String> IS_ACTIVE = List.of("systemctl", "is-active", "tomcat.service");
   private static final List<String> STOP =
@@ -38,8 +46,7 @@ class SystemdSocketAndPidFileTest {
                 Response.ok("active"),
                 Response.failing(3, "inactive"))
             .on(STOP, Response.ok());
-    SystemdServiceController controller =
-        new SystemdServiceController(runner, "tomcat.socket", POLL);
+    SystemdServiceController controller = systemd(runner, "tomcat.socket");
 
     assertThat(controller.state()).isEqualTo(State.RUNNING);
     assertThat(controller.stop(TIMEOUT)).isEqualTo(State.STOPPED);
@@ -55,8 +62,7 @@ class SystemdSocketAndPidFileTest {
         new FakeProcessRunner()
             .on(IS_ACTIVE, Response.failing(3, "inactive"), Response.ok("active"))
             .on(START, Response.ok());
-    SystemdServiceController controller =
-        new SystemdServiceController(runner, "tomcat.socket", POLL);
+    SystemdServiceController controller = systemd(runner, "tomcat.socket");
 
     assertThat(controller.start(TIMEOUT)).isEqualTo(State.RUNNING);
     assertThat(runner.countOf(START)).isEqualTo(1);
@@ -68,8 +74,7 @@ class SystemdSocketAndPidFileTest {
         new FakeProcessRunner()
             .on(IS_ACTIVE, Response.failing(3, "inactive"))
             .on(STOP, Response.ok());
-    SystemdServiceController controller =
-        new SystemdServiceController(runner, "tomcat.socket", POLL);
+    SystemdServiceController controller = systemd(runner, "tomcat.socket");
 
     assertThat(controller.stop(TIMEOUT)).isEqualTo(State.STOPPED);
     assertThat(runner.countOf(STOP)).isEqualTo(1);
@@ -82,8 +87,7 @@ class SystemdSocketAndPidFileTest {
     FakeProcessRunner runner =
         new FakeProcessRunner()
             .on(List.of("systemctl", "is-active", "jasperreports"), Response.ok("active"));
-    assertThat(new SystemdServiceController(runner, "jasperreports", POLL).describe())
-        .isEqualTo("systemd unit jasperreports");
+    assertThat(systemd(runner, "jasperreports").describe()).isEqualTo("systemd unit jasperreports");
   }
 
   @Test
