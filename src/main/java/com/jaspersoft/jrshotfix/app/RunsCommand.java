@@ -104,6 +104,7 @@ final class RunsCommand implements Callable<Integer> {
       }
       RunRecord r = run.get();
       PrintWriter out = out();
+      out.println("home: " + boot.home().root());
       TextTable head = new TextTable();
       head.row("run", r.runId());
       head.row("operation", r.operation());

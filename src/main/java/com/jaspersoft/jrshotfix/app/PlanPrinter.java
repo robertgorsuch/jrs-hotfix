@@ -3,6 +3,7 @@ package com.jaspersoft.jrshotfix.app;
 import com.jaspersoft.jrshotfix.engine.Plan;
 import com.jaspersoft.jrshotfix.engine.PlanSummary;
 import com.jaspersoft.jrshotfix.engine.Step;
+import com.jaspersoft.jrshotfix.home.Home;
 import com.jaspersoft.jrshotfix.redact.Redactor;
 import java.io.PrintWriter;
 import java.nio.file.Path;
@@ -11,11 +12,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Renders a {@link Plan} for the operator before confirmation (spec §6.2): header, summary block,
- * steps grouped by phase, numbered the way the progress renderer numbers them and named by the step
- * id the journal and {@code runs show} use, the fingerprint, and the reminder that nothing has
- * changed yet. Invariants: step numbers are 1-based positions in {@code plan.steps()}; every text
- * line is redacted.
+ * Renders a {@link Plan} for the operator before confirmation (spec §6.2): the home it runs in,
+ * header, summary block, steps grouped by phase, numbered the way the progress renderer numbers
+ * them and named by the step id the journal and {@code runs show} use, the fingerprint, and the
+ * reminder that nothing has changed yet. Invariants: step numbers are 1-based positions in {@code
+ * plan.steps()}; every text line is redacted.
  */
 final class PlanPrinter {
 
@@ -28,9 +29,10 @@ final class PlanPrinter {
     return String.format(java.util.Locale.ROOT, "%02d", index + 1);
   }
 
-  static void print(PrintWriter out, Plan plan, Ansi ansi, Redactor redactor) {
+  static void print(PrintWriter out, Home home, Plan plan, Ansi ansi, Redactor redactor) {
     PlanSummary s = plan.summary();
     List<String> lines = new ArrayList<>();
+    lines.add("home: " + home.root());
     lines.add("Plan  " + s.operation() + "  " + s.target());
     lines.add("Summary");
     TextTable summary = new TextTable();

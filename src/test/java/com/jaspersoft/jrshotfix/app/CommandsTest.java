@@ -291,6 +291,34 @@ class CommandsTest {
   }
 
   @Test
+  void should_exit_2_naming_every_home_when_two_installations_hold_settings() throws Exception {
+    Fixture f = fixture();
+    Path other = tmp.resolve("other");
+    SettingsStore.save(
+        new Home(other.resolve("jrs-hotfix")),
+        SettingsStore.load(f.home).orElseThrow().withKey("webappName", "jasperserver"));
+    f.hf.platform.candidates.add(f.hf.paths.installDir());
+    f.hf.platform.candidates.add(other);
+    assertThat(f.runExactly(List.of("list", "--non-interactive"))).isEqualTo(2);
+    assertThat(f.err())
+        .contains(f.home.root().toString())
+        .contains(new Home(other.resolve("jrs-hotfix")).root().toString())
+        .contains("--home");
+    assertThat(Files.exists(f.lastHomeFile())).isFalse();
+  }
+
+  @Test
+  void should_name_the_home_first_when_the_plan_or_a_run_is_shown() throws Exception {
+    Fixture f = fixture();
+    assertThat(f.run("apply", f.pkg.toString(), "--plan")).isEqualTo(0);
+    assertThat(f.out().lines().findFirst()).contains("home: " + f.home.root());
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
+    String runId = new FileJournal(f.home, Clock.systemUTC()).runs().get(0).runId();
+    assertThat(f.run("runs", "show", runId)).isEqualTo(0);
+    assertThat(f.out()).contains("home: " + f.home.root());
+  }
+
+  @Test
   void should_find_the_last_home_when_no_home_is_given_and_no_scan_sees_it() throws Exception {
     Fixture f = fixture();
     assertThat(f.run("list")).isEqualTo(0);

@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -31,12 +32,12 @@ import java.util.function.Function;
  * What every command opens first: the home, the settings in it, the platform and whether a person
  * is at the terminal. Invariants: the home comes from {@code --home}, then {@code JRS_HOTFIX_HOME},
  * then {@code ./jrs-hotfix} when it holds settings, then the home used last ({@link LastHome})
- * while its settings still exist, then the first detected installation whose {@code jrs-hotfix/}
- * holds settings, else {@code ./jrs-hotfix}; a home with settings is remembered as the last one;
- * the home directory exists once {@link #open} returns and native temporary files go below it; the
- * platform is bound to the configured install directory when there are settings; a command that
- * needs the hotfix runtime without settings fails with a precheck telling the operator how to
- * create them.
+ * while its settings still exist, then the one detected installation whose {@code jrs-hotfix/}
+ * holds settings (more than one is refused, naming each, until {@code --home} chooses), else {@code
+ * ./jrs-hotfix}; a home with settings is remembered as the last one; the home directory exists once
+ * {@link #open} returns and native temporary files go below it; the platform is bound to the
+ * configured install directory when there are settings; a command that needs the hotfix runtime
+ * without settings fails with a precheck telling the operator how to create them.
  */
 final class Bootstrap {
 
@@ -100,8 +101,8 @@ final class Bootstrap {
     Path pointer = LastHome.file(env, detected.os() == Platform.OsFamily.WINDOWS);
     // the home needs the install dir and the install dir is in the settings: so the flag or the
     // environment first, else ./jrs-hotfix with settings, else the home used last while its
-    // settings are still there, else the first detected installation whose jrs-hotfix/ holds
-    // settings
+    // settings are still there, else the one detected installation whose jrs-hotfix/ holds
+    // settings; two or more of those is a question only the operator can answer
     Home home = HomeResolver.resolve(options.home(), env, Optional.empty());
     Optional<Settings> settings = SettingsStore.load(home);
     if (settings.isEmpty() && !explicit) {
@@ -111,14 +112,22 @@ final class Bootstrap {
         home = last.get();
         settings = SettingsStore.load(home);
       } else {
+        Map<Home, Settings> found = new LinkedHashMap<>();
         for (Path c : detected.scanInstallDirs().candidates()) {
           Home h = HomeResolver.resolve(Optional.empty(), env, Optional.of(c));
-          Optional<Settings> s = SettingsStore.load(h);
-          if (s.isPresent()) {
-            home = h;
-            settings = s;
-            break;
-          }
+          SettingsStore.load(h).ifPresent(s -> found.putIfAbsent(h, s));
+        }
+        if (found.size() > 1) {
+          throw new HotfixException(
+              HotfixException.PRECHECK,
+              "more than one installation has settings: "
+                  + String.join(
+                      ", ", found.keySet().stream().map(h -> h.root().toString()).toList()),
+              "choose one with `--home <installDir>/jrs-hotfix` (or set JRS_HOTFIX_HOME)");
+        }
+        for (Map.Entry<Home, Settings> e : found.entrySet()) {
+          home = e.getKey();
+          settings = Optional.of(e.getValue());
         }
       }
     }

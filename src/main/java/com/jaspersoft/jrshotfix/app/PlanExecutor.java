@@ -72,7 +72,7 @@ final class PlanExecutor {
     if (blocked.isPresent()) {
       return blocked.get();
     }
-    PlanPrinter.print(out, plan, ansi, redactor);
+    PlanPrinter.print(out, boot.home(), plan, ansi, redactor);
     if (showOnly) {
       return ExitCodes.SUCCESS;
     }
