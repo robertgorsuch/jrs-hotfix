@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# jrs-hotfix launcher (Linux). Uses the bundled runtime; no JDK or JAVA_HOME needed.
+set -euo pipefail
+self="$0"
+while [ -h "$self" ]; do
+  link=$(readlink "$self")
+  case "$link" in
+    /*) self="$link" ;;
+    *) self="$(dirname "$self")/$link" ;;
+  esac
+done
+DIR=$(cd "$(dirname "$self")" && pwd -P)
+exec "$DIR/../runtime/bin/java" -jar "$DIR/../lib/jrs-hotfix.jar" "$@"
