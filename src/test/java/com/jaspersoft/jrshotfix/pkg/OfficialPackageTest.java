@@ -5,10 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class OfficialPackageTest {
@@ -161,5 +164,49 @@ class OfficialPackageTest {
         .isInstanceOfSatisfying(
             HotfixException.class, e -> assertThat(e.kind()).isEqualTo(HotfixException.UNSUPPORTED))
         .hasMessageContaining("unusable path");
+  }
+
+  /**
+   * The readme deletes {@code FOO-1.2.3.jar} and the payload lays down {@code foo-1.2.3.jar}; both
+   * exist on disk as far as the file system can tell.
+   */
+  private PackageContents caseClash() throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    Path upper =
+        paths.tomcatDir().resolve("webapps/jasperserver-pro/" + Packages.LIB + "FOO-1.2.3.jar");
+    if (!Files.exists(upper)) {
+      Files.writeString(upper, "upper foo");
+    }
+    return OfficialPackage.read(
+        packageWith(
+            "case.zip",
+            Map.of(Packages.LIB + "foo-1.2.3.jar", "new foo"),
+            "Deleted files:\nWEB-INF/lib/FOO-1.2.3.jar\n"),
+        paths,
+        "jasperserver-pro",
+        files);
+  }
+
+  @Test
+  @EnabledOnOs(OS.WINDOWS)
+  void should_not_delete_what_the_package_lays_down_when_only_the_case_differs_on_windows()
+      throws Exception {
+    PackageContents c = caseClash();
+    assertThat(c.replaces())
+        .extracting(PackageContents.Entry::path)
+        .containsExactly("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar");
+    assertThat(c.deletes()).isEmpty();
+  }
+
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void should_keep_both_entries_when_only_the_case_differs_on_linux() throws Exception {
+    PackageContents c = caseClash();
+    assertThat(c.replaces())
+        .extracting(PackageContents.Entry::path)
+        .containsExactly("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar");
+    assertThat(c.deletes())
+        .extracting(PackageContents.Entry::path)
+        .containsExactly("webapps/jasperserver-pro/WEB-INF/lib/FOO-1.2.3.jar");
   }
 }

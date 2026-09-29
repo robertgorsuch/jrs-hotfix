@@ -17,6 +17,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -418,13 +419,25 @@ public final class OfficialPackage {
       Readme readme, Set<String> added, PackagePaths paths, List<String> notes) {
     List<PackageContents.Entry> out = new ArrayList<>();
     Set<String> seen = new LinkedHashSet<>();
+    // compared as resolved paths too: WindowsPath equality ignores case, as the file system does,
+    // so a readme deletion spelt differently from a payload path never removes that payload
+    Set<Path> laidDown = new HashSet<>();
+    for (String a : added) {
+      laidDown.add(paths.resolve(a).toAbsolutePath().normalize());
+    }
+    Set<Path> seenTargets = new HashSet<>();
     for (String path : readme.deleted()) {
       List<String> problems = PackagePaths.pathProblems(path);
       if (!problems.isEmpty()) {
         notes.add(skipped(path, problems));
         continue;
       }
-      if (!added.contains(path) && seen.add(path) && Files.isRegularFile(paths.resolve(path))) {
+      Path target = paths.resolve(path);
+      if (!added.contains(path)
+          && !laidDown.contains(target)
+          && seen.add(path)
+          && seenTargets.add(target)
+          && Files.isRegularFile(target)) {
         out.add(deletion(path));
       }
     }
@@ -436,7 +449,11 @@ public final class OfficialPackage {
         continue;
       }
       for (String path : expand(glob, paths)) {
-        if (!added.contains(path) && seen.add(path)) {
+        Path target = paths.resolve(path);
+        if (!added.contains(path)
+            && !laidDown.contains(target)
+            && seen.add(path)
+            && seenTargets.add(target)) {
           out.add(deletion(path));
           fromGlobs++;
         }
