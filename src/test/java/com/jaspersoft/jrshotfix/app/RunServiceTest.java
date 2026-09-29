@@ -68,7 +68,11 @@ class RunServiceTest {
     GlobalOptions g = new GlobalOptions();
     g.home = hf.home.root();
     g.nonInteractive = true;
-    return Bootstrap.open(g, Map.of(), clock, prompt -> hf.platform);
+    return Bootstrap.open(
+        g,
+        Map.of("XDG_CONFIG_HOME", hf.root.resolve("config").toString()),
+        clock,
+        prompt -> hf.platform);
   }
 
   private static LedgerEntry entry(String id, String runId, HotfixState state) {

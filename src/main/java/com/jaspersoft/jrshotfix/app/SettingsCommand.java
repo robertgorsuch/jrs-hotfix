@@ -51,9 +51,8 @@ final class SettingsCommand implements Callable<Integer> {
             () ->
                 new HotfixException(
                     HotfixException.PRECHECK,
-                    "no settings yet",
-                    "run `jrs-hotfix settings detect`, or start jrs-hotfix at a terminal for the"
-                        + " wizard"));
+                    Bootstrap.NO_SETTINGS,
+                    Bootstrap.NO_SETTINGS_REMEDIATION));
   }
 
   static void print(PrintWriter out, Home home, Settings settings) {
@@ -158,6 +157,7 @@ final class SettingsCommand implements Callable<Integer> {
         if (found.isPresent()) {
           Home home = boot.homeFor(candidate);
           SettingsStore.save(home, found.get());
+          boot.remember(home);
           out().println("settings written to " + home.settingsFile());
           print(out(), home, found.get());
           return ExitCodes.SUCCESS;
@@ -172,21 +172,12 @@ final class SettingsCommand implements Callable<Integer> {
     }
 
     /**
-     * A person at the terminal: existing settings are replaced only after they agree (there is no
-     * {@code --yes} at a terminal, since it implies {@code --non-interactive}), then the wizard
-     * asks for every value.
+     * A person at the terminal: the wizard asks for every value, and replaces settings that exist
+     * for the chosen installation only after they agree (there is no {@code --yes} at a terminal,
+     * since it implies {@code --non-interactive}).
      */
     private int wizard(Bootstrap boot) {
-      if (boot.settings().isPresent()
-          && !Prompter.yes(
-              out(),
-              "Settings exist already in " + boot.home().root() + ". Replace them? [y/N] ",
-              false)) {
-        out().println("Nothing was changed.");
-        out().flush();
-        return ExitCodes.CANCELLED;
-      }
-      return new SettingsWizard(out(), boot.platform(), boot::homeFor)
+      return new SettingsWizard(out(), boot.platform(), boot::homeFor, boot::remember)
           .run()
           .map(saved -> ExitCodes.SUCCESS)
           .orElse(ExitCodes.CANCELLED);

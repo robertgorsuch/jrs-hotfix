@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jaspersoft.jrshotfix.engine.RunLock;
 import com.jaspersoft.jrshotfix.home.Home;
+import com.jaspersoft.jrshotfix.home.LastHome;
 import com.jaspersoft.jrshotfix.home.SettingsStore;
 import com.jaspersoft.jrshotfix.hotfix.HotfixFixture;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
@@ -282,7 +283,22 @@ class CommandsTest {
     Fixture f = fixture();
     Files.delete(f.home.settingsFile());
     assertThat(f.run("list")).isEqualTo(2);
-    assertThat(f.err()).contains("no settings yet").contains("settings detect");
+    assertThat(f.err())
+        .contains("no settings found")
+        .contains("--home <installDir>/jrs-hotfix")
+        .contains("JRS_HOTFIX_HOME")
+        .contains("settings detect");
+  }
+
+  @Test
+  void should_find_the_last_home_when_no_home_is_given_and_no_scan_sees_it() throws Exception {
+    Fixture f = fixture();
+    assertThat(f.run("list")).isEqualTo(0);
+    assertThat(Files.readString(f.lastHomeFile()).strip()).isEqualTo(f.home.root().toString());
+    // no --home, no JRS_HOTFIX_HOME, no ./jrs-hotfix and no installation the scan can see
+    assertThat(f.hf.platform.scanInstallDirs().candidates()).isEmpty();
+    assertThat(f.runExactly(List.of("list", "--non-interactive"))).isEqualTo(0);
+    assertThat(f.out()).contains("no hotfixes recorded");
   }
 
   @Test
@@ -313,6 +329,7 @@ class CommandsTest {
     final HotfixFixture hf;
     final Home home;
     final Path pkg;
+    final Path config;
     private final HttpServer server;
     private StringWriter out = new StringWriter();
     private StringWriter err = new StringWriter();
@@ -322,6 +339,7 @@ class CommandsTest {
       this.home = hf.home;
       this.server = server;
       this.pkg = hf.packageFile();
+      this.config = hf.root.resolve("config");
       URI base =
           URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/jasperserver-pro");
       SettingsStore.save(home, hf.settings.withKey("baseUrl", base.toString()));
@@ -341,15 +359,29 @@ class CommandsTest {
     }
 
     int run(String... args) {
-      out = new StringWriter();
-      err = new StringWriter();
       List<String> all = new ArrayList<>(List.of(args));
       if (args.length > 0 && !args[0].startsWith("--")) {
         all.addAll(List.of("--home", home.root().toString(), "--non-interactive"));
       }
-      Bootstrap.Opener opener = Bootstrap.opener(prompt -> hf.platform, Map.of());
+      return runExactly(all);
+    }
+
+    /** Runs {@code args} as given, without the {@code --home} {@link #run} adds. */
+    int runExactly(List<String> args) {
+      out = new StringWriter();
+      err = new StringWriter();
+      Bootstrap.Opener opener = Bootstrap.opener(prompt -> hf.platform, env());
       return Main.commandLine(new PrintWriter(out, true), new PrintWriter(err, true), opener)
-          .execute(all.toArray(String[]::new));
+          .execute(args.toArray(String[]::new));
+    }
+
+    /** The environment the commands see: the configuration directory is the fixture's own. */
+    Map<String, String> env() {
+      return Map.of("XDG_CONFIG_HOME", config.toString(), "APPDATA", config.toString());
+    }
+
+    Path lastHomeFile() {
+      return LastHome.file(env(), false);
     }
 
     String out() {

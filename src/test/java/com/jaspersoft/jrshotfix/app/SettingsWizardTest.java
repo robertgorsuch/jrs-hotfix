@@ -17,6 +17,7 @@ import java.io.StringReader;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -142,5 +143,35 @@ class SettingsWizardTest {
     Home home = new Home(tmp.resolve("home"));
     assertThat(wizard(platform(List.of(install), Optional.empty()), home, "1\n\n")).isEmpty();
     assertThat(SettingsStore.load(home)).isEmpty();
+  }
+
+  @Test
+  void should_keep_existing_settings_and_remember_their_home_when_the_operator_says_no()
+      throws Exception {
+    Path install = install();
+    Home home = new Home(tmp.resolve("home"));
+    wizard(platform(List.of(install), Optional.empty()), home, "1\n\n\n\n\n");
+    Settings before =
+        SettingsStore.load(home).orElseThrow().withKey("service.stopTimeoutSeconds", "77");
+    SettingsStore.save(home, before);
+    sw.getBuffer().setLength(0);
+    List<Home> remembered = new ArrayList<>();
+    Prompter.override(new StringReader("1\nn\n"));
+    Optional<Settings> kept =
+        new SettingsWizard(
+                new PrintWriter(sw, true),
+                platform(List.of(install), Optional.empty()),
+                dir -> home,
+                remembered::add)
+            .run();
+    assertThat(kept).contains(before);
+    assertThat(SettingsStore.load(home)).contains(before);
+    assertThat(remembered).containsExactly(home);
+    assertThat(sw.toString())
+        .contains(
+            "Settings already exist for "
+                + install.toAbsolutePath().normalize()
+                + "; replace them? [y/N]")
+        .contains("77");
   }
 }

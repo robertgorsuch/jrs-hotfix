@@ -100,6 +100,11 @@ never pruned while the hotfix it belongs to is installed. `jrs-hotfix runs show
 <id>` prints the run's record, every step transition, and the stored plan's
 steps, so you can see exactly where it stopped.
 
+A run interrupted while the service was down, at an installation outside the
+default paths, is found again through the home jrs-hotfix remembers it used
+last; if that is gone too, pass `--home <installDir>/jrs-hotfix` (or set
+`JRS_HOTFIX_HOME`) to `runs resume` or `runs rollback`.
+
 ## Files
 
 Everything jrs-hotfix keeps lives under its home, `<installDir>/jrs-hotfix/`

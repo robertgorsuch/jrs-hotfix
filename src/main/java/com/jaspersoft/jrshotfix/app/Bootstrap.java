@@ -3,6 +3,7 @@ package com.jaspersoft.jrshotfix.app;
 import com.jaspersoft.jrshotfix.engine.Sleeper;
 import com.jaspersoft.jrshotfix.home.Home;
 import com.jaspersoft.jrshotfix.home.HomeResolver;
+import com.jaspersoft.jrshotfix.home.LastHome;
 import com.jaspersoft.jrshotfix.home.Settings;
 import com.jaspersoft.jrshotfix.home.SettingsStore;
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
@@ -29,11 +30,13 @@ import java.util.function.Function;
 /**
  * What every command opens first: the home, the settings in it, the platform and whether a person
  * is at the terminal. Invariants: the home comes from {@code --home}, then {@code JRS_HOTFIX_HOME},
- * then the first detected installation whose {@code jrs-hotfix/} holds settings, else {@code
- * ./jrs-hotfix}; the home directory exists once {@link #open} returns and native temporary files go
- * below it; the platform is bound to the configured install directory when there are settings; a
- * command that needs the hotfix runtime without settings fails with a precheck telling the operator
- * how to create them.
+ * then {@code ./jrs-hotfix} when it holds settings, then the home used last ({@link LastHome})
+ * while its settings still exist, then the first detected installation whose {@code jrs-hotfix/}
+ * holds settings, else {@code ./jrs-hotfix}; a home with settings is remembered as the last one;
+ * the home directory exists once {@link #open} returns and native temporary files go below it; the
+ * platform is bound to the configured install directory when there are settings; a command that
+ * needs the hotfix runtime without settings fails with a precheck telling the operator how to
+ * create them.
  */
 final class Bootstrap {
 
@@ -42,6 +45,12 @@ final class Bootstrap {
   interface Opener {
     Bootstrap open(GlobalOptions options);
   }
+
+  static final String NO_SETTINGS = "no settings found";
+
+  static final String NO_SETTINGS_REMEDIATION =
+      "pass `--home <installDir>/jrs-hotfix` or set `JRS_HOTFIX_HOME`, or run `jrs-hotfix settings"
+          + " detect` to set up this installation";
 
   static final Opener DEFAULT = options -> open(options, Env.vars(), Clock.systemUTC());
 
@@ -52,6 +61,7 @@ final class Bootstrap {
   private final Clock clock;
   private final boolean interactive;
   private final boolean explicitHome;
+  private final Path lastHome;
 
   private Bootstrap(
       Home home,
@@ -60,7 +70,8 @@ final class Bootstrap {
       Redactor redactor,
       Clock clock,
       boolean interactive,
-      boolean explicitHome) {
+      boolean explicitHome,
+      Path lastHome) {
     this.home = home;
     this.settings = settings;
     this.platform = platform;
@@ -68,6 +79,7 @@ final class Bootstrap {
     this.clock = clock;
     this.interactive = interactive;
     this.explicitHome = explicitHome;
+    this.lastHome = lastHome;
   }
 
   static Bootstrap open(GlobalOptions options, Map<String, String> env, Clock clock) {
@@ -85,20 +97,33 @@ final class Bootstrap {
     boolean explicit =
         options.home().isPresent()
             || (env.containsKey(HomeResolver.ENV) && !env.get(HomeResolver.ENV).isBlank());
+    Path pointer = LastHome.file(env, detected.os() == Platform.OsFamily.WINDOWS);
     // the home needs the install dir and the install dir is in the settings: so the flag or the
-    // environment first, else the first detected installation whose jrs-hotfix/ holds settings
+    // environment first, else ./jrs-hotfix with settings, else the home used last while its
+    // settings are still there, else the first detected installation whose jrs-hotfix/ holds
+    // settings
     Home home = HomeResolver.resolve(options.home(), env, Optional.empty());
     Optional<Settings> settings = SettingsStore.load(home);
     if (settings.isEmpty() && !explicit) {
-      for (Path c : detected.scanInstallDirs().candidates()) {
-        Home h = HomeResolver.resolve(Optional.empty(), env, Optional.of(c));
-        Optional<Settings> s = SettingsStore.load(h);
-        if (s.isPresent()) {
-          home = h;
-          settings = s;
-          break;
+      Optional<Home> last =
+          LastHome.read(pointer).filter(h -> Files.isRegularFile(h.settingsFile()));
+      if (last.isPresent()) {
+        home = last.get();
+        settings = SettingsStore.load(home);
+      } else {
+        for (Path c : detected.scanInstallDirs().candidates()) {
+          Home h = HomeResolver.resolve(Optional.empty(), env, Optional.of(c));
+          Optional<Settings> s = SettingsStore.load(h);
+          if (s.isPresent()) {
+            home = h;
+            settings = s;
+            break;
+          }
         }
       }
+    }
+    if (settings.isPresent()) {
+      LastHome.write(pointer, home);
     }
     try {
       Files.createDirectories(home.root());
@@ -111,7 +136,8 @@ final class Bootstrap {
     }
     NativeTempDir.use(home.nativeTemp());
     Platform platform = settings.map(s -> detected.withInstallDir(s.installDir())).orElse(detected);
-    return new Bootstrap(home, settings, platform, Redactor.global(), clock, interactive, explicit);
+    return new Bootstrap(
+        home, settings, platform, Redactor.global(), clock, interactive, explicit, pointer);
   }
 
   Home home() {
@@ -147,15 +173,17 @@ final class Bootstrap {
     return explicitHome ? home : new Home(installDir.resolve("jrs-hotfix"));
   }
 
+  /** Makes {@code h} the home a later command finds without {@code --home}; never fails. */
+  void remember(Home h) {
+    LastHome.write(lastHome, h);
+  }
+
   HotfixRuntime runtime() {
     Settings s =
         settings.orElseThrow(
             () ->
                 new HotfixException(
-                    HotfixException.PRECHECK,
-                    "no settings yet",
-                    "run `jrs-hotfix settings detect`, or start jrs-hotfix at a terminal for the"
-                        + " wizard"));
+                    HotfixException.PRECHECK, NO_SETTINGS, NO_SETTINGS_REMEDIATION));
     return new HotfixRuntime(
         home,
         s,

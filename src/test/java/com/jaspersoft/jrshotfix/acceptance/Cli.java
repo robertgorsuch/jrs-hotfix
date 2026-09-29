@@ -100,6 +100,10 @@ final class Cli {
     // the caller's own environment must not leak a home or a pause point into the child
     pb.environment().remove("JRS_HOTFIX_HOME");
     pb.environment().remove("JRS_HOTFIX_TEST_PAUSE_AT");
+    // nor may the child remember its home in the operator's own configuration directory
+    String config = home.getParent().resolve("config").toString();
+    pb.environment().put("APPDATA", config);
+    pb.environment().put("XDG_CONFIG_HOME", config);
     pb.environment().putAll(env);
     Files.createDirectories(captures);
     Path out = Files.createTempFile(captures, "out", ".txt");

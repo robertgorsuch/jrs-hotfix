@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -30,7 +31,8 @@ import java.util.function.Predicate;
  * input saves nothing and returns empty; an answer that is not acceptable is asked again; the saved
  * settings hold exactly the keys {@link Settings#keys()} lists, with the value of any service field
  * the chosen kind does not use cleared; the settings are saved in the home {@code homeFor} names
- * for the chosen directory.
+ * for the chosen directory; settings already in that home are replaced only after the operator's
+ * yes, and on no they are kept, remembered as the last home and returned.
  */
 final class SettingsWizard {
 
@@ -42,17 +44,23 @@ final class SettingsWizard {
   private final PrintWriter out;
   private final Platform platform;
   private final Function<Path, Home> homeFor;
+  private final Consumer<Home> remember;
 
   /** A wizard that saves into {@code home} whatever directory is chosen. */
   SettingsWizard(PrintWriter out, Platform platform, Home home) {
-    this(out, platform, dir -> home);
+    this(out, platform, dir -> home, h -> {});
   }
 
-  /** A wizard that saves into the home {@code homeFor} gives for the chosen directory. */
-  SettingsWizard(PrintWriter out, Platform platform, Function<Path, Home> homeFor) {
+  /**
+   * A wizard that saves into the home {@code homeFor} gives for the chosen directory and hands the
+   * home it saved into, or kept, to {@code remember}.
+   */
+  SettingsWizard(
+      PrintWriter out, Platform platform, Function<Path, Home> homeFor, Consumer<Home> remember) {
     this.out = Objects.requireNonNull(out, "out");
     this.platform = Objects.requireNonNull(platform, "platform");
     this.homeFor = Objects.requireNonNull(homeFor, "homeFor");
+    this.remember = Objects.requireNonNull(remember, "remember");
   }
 
   /** Runs the wizard; the saved settings, or empty when input ended before they were complete. */
@@ -63,6 +71,19 @@ final class SettingsWizard {
       return Optional.empty();
     }
     Settings s = detected.get();
+    Home target = homeFor.apply(s.installDir());
+    Optional<Settings> existing = SettingsStore.load(target);
+    if (existing.isPresent()) {
+      out.println();
+      out.println("Settings already exist for " + s.installDir() + ":");
+      SettingsCommand.print(out, target, existing.get());
+      if (!Prompter.yes(
+          out, "Settings already exist for " + s.installDir() + "; replace them? [y/N] ", false)) {
+        out.println("kept the settings in " + target.settingsFile());
+        remember.accept(target);
+        return existing;
+      }
+    }
     out.println();
     out.println("Detected for " + s.installDir() + ":");
     printKeys(s);
@@ -75,6 +96,7 @@ final class SettingsWizard {
     }
     Home home = homeFor.apply(confirmed.get().installDir());
     SettingsStore.save(home, confirmed.get());
+    remember.accept(home);
     out.println();
     out.println("settings written to " + home.settingsFile());
     SettingsCommand.print(out, home, confirmed.get());
