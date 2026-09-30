@@ -119,8 +119,6 @@ public class WarFileTest {
     assertThat(WarFile.entries(out)).isEqualTo(count);
     assertThat(WarFile.temporary(out).getFileName().toString())
         .isEqualTo("fixed.war.jrs-hotfix.tmp");
-    assertThat(WarFile.sidecar(out).getFileName().toString())
-        .isEqualTo("fixed.war.jrs-hotfix.json");
     assertThat(List.of(WarFile.identity().apply("a/b"))).containsExactly("a/b");
   }
 }

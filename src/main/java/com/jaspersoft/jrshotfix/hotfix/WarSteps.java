@@ -6,11 +6,8 @@ import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.engine.StepResult;
 import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
-import com.jaspersoft.jrshotfix.json.Json;
-import com.jaspersoft.jrshotfix.merge.MergeDoc;
 import com.jaspersoft.jrshotfix.pkg.Action;
 import com.jaspersoft.jrshotfix.pkg.FileTarget;
-import com.jaspersoft.jrshotfix.pkg.PackageContents;
 import com.jaspersoft.jrshotfix.pkg.PackagePaths;
 import com.jaspersoft.jrshotfix.platform.DiskSpace;
 import com.jaspersoft.jrshotfix.platform.Durability;
@@ -18,7 +15,6 @@ import com.jaspersoft.jrshotfix.platform.Trees;
 import com.jaspersoft.jrshotfix.war.WarFile;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -33,10 +29,10 @@ import java.util.Set;
 /**
  * The steps of an apply whose target is a WAR (0.2 design, section 7): the input WAR is never
  * modified, the hotfixed WAR is written beside the output path and renamed only once checked, and
- * the record is a sidecar file next to it, not a ledger entry (a WAR has no server to be the
- * inventory of). Invariants: every step re-checks the state on disk before it acts, so a resumed
- * run converges; the only files written outside the home are the output, its temporary name and the
- * sidecar; there is no service, no snapshot and no rollback.
+ * there is no ledger entry (a WAR has no server to be the inventory of): the output's own build
+ * file and the hotfix baseline in the home say what it carries. Invariants: every step re-checks
+ * the state on disk before it acts, so a resumed run converges; the only files written outside the
+ * home are the output and its temporary name; there is no service, no snapshot and no rollback.
  */
 final class WarSteps {
 
@@ -57,10 +53,6 @@ final class WarSteps {
 
     Path temporary() {
       return WarFile.temporary(out);
-    }
-
-    Path sidecar() {
-      return WarFile.sidecar(out);
     }
 
     String prefix() {
@@ -333,8 +325,8 @@ final class WarSteps {
   }
 
   /**
-   * Step 5: give the output its name, write the sidecar beside it, and keep the package's files as
-   * the hotfix's baseline. Compensation removes the output and the sidecar.
+   * Step 5: give the output its name and keep the package's files as the hotfix's baseline.
+   * Compensation removes the output.
    */
   static final class WriteOut implements Step {
     private final HotfixRuntime rt;
@@ -354,7 +346,7 @@ final class WarSteps {
 
     @Override
     public String title() {
-      return "write " + target.out().getFileName() + " and its record";
+      return "write " + target.out().getFileName();
     }
 
     @Override
@@ -364,8 +356,7 @@ final class WarSteps {
 
     @Override
     public String detail() {
-      return target.sidecar().getFileName()
-          + ": the package, the merge, and every file written or kept";
+      return "the hotfixed WAR, and the package's files as the hotfix's baseline";
     }
 
     @Override
@@ -383,14 +374,6 @@ final class WarSteps {
         if (Files.isRegularFile(target.temporary())) {
           Durability.move(target.temporary(), target.out(), StandardCopyOption.ATOMIC_MOVE);
         }
-        Path tmp = target.sidecar().resolveSibling(target.sidecar().getFileName() + ".tmp");
-        Files.writeString(tmp, Json.writePretty(sidecar(ctx)), StandardCharsets.UTF_8);
-        Durability.sync(tmp);
-        Durability.move(
-            tmp,
-            target.sidecar(),
-            StandardCopyOption.REPLACE_EXISTING,
-            StandardCopyOption.ATOMIC_MOVE);
         rt.baselines().addHotfix(in.packageFile(), in.contents(), target.webappName());
         Trees.deleteRecursively(in.stagingDir(ctx));
         out.emit(
@@ -404,54 +387,9 @@ final class WarSteps {
         return StepResult.ok();
       } catch (IOException | UncheckedIOException e) {
         return Failures.recoverable(
-            "cannot write the output or its record: " + e.getMessage(),
+            "cannot write the output: " + e.getMessage(),
             "check permissions beside " + target.out());
       }
-    }
-
-    /** The record beside the output: what was applied, from what, and what every file became. */
-    private Map<String, Object> sidecar(Context ctx) throws IOException {
-      PackageContents c = in.contents();
-      Map<String, Object> doc = new LinkedHashMap<>();
-      doc.put("hotfixId", c.id());
-      doc.put("title", c.title());
-      doc.put("build", c.build());
-      doc.put("packageSha256", c.sha256());
-      doc.put("input", target.war().toString());
-      doc.put("inputSha256", rt.files().sha256(target.war()));
-      doc.put("output", target.out().toString());
-      doc.put("outputSha256", rt.files().sha256(target.out()));
-      doc.put("runId", ctx.runId());
-      doc.put("writtenAt", rt.clock().instant().toString());
-      doc.put("mergeId", in.merge().map(MergeDoc::id).orElse(null));
-      doc.put("baselines", in.merge().map(MergeDoc::baselines).orElse(List.of()));
-      List<Map<String, Object>> files = new ArrayList<>();
-      for (FileTarget t : in.targets()) {
-        Optional<String> path = target.pathOf(t);
-        if (path.isEmpty()) {
-          continue;
-        }
-        Map<String, Object> f = new LinkedHashMap<>();
-        f.put("path", path.get());
-        f.put("action", t.action().name().toLowerCase(java.util.Locale.ROOT));
-        f.put("beforeSha256", t.before().orElse(null));
-        f.put("afterSha256", t.after().orElse(null));
-        f.put("vendorSha256", t.entry().packageSha256().orElse(null));
-        files.add(f);
-      }
-      doc.put("files", files);
-      List<Map<String, Object>> kept = new ArrayList<>();
-      for (PackageContents.Kept k : c.kept()) {
-        if (k.path().startsWith(target.prefix())) {
-          Map<String, Object> f = new LinkedHashMap<>();
-          f.put("path", k.path().substring(target.prefix().length()));
-          f.put("vendorSha256", k.vendorSha256());
-          f.put("reason", k.reason());
-          kept.add(f);
-        }
-      }
-      doc.put("kept", kept);
-      return doc;
     }
 
     @Override
@@ -462,7 +400,6 @@ final class WarSteps {
     @Override
     public StepResult compensate(Context ctx, EventSink out) {
       try {
-        Files.deleteIfExists(target.sidecar());
         Files.deleteIfExists(target.out());
         return StepResult.ok();
       } catch (IOException e) {

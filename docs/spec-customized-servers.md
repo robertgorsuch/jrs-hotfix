@@ -549,8 +549,15 @@ produces a hotfixed WAR and touches no server. `scan` and `merge prepare` take t
 
 There is no service, no snapshot and no rollback: the input is never modified, and the
 output is a new file. The home is `--home`, else a directory beside `--out`. The sidecar
-is what `record` reads on the server the WAR is deployed to, so that server's ledger
+was to be what `record` reads on the server the WAR is deployed to, so that server's ledger
 learns the hotfix and its merge.
+
+Removed 2026-09-30 (0.4.0): nothing ever read the sidecar, and everything it held is
+elsewhere: the output WAR's own `jasperserver-pro.properties` states the build, the hotfix
+baseline in the home holds the package's files, the merge holds the site's, and
+`runs/<runId>/plan.json` holds what every file became. `record <package.zip>` on the
+deploying server needs none of it. The output is now the one file `apply --war` writes
+outside the home.
 
 As built (2026-09-30, `WarFile`, `WarSteps`, `Bootstrap.forWar`):
 
@@ -566,9 +573,9 @@ As built (2026-09-30, `WarFile`, `WarSteps`, `Bootstrap.forWar`):
   commands must share one home. A home that has no settings gets settings written that
   name the unpacked copy as the webapp, with no service, so `baseline add` works in it.
 - No ledger entry, origin `WAR` or otherwise. The ledger is a server's inventory, one
-  entry per hotfix id; a home used for several WARs would refuse the second. The sidecar
-  is the record. `record` on the deploying server does not read it yet: it records from
-  the files as before, which gives the same hashes.
+  entry per hotfix id; a home used for several WARs would refuse the second. The run's
+  record in the home is the record (the sidecar beside the output was dropped, above);
+  `record` on the deploying server records from the files, which gives the same hashes.
 - The hotfix baseline is written by `apply --war` as by an apply on a server, so the
   output WAR, given as the next input, is compared with the hotfix's files.
 - Tested: unit (unpack, assemble, check; the commands over a site's WAR with and without a
@@ -579,7 +586,8 @@ As built (2026-09-30, `WarFile`, `WarSteps`, `Bootstrap.forWar`):
   baseline added, `scan --war --package` naming the one collision, `apply --war --out`
   in two minutes with both properties files merged automatically, the output holding
   5844 entries (5819 less 149 deleted plus 174 added, as the check step counts), the
-  site's key and the vendor's new keys in it, and a 116 KB sidecar with 448 files.
+  site's key and the vendor's new keys in it (and, until it was dropped, a 116 KB sidecar
+  with 448 files).
 
 ## 8. Commands and menu
 

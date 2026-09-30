@@ -77,7 +77,7 @@ final class ApplyCommand extends AppCommand {
   @Option(
       names = "--out",
       paramLabel = "<out.war>",
-      description = "Where the hotfixed WAR is written, with its record <out.war>.jrs-hotfix.json.")
+      description = "Where the hotfixed WAR is written.")
   Path out;
 
   @Override

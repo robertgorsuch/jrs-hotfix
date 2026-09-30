@@ -2,10 +2,8 @@ package com.jaspersoft.jrshotfix.app;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.jaspersoft.jrshotfix.baseline.Wars;
 import com.jaspersoft.jrshotfix.hotfix.SiteFixture;
-import com.jaspersoft.jrshotfix.json.Json;
 import com.jaspersoft.jrshotfix.pkg.Packages;
 import com.jaspersoft.jrshotfix.war.WarFileTest;
 import java.nio.charset.StandardCharsets;
@@ -129,15 +127,11 @@ class WarCommandsTest {
     assertThat(f.hf.sha(in)).isEqualTo(inSha);
     assertThat(out.resolveSibling(out.getFileName() + ".jrs-hotfix.tmp")).doesNotExist();
 
-    Path sidecar = out.resolveSibling(out.getFileName() + ".jrs-hotfix.json");
-    JsonNode doc = Json.mapper().readTree(Files.readString(sidecar));
-    assertThat(doc.get("hotfixId").asText()).isEqualTo(SiteFixture.HOTFIX_ID);
-    assertThat(doc.get("inputSha256").asText()).isEqualTo(inSha);
-    assertThat(doc.get("outputSha256").asText()).isEqualTo(f.hf.sha(out));
-    assertThat(doc.get("files"))
-        .anySatisfy(n -> assertThat(n.get("path").asText()).isEqualTo(Wars.WEB_XML));
-    assertThat(doc.get("kept"))
-        .anySatisfy(n -> assertThat(n.get("path").asText()).isEqualTo(Wars.CONTAINER));
+    // the output is the only file written beside the input: no record, no temporary name
+    assertThat(out.resolveSibling(out.getFileName() + ".jrs-hotfix.json")).doesNotExist();
+    // the hotfix's baseline is in the home, so the next hotfix on the output is compared with it
+    assertThat(f.run("baseline", "list")).isEqualTo(0);
+    assertThat(f.out()).contains(SiteFixture.HOTFIX_ID);
     // a WAR is not the server's inventory: nothing in the ledger
     assertThat(f.run("list")).isEqualTo(0);
     assertThat(f.out()).contains("no hotfixes recorded");

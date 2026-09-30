@@ -235,11 +235,6 @@ public final class WarFile {
     return out.resolveSibling(out.getFileName() + ".jrs-hotfix.tmp");
   }
 
-  /** The record written beside a hotfixed WAR. */
-  public static Path sidecar(Path out) {
-    return out.resolveSibling(out.getFileName() + ".jrs-hotfix.json");
-  }
-
   /** A function from a webapp path to the entry name it has in a WAR: the same string. */
   public static Function<String, String> identity() {
     return Function.identity();

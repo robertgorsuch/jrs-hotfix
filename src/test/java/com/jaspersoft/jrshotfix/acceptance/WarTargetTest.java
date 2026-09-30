@@ -85,7 +85,7 @@ class WarTargetTest {
       assertThat(result.get(Wars.QUARTZ)).contains("reports:8081").contains("new.key=1");
       assertThat(result.get(Packages.LIB + "foo-1.2.3.jar")).isEqualTo("patched foo");
       assertThat(sha(in)).as("the input WAR is never modified").isEqualTo(inSha);
-      assertThat(out.resolveSibling(out.getFileName() + ".jrs-hotfix.json")).exists();
+      assertThat(out.resolveSibling(out.getFileName() + ".jrs-hotfix.json")).doesNotExist();
       assertThat(f.pendingRunIds()).isEmpty();
       assertThat(f.tomcatRunning()).as("no server was touched").isTrue();
       // the server's ledger is not the WAR's inventory

@@ -130,8 +130,8 @@ every file the package ships is replaced, as before.
 
 `apply <package.zip> --war <in.war> --out <out.war>` does the same to a WAR
 instead of a server: no service, no snapshot; the input is never modified, the
-output is written beside its record `<out.war>.jrs-hotfix.json`, and the home
-is `jrs-hotfix` beside the WAR unless `--home` says otherwise. `scan --war` and
+output is the one file written, and the home is `jrs-hotfix` beside the WAR
+unless `--home` says otherwise. `scan --war` and
 `merge prepare --war` read the site's files from the WAR. Files of
 `js-install.zip` are not part of a WAR and are left out.
 
