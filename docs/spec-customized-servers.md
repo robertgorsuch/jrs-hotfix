@@ -1,6 +1,7 @@
 # jrs-hotfix 0.2: hotfixes on customized servers
 
-Status: draft for review, 2026-09-29. Extends `docs/spec.md` (the 0.1 design); section
+Status: draft for review, 2026-09-29; the maintainer's rulings of 2026-09-30 are folded in
+(see "Decided 2026-09-30" at the end). Extends `docs/spec.md` (the 0.1 design); section
 numbers there are cited as "spec 4.1". Source of the requirements: the hotfix flow diagram
 (vanilla check, three-way collisions, merge by file kind, library cleanup, deployed or
 zipped WAR) compared with jrs-hotfix at 56c242f.
@@ -43,6 +44,8 @@ then copy. 0.2 adds that half in front of the 0.1 apply, without weakening it.
 ## Scope
 
 - Same as spec "Scope": JRS 10.x, Tomcat, Windows and Linux, official packages only.
+- Commercial (PRO) edition only. The Community edition is disregarded: nothing here reads
+  its files, and detection (spec 2) already refuses it.
 - New: reading the installed build, a vendor baseline, a customization scan, a three-way
   merge workspace prepared before the outage, merged files carried through the existing
   swap, superseded-library cleanup, the JSP cache, and a WAR file as a target.
@@ -120,8 +123,8 @@ with no `INSTALLED` entry):
 2) is unchanged: the release still comes from the jar names, and the two must agree or
 `settings detect` says which file disagrees.
 
-Open: the Community edition's file is `jasperserver.properties` with `JS_VERSION`; where
-its build stamps live must be read from a CE install before this check is enabled for CE.
+The Community edition is out of scope (decided 2026-09-30): its file is
+`jasperserver.properties` and nothing reads it.
 
 ## 2. Baseline
 
@@ -157,9 +160,14 @@ A release baseline is keyed by build as well as by release and edition (measured
   hotfix that was applied by hand. The package must parse as in spec 4.1.
 - The `record` step of every apply (spec 4.1 step 8) writes the hotfix baseline from the
   package it just applied. From the second hotfix on, the operator supplies nothing.
-- Base for a path = the newest hotfix baseline at or below the installed build that holds
-  the path, else the release baseline. Packages are cumulative, so one hotfix baseline is
-  normally enough; older ones are kept for rollback and pruned with their ledger entry.
+- Base for a path = the hotfix baseline of the installed build when it holds the path, else
+  the release baseline. Packages are cumulative, so one hotfix baseline is enough. When the
+  installed build is a hotfix and its baseline is absent (pruned, or applied by hand), a
+  merge is refused with exit 2 and the message names `baseline add <package.zip>`: an older
+  base would show the vendor's own changes as the site's.
+- `runs prune` also removes hotfix baselines older than the newest two (decided
+  2026-09-30). Two are kept so that one rollback still finds its base. Release baselines
+  are never pruned; `baseline remove <id>` removes any of them by hand.
 - A release baseline is verified against the installation before use: at least 95 percent
   of the jars under `WEB-INF/lib` that the baseline lists must exist on disk with the same
   hash, or the baseline is refused as belonging to another release or edition.
@@ -206,9 +214,9 @@ a Windows editor is not a customization.
 | Class | Paths | How it is merged | Who resolves a collision |
 |---|---|---|---|
 | P properties | `*.properties` | by key (4.2) | automatic; keys both changed follow the conflict policy |
-| T text templates | `*.jsp`, `*.jspf`, `*.tag`, `*.tld`, `*.html`, `*.css` outside `scripts/` and `optimized-scripts/` | by line (4.3) | automatic when clean; operator when not |
+| T text templates | `*.jsp`, `*.jspf`, `*.tag`, `*.tld`, `*.html` outside `scripts/` and `optimized-scripts/` | by line (4.3) | automatic when clean; operator when not |
 | X reviewed XML | `WEB-INF/applicationContext*.xml`, `WEB-INF/web.xml`, `WEB-INF/*-servlet.xml`, `META-INF/context.xml`, other `*.xml` under `WEB-INF` | by line (4.3), then checked (4.3) | operator always confirms, clean or not |
-| G generated | `scripts/**`, `optimized-scripts/**`, `*.js`, `*.js.map`, `*.min.css` | never merged: theirs wins | nobody; a site change is reported and kept in the snapshot |
+| G generated | `scripts/**`, `optimized-scripts/**`, `*.js`, `*.js.map`, `*.css` | never merged: theirs wins | nobody; a site change is reported and kept in the snapshot |
 | B binary | `*.jar`, `*.class`, images, fonts, everything else | never merged: theirs wins | nobody; a site change is reported and kept in the snapshot |
 
 Class G is the diagram's "identify JavaScript changes and exclude them". The package
@@ -217,7 +225,10 @@ line merge of them means nothing, and a site that patched one must rebuild its p
 against the new bundle. The plan lists such files under their own heading so the operator
 sees them before the outage, and the snapshot holds the site's copy.
 
-Classes are decided by path, in the order X, P, T, G, B; the first match wins.
+Webapp CSS is class G (decided 2026-09-30): themes live in the repository, not the webapp,
+so a stylesheet under the webapp is vendor output and is replaced.
+
+Classes are decided by path, in the order X, P, G, T, B; the first match wins.
 
 ### 4.2 Properties, by key
 
@@ -358,6 +369,22 @@ jrs-hotfix merge discard <mergeId>
 of 4.3, stores the hash and marks the record `RESOLVED`. Nothing under the installation is
 touched by any `merge` command.
 
+### 4.6 External authentication
+
+The readme's external-authentication step (port the changes of
+`samples/externalAuth-sample-config` into the deployed
+`applicationContext-externalAuth-*.xml`) is the operator's: the deployed file is the site's
+own, made from a sample, and no package replaces it. The tool flags it (decided
+2026-09-30). When a deployed `WEB-INF/applicationContext-externalAuth*.xml` exists:
+
+- `scan` lists it under its own heading, "External authentication", not as `ADDED`;
+- with a package (`scan --package`, the apply plan, `merge prepare`), when the package
+  changes any file under `samples/externalAuth-sample-config`, a warning names each deployed
+  file and each sample the package changed, and says that the changes must be ported by
+  hand.
+
+It is a warning only: nothing is merged, nothing is refused.
+
 ## 5. Apply with a merge
 
 `jrs-hotfix apply <package.zip> [--merge <mergeId>]`. At a terminal, when the scan finds a
@@ -489,7 +516,7 @@ Every message names the file and the one command that moves things forward.
 |---|---|---|
 | 1 | section 1 (installed build), 4.4 (installer-written files), 5a (JSP cache), 6 with baseline-free warning | each fixes something 0.1 does wrong on every server; none needs a baseline. **Landed in v0.1.0**, except the preflight `build` table, `context.xml` kept, and the superseded warning |
 | 2 | sections 2, 3, 4, 5, full section 6 | the customized path of the diagram |
-| 3 | section 7 | the WAR target; reuses everything above |
+| 3 | section 7 | the WAR target; reuses everything above. Wanted for 0.2 (decided 2026-09-30) |
 
 ## 12. The diagram, box by box
 
@@ -509,27 +536,23 @@ Every message names the file and the one command that moves things forward.
 | Port customizations | merged files carried through staging (section 5); class G and B changes listed for the operator |
 | Propagated into the deployed or the zipped WAR | spec 4.1 for the deployed webapp; section 7 for a WAR |
 
+## Decided 2026-09-30
+
+- The Community edition is disregarded (Scope, section 1).
+- Webapp `*.css` is class G: vendor output, replaced, a site change reported (4.1).
+- `runs prune` removes hotfix baselines older than the newest two (section 2).
+- A deployed `applicationContext-externalAuth*.xml` is flagged (4.6).
+- A WAR as the target (section 7) is wanted for 0.2; it is phase 3.
+- The order of 0.2 work: the three leftovers of phase 1, then phase 2 as `baseline add` and
+  `scan` first (read-only, no outage, every later section needs them), then 4.2 and the
+  keep/replace verdicts, then the class X workspace.
+
 ## Open points
 
-- Community edition: where the build stamps live (section 1).
-- Whether `*.css` belongs in class T or G. Themes are in the repository, not the webapp,
-  so webapp CSS is mostly vendor output; class G may be the safer default.
 - Whether `merge.onConflict` should ever default to `mine` for installer-written keys
-  outside the five files of 4.4.
+  outside the five files of 4.4. Until decided it does not: the defaults of 4.2 stand.
 - The 95 percent threshold of section 2 is a guess until it has met a second server.
-- Baseline size on a server with years of hotfixes; whether `runs prune` should also
-  prune hotfix baselines older than the newest two.
-- The readme's external-authentication step (port the changes of
-  `samples/externalAuth-sample-config` into the deployed
-  `applicationContext-externalAuth-*.xml`) is covered neither by the diagram nor here. The
-  tool could notice a deployed `WEB-INF/applicationContext-externalAuth*.xml` and say which
-  sample the package changed.
-- Whether section 7 (a WAR as the target) is wanted for 0.2 at all; nobody has asked for it.
 - A readme glob that matches a jar the site added (measured 2026-09-29: `iijdbc.jar` and
   `actian-chart-customizers.jar` on the Windows server) should be flagged, not deleted,
   once a baseline can tell a site file from a vendor one; the same third condition as in
   section 6.
-- The order of 0.2 work: `baseline add` and `scan` first (read-only, no outage, every later
-  section needs them, and the test bed is ready: the pristine WAR in `Downloads` and two
-  servers), then 4.2 and the keep/replace verdicts, then the class X workspace, which is the
-  largest and least certain piece.
