@@ -107,9 +107,10 @@ final class ApplySteps {
 
   /**
    * Step 1: the package fits this installation and the host can take it. Release and edition must
-   * match the webapp, the hotfix must not be installed already, the directories written to must be
-   * writable, the home's volume must hold staging and the snapshot, the replaced files' owners must
-   * be restorable, and the service must be identifiable.
+   * match the webapp, the hotfix must not be installed already (by the ledger, or by every file
+   * being in place as the plan found them, which would be an outage that changes nothing), the
+   * directories written to must be writable, the home's volume must hold staging and the snapshot,
+   * the replaced files' owners must be restorable, and the service must be identifiable.
    */
   static final class Preflight extends ReadOnly {
     Preflight(HotfixRuntime rt, ApplyInput in) {
@@ -140,7 +141,7 @@ final class ApplySteps {
     @Override
     public CheckResult precheck(Context ctx) {
       List<String> problems = new ArrayList<>();
-      problems.addAll(HotfixPlans.applicability(rt, in.contents()));
+      problems.addAll(HotfixPlans.applicability(rt, in.contents(), in.targets()));
       for (Path dir :
           List.of(rt.settings().webappDir(), rt.settings().installDir(), rt.home().root())) {
         if (!rt.files().isWritable(dir)) {

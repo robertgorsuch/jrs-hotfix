@@ -35,6 +35,37 @@ class PreflightTest {
     }
   }
 
+  /** What an operator following the readme leaves behind: every file in place, no ledger entry. */
+  static void applyByHand(HotfixFixture f) throws Exception {
+    Files.writeString(f.target(HotfixFixture.FOO), "patched foo");
+    Files.writeString(f.target(HotfixFixture.NEW), "brand new");
+    Files.writeString(f.target(HotfixFixture.TOOL), "patched tool");
+    Files.delete(f.target(HotfixFixture.BAR));
+    Files.delete(f.target(HotfixFixture.FOO_OLDER));
+  }
+
+  @Test
+  void should_refuse_and_name_record_when_the_hotfix_was_applied_by_hand() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      applyByHand(f);
+      Plan plan = f.plan();
+      assertThat(failure(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r"))))
+          .contains(HotfixFixture.ID + " is already on this server")
+          .contains("jrs-hotfix record");
+    }
+  }
+
+  @Test
+  void should_pass_when_only_a_deletion_is_left_to_do() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      applyByHand(f);
+      Files.writeString(f.target(HotfixFixture.BAR), "bar");
+      Plan plan = f.plan();
+      assertThat(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r")))
+          .isNotInstanceOf(CheckResult.Fail.class);
+    }
+  }
+
   @Test
   void should_refuse_when_the_webapp_is_another_release() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {

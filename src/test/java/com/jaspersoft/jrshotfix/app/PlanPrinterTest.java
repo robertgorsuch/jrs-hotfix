@@ -10,6 +10,7 @@ import com.jaspersoft.jrshotfix.redact.Redactor;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -88,6 +89,30 @@ class PlanPrinterTest {
       Plan plan = f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false));
       String text = printed(f, plan);
       assertThat(text).contains("5 files: 2 restored, 1 removed, 2 put back");
+    }
+  }
+
+  @Test
+  void should_say_that_the_run_will_be_refused_when_the_hotfix_is_already_on_the_server()
+      throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      Files.writeString(f.target(HotfixFixture.FOO), "patched foo");
+      Files.writeString(f.target(HotfixFixture.NEW), "brand new");
+      Files.writeString(f.target(HotfixFixture.TOOL), "patched tool");
+      Files.delete(f.target(HotfixFixture.BAR));
+      Files.delete(f.target(HotfixFixture.FOO_OLDER));
+      String text = printed(f, f.plan());
+      assertThat(text)
+          .contains("this plan will be refused")
+          .contains("is already on this server")
+          .contains("jrs-hotfix record");
+    }
+  }
+
+  @Test
+  void should_not_speak_of_a_refusal_when_the_package_applies() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      assertThat(printed(f, f.plan())).doesNotContain("will be refused");
     }
   }
 }

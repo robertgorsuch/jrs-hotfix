@@ -106,6 +106,10 @@ public final class HotfixPlans {
     List<FileTarget> targets = FileTarget.resolve(contents, rt.paths(), rt.files());
     ApplyInput in = new ApplyInput(file, contents, rt.paths(), targets);
     List<String> warnings = new ArrayList<>();
+    // the preview runs no step, so what preflight will refuse is said here, first
+    for (String problem : applicability(rt, contents, targets)) {
+      warnings.add("this plan will be refused before anything is changed: " + problem);
+    }
     warnings.add(
         "package "
             + file.getFileName()
@@ -528,7 +532,12 @@ public final class HotfixPlans {
     } catch (IOException | UncheckedIOException e) {
       return unreadable("cannot read " + file + ": " + e.getMessage());
     }
-    List<String> problems = applicability(rt, c);
+    List<String> problems;
+    try {
+      problems = applicability(rt, c, FileTarget.resolve(c, rt.paths(), rt.files()));
+    } catch (UncheckedIOException e) {
+      return unreadable("cannot read this installation: " + e.getMessage());
+    }
     return new VerifyReport(
         true,
         c.id(),
@@ -555,9 +564,11 @@ public final class HotfixPlans {
   /**
    * Why the package does not apply here, empty when it does: the installed release must equal the
    * package's, the edition must match the webapp name, and the hotfix must not be installed
-   * already. Shared by {@code verify} and the apply plan's preflight.
+   * already, by the ledger or, when the ledger does not know it, by the files themselves. Shared by
+   * {@code verify} and the apply plan's preflight; {@code targets} are the package's files as they
+   * were on disk when the caller resolved them.
    */
-  static List<String> applicability(HotfixRuntime rt, PackageContents c) {
+  static List<String> applicability(HotfixRuntime rt, PackageContents c, List<FileTarget> targets) {
     List<String> problems = new ArrayList<>();
     String installed = JrsVersion.ofWebapp(rt.settings().webappDir()).orElse("");
     if (!installed.equals(c.release())) {
@@ -579,8 +590,25 @@ public final class HotfixPlans {
     }
     if (rt.ledger().find(c.id()).filter(e -> e.state() == HotfixState.INSTALLED).isPresent()) {
       problems.add(c.id() + " is already installed");
+    } else if (problems.isEmpty() && inPlace(targets)) {
+      problems.add(
+          c.id()
+              + " is already on this server: every file of the package is in place with the"
+              + " package's content and nothing is left to delete, but the ledger does not list"
+              + " it as installed; it was applied by hand or by another tool, so run `jrs-hotfix"
+              + " record <package.zip>` and the ledger will know it");
     }
     return problems;
+  }
+
+  /**
+   * True when applying would change nothing: every add and replace is on disk at the hash the
+   * package would leave there, and no deletion is left. An empty list is not "in place".
+   */
+  static boolean inPlace(List<FileTarget> targets) {
+    return !targets.isEmpty()
+        && targets.stream()
+            .allMatch(t -> t.action() != Action.DELETE && t.before().equals(t.after()));
   }
 
   /** Every ledger entry, installed and rolled back alike, in install order. */
