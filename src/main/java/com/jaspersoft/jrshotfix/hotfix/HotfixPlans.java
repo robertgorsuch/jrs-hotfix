@@ -122,7 +122,7 @@ public final class HotfixPlans {
       }
       return new ApplyArgs(packageFile, checksumConfirmed);
     }
-    MergeDoc doc = prepareMerge(packageFile, asked, fallback, true);
+    MergeDoc doc = prepareMerge(resolution.view().get(), packageFile, asked, fallback, true);
     if (!doc.blocking().isEmpty()) {
       throw MergePlans.blocked(doc);
     }
@@ -147,6 +147,15 @@ public final class HotfixPlans {
                 () ->
                     new HotfixException(
                         HotfixException.PRECHECK, resolution.problem(), resolution.remediation()));
+    return prepareMerge(view, packageFile, asked, fallback, reuse);
+  }
+
+  private MergeDoc prepareMerge(
+      BaseView view,
+      Path packageFile,
+      Optional<MergeWorkspace.OnConflict> asked,
+      MergeWorkspace.OnConflict fallback,
+      boolean reuse) {
     Path file = packageFile.toAbsolutePath().normalize();
     PackageContents contents = readPackage(file);
     MergePlans merges = new MergePlans(rt);
@@ -694,7 +703,34 @@ public final class HotfixPlans {
         paths(c.adds()),
         paths(c.replaces()),
         paths(c.deletes()),
-        notes(c, buildWarnings(rt, c)));
+        notes(c, asApplied(c)));
+  }
+
+  /**
+   * What is said about a package beyond its own notes: what the build the webapp states implies,
+   * and, when the hotfix is installed, which of its files were merged with this site's or left as
+   * the site has them. A merged file that still has the hash the apply wrote is as it should be,
+   * not a mismatch with the package.
+   */
+  private List<String> asApplied(PackageContents c) {
+    List<String> out = new ArrayList<>(buildWarnings(rt, c));
+    Optional<LedgerEntry> entry =
+        rt.ledger().find(c.id()).filter(e -> e.state() == HotfixState.INSTALLED);
+    if (entry.isEmpty()) {
+      return out;
+    }
+    for (OwnedFile f : entry.get().files()) {
+      if (f.wasMerged()) {
+        out.add(
+            FileTarget.hashOf(rt.files(), f.path()).equals(f.afterSha256())
+                ? f.path() + ": merged by jrs-hotfix with this site's file"
+                : f.path() + ": merged by jrs-hotfix, and changed since");
+      }
+    }
+    for (LedgerEntry.KeptFile k : entry.get().kept()) {
+      out.add(k.path() + ": kept as the site has it (" + k.reason() + ")");
+    }
+    return out;
   }
 
   private static List<String> notes(PackageContents c, List<String> warnings) {

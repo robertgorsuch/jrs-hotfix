@@ -573,7 +573,7 @@ Every message names the file and the one command that moves things forward.
 | Phase | Contents | Why first |
 |---|---|---|
 | 1 | section 1 (installed build), 4.4 (installer-written files), 5a (JSP cache), 6 with baseline-free warning | each fixes something 0.1 does wrong on every server; none needs a baseline. **Landed in v0.1.0**; the preflight `build` table, `context.xml` kept, and the superseded warning landed after it, on 2026-09-30 |
-| 2 | sections 2, 3, 4, 5, full section 6 | the customized path of the diagram |
+| 2 | sections 2, 3, 4, 5, full section 6 | the customized path of the diagram. **Landed 2026-09-30**; where it differs from the text above, section 13 says how and why |
 | 3 | section 7 | the WAR target; reuses everything above. Wanted for 0.2 (decided 2026-09-30) |
 
 ## 12. The diagram, box by box
@@ -594,6 +594,99 @@ Every message names the file and the one command that moves things forward.
 | Port customizations | merged files carried through staging (section 5); class G and B changes listed for the operator |
 | Propagated into the deployed or the zipped WAR | spec 4.1 for the deployed webapp; section 7 for a WAR |
 
+## 13. Phase 2 as built
+
+Built on 2026-09-30 in the design's order: baseline and scan, then the merge by key and the
+keep and replace verdicts, then the workspace. The sections above stay as designed; these are
+the places where the implementation differs, each with its reason.
+
+**The merge document decides everything, not only collisions.** `merge.json` holds one
+record for every file the package ships under the webapp, with the hash the server's file
+had when the merge was prepared, and three more states than 4.5 lists: `PLAIN` (the
+package's copy lands, nothing of the site's is lost), `KEPT` (only the site changed it, or
+the installer wrote it: not written) and `OVERWRITTEN` (a class G or B file both changed:
+the package's copy lands). An apply on a server with a baseline always runs with a merge,
+and its plan is built from the package and `merge.json` alone, never from the baseline
+again. The reason is recovery: a plan is rebuilt from its stored arguments in the middle of
+a run, when some files are already swapped and the webapp states the new build. A plan that
+asked the baseline again at that point would judge the swapped files as site changes. With
+the decisions recorded, the rebuilt plan is the plan that was started, and the preflight
+rule of section 5 ("every file on disk still has the `mine` hash") becomes: every file is
+as the merge found it, or already as the apply leaves it.
+
+**`apply` prepares the merge itself.** Without `--merge`, `apply` uses the newest merge
+that is still valid (same package, same baselines, every file as it found it) and prepares
+one otherwise, so a server where no file collides needs no extra command, and a second
+attempt meets the merge the operator has been resolving. `apply --plan` therefore writes a
+workspace under the home; it still changes nothing on the server. While a record is
+`CONFLICT` or `REVIEW`, `apply` exits 2 and names the merge and the three commands. The
+terminal does not "offer to prepare": there is nothing to ask.
+
+**Kept files are not rows of `files`.** The ledger entry gains `mergeId`, `baselines` and
+`kept` (path, the vendor's hash, the reason); a file of `files` gains `vendorSha256` when
+what was written is a merge. There is no action `keep`: every row of `files` is something a
+rollback restores, and a kept file was never touched.
+
+**The hotfix baseline outlives a rollback.** The build the webapp states selects the base,
+so the baseline of a rolled-back hotfix is unused, not wrong, and the step that would
+remove it would need a compensation that writes it back. `runs prune` removes hotfix
+baselines older than the newest two, and always keeps the one of the build the webapp
+states. `record` writes the hotfix baseline too, so a hotfix applied by hand and then
+recorded is the vendor's level for the next merge. In an apply the baseline is written by
+the stage step, not the record step: staging reads the package before the outage anyway,
+and a record step that failed on a missing package, with the service up again, would roll
+a good apply back. The record step finds the baseline there; if it has to write it and
+cannot, it says so and does not fail.
+
+**Baselines that do not fit refuse the apply.** When a release baseline exists and the
+build the webapp states has no baseline (a hotfix applied by hand, or by 0.1), `apply` is
+refused with exit 2 and names `baseline add <package.zip>` and `baseline remove`. The
+design's "behaves as 0.1" holds only when there is no release baseline at all: an operator
+who added one expects the site's files to be compared, and replacing them silently is the
+unsafe reading.
+
+**The installer's files under a merge.** A properties file the installer wrote is merged by
+key with the base, the site's value standing in a conflict and nothing said in the file,
+exactly as 0.1 merged it without a base; the gain is that a key only the vendor changed now
+takes the vendor's value. This settles the first open point for these files and leaves it
+open for every other file. The heading over carried keys stays the fixed one of 0.1, not
+"re-applied by jrs-hotfix <runId>": a line that changed with every run would make the
+merged file differ from itself.
+
+**`--on-conflict` is for properties keys.** `mine` and `theirs` settle a key both changed
+and write the other value above it as a comment. A line both changed in a page or an XML
+file always waits for the operator. `fail` prepares the same workspace as `ask` and makes
+`merge prepare` exit 2.
+
+**Neighbouring lines conflict.** The line merge treats changes on adjacent lines as one
+place, as git does. Two edits need an unchanged line between them to merge cleanly.
+
+**A readme pattern never deletes the site's file.** The last open point is closed for
+patterns: a file a readme glob matches is deleted only when a baseline or a ledger entry
+knows it; otherwise it gets a `KEPT` record and a note in the plan. A path the readme lists
+by name is deleted as before.
+
+**Not built.** `--keep-superseded` and the `delete (superseded)` action (section 6 is
+report-only), and `--war` (section 7, phase 3). `verify` reports merged and kept files of
+an installed hotfix from the ledger; it does not yet compare every owned file with the
+disk.
+
+**Menu.** Eight entries: "Check the server for customizations" is entry 4 and runs `scan`;
+when there is no baseline it asks for the WAR and adds it. Recovery moved from entry 6 to 7.
+
+**Tests.** Unit: the 4.2 table row by row, the three styles, continuation lines, escaped
+separators and ISO-8859-1 bytes; diff3 on clean, overlapping, identical, empty and random
+inputs; the XML checks; path classes; the workspace and its states; the apply plan with a
+merge, its rebuild after the swap, and a second cumulative hotfix over the first.
+Acceptance, through the shaded jar (`CustomizedServerTest`): scenarios 10 to 18, a run
+killed after staging and resumed with the merged files, and a file edited between `merge
+prepare` and `apply`. Scenario 19 is phase 3.
+
+**Live.** Read-only so far: `baseline add` from the real WAR and the real package, and
+`scan`, against the JRS 10.0.0 PRO on this machine with a scratch home (section 3). The
+live sequence of section 10 (re-create the `web.xml` edits, merge, apply, roll back) has
+not been run.
+
 ## Decided 2026-09-30
 
 - The Community edition is disregarded (Scope, section 1).
@@ -609,8 +702,7 @@ Every message names the file and the one command that moves things forward.
 
 - Whether `merge.onConflict` should ever default to `mine` for installer-written keys
   outside the five files of 4.4. Until decided it does not: the defaults of 4.2 stand.
+  (Inside those files the site's value stands, as in 0.1; section 13.)
 - The 95 percent threshold of section 2 is a guess until it has met a second server.
-- A readme glob that matches a jar the site added (measured 2026-09-29: `iijdbc.jar` and
-  `actian-chart-customizers.jar` on the Windows server) should be flagged, not deleted,
-  once a baseline can tell a site file from a vendor one; the same third condition as in
-  section 6.
+- Whether a class G or B file both changed should be resolvable with `--mine`. Today the
+  package's copy always wins and the plan lists the file.

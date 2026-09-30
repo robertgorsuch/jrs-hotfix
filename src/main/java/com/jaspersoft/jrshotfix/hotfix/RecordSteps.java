@@ -28,9 +28,10 @@ import java.util.Optional;
  * The record phase of the apply plan: the ledger entry that makes the hotfix visible to {@code
  * list} and to a later rollback. Invariants: the entry is written only after the swap has verified
  * what it landed, so nothing is recorded as installed that is not; its before-hashes come from the
- * run's own snapshot, so they are what a rollback restores; the package's files are written as the
- * hotfix's baseline, which a rollback leaves alone (the build the webapp states selects the base,
- * so an unused one does no harm); audit lines go to the run's event stream, not to the ledger.
+ * run's own snapshot, so they are what a rollback restores; the package's files are the hotfix's
+ * baseline from staging on, which a rollback leaves alone (the build the webapp states selects the
+ * base, so an unused one does no harm), and a baseline that cannot be written never fails this
+ * step; audit lines go to the run's event stream, not to the ledger.
  */
 final class RecordSteps {
 
@@ -87,12 +88,24 @@ final class RecordSteps {
       }
       try {
         // what this package ships is the vendor's level from now on: the base of the next merge.
-        // Before the ledger entry, so a failure here leaves nothing recorded as installed.
+        // Staging wrote it before the outage, so this finds it there and reads nothing; a run
+        // staged by an older jrs-hotfix writes it now. The server is up again by this step, so a
+        // failure is said and not made the run's: undoing a good apply for it would be worse.
         rt.baselines().addHotfix(in.packageFile(), c, rt.settings().webappName());
       } catch (IOException | RuntimeException e) {
-        return Failures.recoverable(
-            "cannot write the baseline of " + id + ": " + Failures.describe(e),
-            "check free space and permissions under " + rt.home().baselines());
+        out.emit(
+            new Event.Log(
+                rt.clock().instant(),
+                ctx.runId(),
+                Optional.of(id()),
+                phase(),
+                Event.Log.Level.WARN,
+                "the baseline of "
+                    + id
+                    + " could not be written ("
+                    + Failures.describe(e)
+                    + "); add it with `jrs-hotfix baseline add <package.zip>` before the next"
+                    + " hotfix"));
       }
       Optional<LedgerEntry> existing = ledger.find(id);
       if (existing.isPresent()) {

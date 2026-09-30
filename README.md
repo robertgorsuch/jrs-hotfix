@@ -21,9 +21,15 @@ about to run, so using the menu also teaches the scripted form.
 
 ```
 jrs-hotfix                                   menu at a terminal; usage otherwise
-jrs-hotfix apply <package.zip> [--plan] [--yes]
+jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--plan] [--yes]
 jrs-hotfix rollback <id> [--cascade] [--plan] [--yes]
 jrs-hotfix verify <package.zip>
+jrs-hotfix scan [--package <package.zip>]
+jrs-hotfix baseline [list | add <war | dir | package.zip> | remove <id>]
+jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] | status [<mergeId>]
+                  | show <mergeId> <path> | edit <mergeId> <path>
+                  | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
+                  | discard <mergeId>]
 jrs-hotfix list
 jrs-hotfix record <package.zip>
 jrs-hotfix runs [list | show <id> | resume <id> | rollback <id> | prune --older-than <days> [--include-failed]]
@@ -107,7 +113,8 @@ in it can be carried over by hand.
 
 Every other `.xml` and `.properties` file the package ships is replaced, and
 the plan names the ones in the webapp: settings you changed in them must be
-applied again.
+applied again. That is so on a server without a baseline; with one, see
+"Customized servers" below.
 
 ## Customized servers
 
@@ -140,6 +147,71 @@ either way, 2 when there is no baseline that fits this installation.
 `jrs-hotfix scan --package <package.zip>` adds what the package would meet:
 for each file it ships, whether only the vendor changed it (replaced), only the
 site (kept), or both (a collision).
+
+### Applying a hotfix to a customized server
+
+With a baseline that fits, `apply` no longer replaces what the site changed. It
+first prepares a merge (or you prepare one ahead of the outage with `jrs-hotfix
+merge prepare <package.zip>`), which decides every file the package ships under
+the webapp:
+
+| The file | What happens |
+|---|---|
+| only the vendor changed it, or it is new | the package's copy lands |
+| only the site changed it | it is kept: not written, not snapshotted, listed in the ledger as kept |
+| both changed a properties file | merged by key: the vendor's value where only the vendor changed a key, the site's where only the site did |
+| both changed a page (`.jsp`, `.tag`, `.html`) | merged by line |
+| both changed an XML file under `WEB-INF` | merged by line, then checked, and always confirmed by you |
+| both changed a script, a stylesheet or a binary file | the package's copy lands; the plan lists the file so that you carry the change over by hand |
+| the installer wrote it (section Settings files) | properties keep this server's values; `context.xml` and the `*-jdbc.xml` files stay |
+| the site added it and a pattern of the readme would delete it | it stays: only a file a baseline or an earlier hotfix knows is the vendor's leftover |
+
+A key, or a line, that both sides changed differently is a conflict. For a
+properties key the rule is `--on-conflict` (or the setting `merge.onConflict`):
+`ask` leaves the file for you, `mine` and `theirs` take one side and write the
+other beside it as a comment, `fail` is `ask` with exit 2. The default is `ask`
+at a terminal and `fail` otherwise: neither side wins silently. Two changes on
+neighbouring lines of a page or an XML file count as a conflict too.
+
+While a file waits for you, `apply` refuses with exit 2 and nothing on the
+server is touched. The workspace is `merges/<mergeId>/` in the home:
+
+```
+jrs-hotfix merge status <mergeId>            every file and its state; exit 0 when none waits
+jrs-hotfix merge show <mergeId> <path>       what the site changed, what the hotfix changed
+jrs-hotfix merge resolve <mergeId> <path> --merged [<file>]   install the merged text
+jrs-hotfix merge resolve <mergeId> <path> --mine | --theirs   keep the server's file, or take the hotfix's
+jrs-hotfix merge edit <mergeId> <path>       run the tool of the setting merge.tool, then resolve
+jrs-hotfix apply <package.zip> --merge <mergeId>
+```
+
+`--merged` takes the workspace's `files/<path>/merged`, which you edit with
+your own editor, or the file you name. It is refused while it holds a conflict
+marker, and an XML file must be well-formed, define no bean, filter, servlet or
+listener twice, and neither bring back a bean the site removed nor lose one the
+site added. `merge.tool` is a command line with `{base}`, `{mine}`, `{theirs}`
+and `{merged}`, for example `code --wait --merge {mine} {theirs} {base}
+{merged}`.
+
+The merged files are staged, swapped, snapshotted and rolled back like every
+other file, so a rollback brings the site's files back byte for byte. The plan
+is built from the package and the merge alone: a file edited on the server
+after the merge was prepared stops the apply (exit 2, "changed since the merge
+was prepared"), and a run that was interrupted resumes with the same merged
+files. `jrs-hotfix verify <package.zip>` on an installed hotfix says which
+files were merged and which were kept.
+
+Every apply writes the package's files as the hotfix's baseline, so the next
+hotfix is compared with them and you supply nothing. `jrs-hotfix runs prune`
+removes hotfix baselines older than the newest two and merges no installed
+hotfix was applied with.
+
+Without a baseline nothing of this applies: the package is applied as before,
+every file it ships is replaced, and only the installer-written files are
+spared. With baselines that do not fit the build the webapp states (a hotfix
+applied by hand whose package was never added), `apply` is refused with exit 2
+rather than run blind; add that package with `jrs-hotfix baseline add`, or
+remove the baselines.
 
 ## Rollback
 
@@ -214,6 +286,11 @@ snapshots/<runId>/snapshot/manifest.json              apply: the files before th
 snapshots/<runId>/snapshot/payload/...                replaced and deleted files, at their relative paths
 snapshots/<rollbackRunId>/pre-rollback-<id>/manifest.json   rollback: the files before the rollback
 snapshots/<rollbackRunId>/pre-rollback-<id>/payload/...
+baselines/<id>/manifest.json  the vendor's files: a hash for every file of a release's WAR or of a hotfix
+baselines/<id>/payload/...    the content of the mergeable ones (settings, XML, pages)
+merges/<mergeId>/merge.json   a prepared merge: what an apply does with every file the package ships
+merges/<mergeId>/report.txt   the same, as `merge status` prints it
+merges/<mergeId>/files/<path>/base|mine|theirs|merged   the three sides of a file that needed a merge, and the result
 ```
 
 ## Settings
@@ -232,6 +309,8 @@ snapshots/<rollbackRunId>/pre-rollback-<id>/payload/...
 | `service.stopTimeoutSeconds` | how long a stop may take | 180 |
 | `service.forceStopAfterSeconds` | end the JVM if the script outlives this (scripts only, off when absent) | absent |
 | `baseUrl` | used only by the wait-for-server probe | `http://localhost:<port from server.xml>/<webappName>` |
+| `merge.onConflict` | a properties key both the site and a hotfix changed: `ask`, `mine`, `theirs`, `fail` | absent: `ask` at a terminal, `fail` otherwise |
+| `merge.tool` | the command `merge edit` runs, with `{base}`, `{mine}`, `{theirs}`, `{merged}` | absent |
 
 ## Build
 

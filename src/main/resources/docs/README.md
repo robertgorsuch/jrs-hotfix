@@ -21,9 +21,15 @@ about to run, so using the menu also teaches the scripted form.
 
 ```
 jrs-hotfix                                   menu at a terminal; usage otherwise
-jrs-hotfix apply <package.zip> [--plan] [--yes]
+jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--plan] [--yes]
 jrs-hotfix rollback <id> [--cascade] [--plan] [--yes]
 jrs-hotfix verify <package.zip>
+jrs-hotfix scan [--package <package.zip>]
+jrs-hotfix baseline [list | add <war | dir | package.zip> | remove <id>]
+jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] | status [<mergeId>]
+                  | show <mergeId> <path> | edit <mergeId> <path>
+                  | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
+                  | discard <mergeId>]
 jrs-hotfix list
 jrs-hotfix record <package.zip>
 jrs-hotfix runs [list | show <id> | resume <id> | rollback <id> | prune --older-than <days> [--include-failed]]
@@ -39,25 +45,75 @@ would otherwise be needed.
 
 ## What apply does
 
-1. preflight - the installed release and edition match the readme; there is free
-   space for staging and the snapshot; the webapp and install tree are writable;
-   no run is pending; an add whose target already exists on disk becomes a
-   replace.
+1. preflight - the installed release and edition match the readme; the hotfix
+   is not on the server already, by the ledger, by the build the webapp states
+   or by its files; there is free space for staging and the snapshot; the
+   webapp and install tree are writable; no run is pending.
 2. snapshot - copy every file the package will replace or delete into
    `snapshots/<runId>`, with hashes.
-3. stage - extract the payload into `runs/<runId>/staging` and hash every file.
+3. stage - extract the payload into `runs/<runId>/staging`, put the merged
+   files in the place of the package's copies, and hash every file.
 4. stop - stop the service and wait for its JVM to end within the timeout;
    force-stop only when configured.
 5. swap - move each staged file into place (replace, add) or into the snapshot
    (delete); skip a file already at the target hash; refuse if any target is
    still locked.
-6. start - start the service, the companion database first when the host has
+6. clear the JSP cache - remove `<tomcatDir>/work/Catalina/localhost/<webappName>`,
+   as the vendor's readme requires.
+7. start - start the service, the companion database first when the host has
    one.
-7. wait - poll for the server to answer, capped.
-8. record - write the ledger entry `INSTALLED` with the file list; remove the
-   staging directory.
+8. wait - poll for the server to answer, capped.
+9. record - write the ledger entry `INSTALLED` with the file list, and the
+   package's files as the hotfix's baseline; remove the staging directory.
 
 The service is always stopped for the swap.
+
+The installer's files keep this server's values: `js.quartz.properties`,
+`js.jdbc.properties`, `hibernate.properties` and `keystore.init.properties`
+are merged by key, and `META-INF/context.xml` and `META-INF/*-jdbc.xml` are
+never replaced.
+
+## Customized servers
+
+Give jrs-hotfix the vendor's own files and it keeps what this site changed:
+
+```
+jrs-hotfix baseline add <jasperserver-pro.war>   the WAR the server was installed from
+jrs-hotfix baseline add <package.zip>            a hotfix applied before there was a baseline
+jrs-hotfix scan                                  vanilla, or customized: what differs
+jrs-hotfix scan --package <package.zip>          where the site and a hotfix changed the same file
+```
+
+With a baseline, `apply` compares every file the package ships under the
+webapp with the vendor's and the server's:
+
+- only the vendor changed it: replaced;
+- only the site changed it: kept;
+- both changed a properties file: merged by key;
+- both changed a page or an XML file under `WEB-INF`: merged by line; an XML
+  file is always confirmed by you;
+- both changed a script, a stylesheet or a binary file: replaced, and listed
+  in the plan so that you carry the change over by hand.
+
+A key or a line both changed differently waits for you, and `apply` refuses
+with exit 2 until it is resolved. Nothing on the server is touched meanwhile:
+
+```
+jrs-hotfix merge prepare <package.zip>       do the comparing ahead of the outage
+jrs-hotfix merge status <mergeId>            every file and its state; exit 0 when none waits
+jrs-hotfix merge show <mergeId> <path>       what the site changed, what the hotfix changed
+jrs-hotfix merge resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
+jrs-hotfix apply <package.zip> --merge <mergeId>
+```
+
+`--merged` installs `merges/<mergeId>/files/<path>/merged` from the home, which
+you edit, or the file you name; it is refused while a conflict marker is left
+in it or an XML file fails its checks. `--on-conflict ask|mine|theirs|fail`
+says what happens to a properties key both changed; the default is `ask` at a
+terminal and `fail` otherwise.
+
+A rollback brings the site's files back byte for byte. Without a baseline
+every file the package ships is replaced, as before.
 
 ## Rollback
 
@@ -66,9 +122,10 @@ back, files the hotfix added are removed, and files it deleted are restored.
 Rollback is last-in-first-out: if a newer installed hotfix owns any of the same
 files, rollback is refused with the blocking ids unless `--cascade` is given,
 which rolls the blocking hotfixes back newest first, then the one asked for.
-Restore is per file and idempotent, so a crash mid-restore resumes cleanly. An
-entry with state `RECORDED` (a hotfix applied by hand) has no snapshot and cannot
-be rolled back by this tool.
+Restore is per file and idempotent, so a crash mid-restore resumes cleanly. The
+JSP cache is removed after the restore, as it is after a swap. An entry that
+was recorded (a hotfix applied by hand) has no snapshot and cannot be rolled
+back by this tool.
 
 ## Manual steps
 
@@ -129,6 +186,11 @@ snapshots/<runId>/snapshot/manifest.json              apply: the files before th
 snapshots/<runId>/snapshot/payload/...                replaced and deleted files, at their relative paths
 snapshots/<rollbackRunId>/pre-rollback-<id>/manifest.json   rollback: the files before the rollback
 snapshots/<rollbackRunId>/pre-rollback-<id>/payload/...
+baselines/<id>/manifest.json  the vendor's files: a hash for every file of a release's WAR or of a hotfix
+baselines/<id>/payload/...    the content of the mergeable ones (settings, XML, pages)
+merges/<mergeId>/merge.json   a prepared merge: what an apply does with every file the package ships
+merges/<mergeId>/report.txt   the same, as `merge status` prints it
+merges/<mergeId>/files/<path>/base|mine|theirs|merged   the three sides of a file that needed a merge, and the result
 ```
 
 ## Settings
@@ -147,3 +209,5 @@ snapshots/<rollbackRunId>/pre-rollback-<id>/payload/...
 | `service.stopTimeoutSeconds` | how long a stop may take | 180 |
 | `service.forceStopAfterSeconds` | end the JVM if the script outlives this (scripts only, off when absent) | absent |
 | `baseUrl` | used only by the wait-for-server probe | `http://localhost:<port from server.xml>/<webappName>` |
+| `merge.onConflict` | a properties key both the site and a hotfix changed: `ask`, `mine`, `theirs`, `fail` | absent: `ask` at a terminal, `fail` otherwise |
+| `merge.tool` | the command `merge edit` runs, with `{base}`, `{mine}`, `{theirs}`, `{merged}` | absent |

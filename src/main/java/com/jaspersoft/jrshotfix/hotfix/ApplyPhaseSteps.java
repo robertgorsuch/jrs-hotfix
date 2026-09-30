@@ -36,7 +36,8 @@ final class ApplyPhaseSteps {
 
   /**
    * Step 3: extract the payload into the run's staging directory, put the merged file in the place
-   * of a settings file this server has values of its own in, and verify every hash.
+   * of a settings file this server has values of its own in, and verify every hash. The package's
+   * files are also written as the hotfix's baseline here, before the outage.
    */
   static final class StageFiles extends ApplySteps.ReadOnly {
     /**
@@ -94,6 +95,9 @@ final class ApplyPhaseSteps {
             wanted.put(t.packagePath(), t);
           }
         }
+        // the package's files as the hotfix's baseline, while the package is being read anyway and
+        // the service is still up: the record step then needs the package no more
+        rt.baselines().addHotfix(in.packageFile(), in.contents(), rt.settings().webappName());
         if (wanted.isEmpty()) {
           return StepResult.ok();
         }
