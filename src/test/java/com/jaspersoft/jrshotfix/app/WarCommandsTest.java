@@ -55,6 +55,12 @@ class WarCommandsTest {
 
   /** The hotfix of {@link SiteFixture}, with an installation-tree file beside the webapp's. */
   private Path hotfix() throws Exception {
+    // built once: a zip built again a second later has other entry times and another hash, and
+    // a merge prepared for the first is "for another package" (a CI failure of 2026-09-30)
+    Path file = tmp.resolve("dl/hotfix-war.zip");
+    if (Files.isRegularFile(file)) {
+      return file;
+    }
     Map<String, byte[]> outer = new LinkedHashMap<>();
     outer.put("readme.txt", Packages.OUTER_README.getBytes(StandardCharsets.UTF_8));
     outer.put(
@@ -63,7 +69,7 @@ class WarCommandsTest {
             SiteFixture.hotfixPayload(), "Deleted files:\n" + Packages.LIB + "bar-0.9.jar\n"));
     outer.put(
         "js-install.zip", Packages.zipBytes(Map.of("buildomatic/lib/tool-2.0.jar", "tool"), null));
-    return Packages.zip(tmp.resolve("dl/hotfix-war.zip"), outer);
+    return Packages.zip(file, outer);
   }
 
   private static String mergeId(String text) {
