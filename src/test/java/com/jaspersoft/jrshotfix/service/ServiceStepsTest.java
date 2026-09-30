@@ -80,6 +80,52 @@ class ServiceStepsTest {
     assertThat(c.state()).isEqualTo(ServiceController.State.RUNNING);
   }
 
+  /** The stop step of the apply phase over {@code c}, with a server that answers as {@code up}. */
+  private Step stopStep(FakeServiceController c, boolean up) {
+    ServerProbe probe = () -> up ? Optional.empty() : Optional.of("connection refused");
+    return ServiceSteps.stop(runtime(c, probe), "apply", ServiceSteps.STOP);
+  }
+
+  @Test
+  void should_start_the_service_again_when_its_jvm_ends_after_a_timed_out_stop() {
+    // 2026-09-29, Linux laptop: the JVM outlived the stop timeout, the compensation saw it
+    // "running" and left it, and it ended on its own; the server stayed down after a rollback
+    FakeServiceController c = new FakeServiceController(ServiceController.State.RUNNING);
+    c.hangOnStop(1);
+    Step stop = stopStep(c, false);
+    assertThat(stop.execute(ctx(), EventSink.discard())).isInstanceOf(StepResult.Failed.class);
+    assertThat(c.state()).isEqualTo(ServiceController.State.RUNNING);
+    assertThat(stop.compensate(ctx(), EventSink.discard())).isInstanceOf(StepResult.Ok.class);
+    assertThat(c.calls()).containsExactly("stop", "stop", "start");
+    assertThat(c.state()).isEqualTo(ServiceController.State.RUNNING);
+  }
+
+  @Test
+  void should_leave_the_service_alone_when_it_still_answers_after_a_refused_stop() {
+    FakeServiceController c = new FakeServiceController(ServiceController.State.RUNNING);
+    c.hangOnStop(1);
+    Step stop = stopStep(c, true);
+    assertThat(stop.execute(ctx(), EventSink.discard())).isInstanceOf(StepResult.Failed.class);
+    assertThat(stop.compensate(ctx(), EventSink.discard())).isInstanceOf(StepResult.Ok.class);
+    // answering: nothing to wait for and nothing to start
+    assertThat(c.calls()).containsExactly("stop");
+  }
+
+  @Test
+  void should_fail_the_compensation_when_the_jvm_never_ends_after_the_stop() {
+    FakeServiceController c = new FakeServiceController(ServiceController.State.RUNNING);
+    c.hangOnStop(10);
+    Step stop = stopStep(c, false);
+    assertThat(stop.execute(ctx(), EventSink.discard())).isInstanceOf(StepResult.Failed.class);
+    StepResult undo = stop.compensate(ctx(), EventSink.discard());
+    assertThat(undo).isInstanceOf(StepResult.Failed.class);
+    assertThat(((StepResult.Failed) undo).failure().cause())
+        .contains("asked to stop")
+        .contains("has not ended");
+    assertThat(((StepResult.Failed) undo).failure().nextAction()).contains("forceStopAfterSeconds");
+    assertThat(c.calls()).doesNotContain("start");
+  }
+
   /**
    * A probe that records the patience it is given and answers from {@code answers}, in order, the
    * last one for ever.

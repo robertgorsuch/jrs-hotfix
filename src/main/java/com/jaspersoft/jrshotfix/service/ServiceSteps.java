@@ -48,6 +48,9 @@ public final class ServiceSteps {
   public static final String WAIT = "wait-for-server";
   public static final Duration WAIT_CAP = Duration.ofMinutes(10);
 
+  /** How long the undo of a stop lets one request wait to tell a live server from an ending JVM. */
+  static final Duration ENDING_JVM_PATIENCE = Duration.ofSeconds(30);
+
   /** The platform refused the service command outright; waiting would not have helped. */
   public static final String RIGHTS_REMEDIATION =
       "run jrs-hotfix with the rights the service manager demands (see the message), then"
@@ -307,6 +310,35 @@ public final class ServiceSteps {
             Event.Log.Level.INFO,
             "service was not stopped by this run; leaving it as is");
         return StepResult.ok();
+      }
+      // A stop that timed out leaves a JVM that is still ending, or one that never will. Started
+      // now, "start" would see it running and leave it, and the server would be down once it
+      // ended (Linux laptop, 2026-09-29). A service that answers was never taken down and is
+      // left alone; one that does not answer is waited for once more, then started.
+      ServiceController.State now;
+      try {
+        now = rt.controller().state();
+      } catch (RuntimeException e) {
+        return recoverable("cannot query the service: " + describe(e), CONFIG_REMEDIATION);
+      }
+      if (now != ServiceController.State.STOPPED
+          && rt.probe().problem(ENDING_JVM_PATIENCE).isPresent()) {
+        log(
+            rt,
+            ctx,
+            out,
+            this,
+            Event.Log.Level.INFO,
+            "the service was asked to stop and its process is still there; waiting for it to end"
+                + " before starting it again");
+        StepResult ended = stop(rt, ctx.cancel()::isCancelled);
+        if (!(ended instanceof StepResult.Ok)) {
+          return recoverable(
+              "the service was asked to stop and its process has not ended after twice the stop"
+                  + " timeout, so it cannot be started again; it is not answering",
+              "end the process by hand and start the service, or set"
+                  + " service.forceStopAfterSeconds and run again");
+        }
       }
       StepResult result = start(rt, ctx.cancel()::isCancelled);
       if (result instanceof StepResult.Ok) {

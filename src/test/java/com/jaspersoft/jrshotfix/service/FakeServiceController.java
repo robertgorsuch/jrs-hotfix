@@ -46,6 +46,16 @@ public final class FakeServiceController implements ServiceController {
     this.stopThrowsAfterStopping = false;
   }
 
+  private int hangingStops;
+
+  /**
+   * The next {@code n} stops leave the service RUNNING, as a JVM that does not end after the
+   * vendor's stop script; later stops end it.
+   */
+  public void hangOnStop(int n) {
+    this.hangingStops = n;
+  }
+
   @Override
   public State state() {
     return state;
@@ -57,6 +67,10 @@ public final class FakeServiceController implements ServiceController {
     if (refuse) {
       throw new ServiceControlException(
           List.of("systemctl", "stop", "jasperserver"), 1, "Access denied");
+    }
+    if (hangingStops > 0) {
+      hangingStops--;
+      return state;
     }
     state = State.STOPPED;
     if (stopThrowsAfterStopping) {
