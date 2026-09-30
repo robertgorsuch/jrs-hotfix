@@ -62,6 +62,9 @@ public final class OfficialPackage {
 
   private static final String README = "readme.txt";
 
+  /** Webapp settings files named in the overwrite warning; the rest is a count. */
+  private static final int MAX_NAMED_SETTINGS = 20;
+
   // Case-insensitive, and "Product:" as well as "Product Name:": readmes differ in capitalisation.
   private static final Pattern PRODUCT = Pattern.compile("(?i)^Product(?: Name)?:\\s*(.+?)\\s*$");
   private static final Pattern RELEASE = Pattern.compile("(?i)^Release Version:\\s*([0-9.]+)\\s*$");
@@ -567,7 +570,11 @@ public final class OfficialPackage {
     return out;
   }
 
-  /** Warnings about files that usually hold site settings and are about to be replaced. */
+  /**
+   * The warning about files that usually hold site settings and are about to be replaced: the
+   * webapp's files by name, because the running server reads them, and the installation's templates
+   * as a count.
+   */
   private static List<String> configNotes(List<PackageContents.Entry> entries) {
     List<String> paths =
         entries.stream()
@@ -579,13 +586,33 @@ public final class OfficialPackage {
     if (paths.isEmpty()) {
       return List.of();
     }
-    List<String> shown = paths.size() > 8 ? paths.subList(0, 8) : paths;
+    List<String> webapp =
+        paths.stream().filter(p -> p.startsWith(PackagePaths.WEBAPPS_PREFIX)).toList();
+    List<String> templates =
+        paths.stream().filter(p -> !p.startsWith(PackagePaths.WEBAPPS_PREFIX)).toList();
+    String counted =
+        templates.size()
+            + (templates.size() == 1 ? " configuration template" : " configuration templates")
+            + " under "
+            + String.join(
+                ", ",
+                templates.stream().map(p -> p.substring(0, p.indexOf('/'))).distinct().toList())
+            + " (read by the installer's scripts, not by the running server)";
+    if (webapp.isEmpty()) {
+      return List.of(
+          counted + " are overwritten; settings you changed in them must be applied again");
+    }
+    List<String> shown =
+        webapp.size() > MAX_NAMED_SETTINGS ? webapp.subList(0, MAX_NAMED_SETTINGS) : webapp;
     String more =
-        paths.size() > shown.size() ? " and " + (paths.size() - shown.size()) + " more" : "";
+        webapp.size() > shown.size()
+            ? " and " + (webapp.size() - shown.size()) + " more in the webapp"
+            : "";
     return List.of(
         "settings you changed in these files are overwritten and must be applied again: "
             + String.join(", ", shown)
-            + more);
+            + more
+            + (templates.isEmpty() ? "" : "; so are " + counted));
   }
 
   /** True for the configuration files a site edits, as opposed to code the hotfix ships. */

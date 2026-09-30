@@ -208,6 +208,46 @@ class OfficialPackageTest {
   }
 
   @Test
+  void should_name_the_webapp_files_and_count_the_templates_when_settings_files_are_replaced()
+      throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    Path webapp = paths.tomcatDir().resolve("webapps/jasperserver-pro");
+    Files.createDirectories(webapp.resolve("WEB-INF/classes"));
+    Files.writeString(webapp.resolve("WEB-INF/web.xml"), "<web-app/>");
+    Files.writeString(webapp.resolve("WEB-INF/classes/jasperreports.properties"), "a=1");
+    Map<String, String> templates = new LinkedHashMap<>();
+    for (int i = 0; i < 9; i++) {
+      String path = "buildomatic/conf_source/iePro/applicationContext-" + i + ".xml";
+      Files.createDirectories(paths.installDir().resolve(path).getParent());
+      Files.writeString(paths.installDir().resolve(path), "<beans/>");
+      templates.put(path, "<beans id='new'/>");
+    }
+    Map<String, byte[]> outer = new LinkedHashMap<>();
+    outer.put("readme.txt", Packages.OUTER_README.getBytes(StandardCharsets.UTF_8));
+    outer.put(
+        "jasperserver-pro.zip",
+        Packages.zipBytes(
+            Map.of(
+                "WEB-INF/web.xml", "<web-app id='new'/>",
+                "WEB-INF/classes/jasperreports.properties", "a=2"),
+            null));
+    outer.put("js-install.zip", Packages.zipBytes(templates, null));
+    PackageContents c =
+        OfficialPackage.read(
+            Packages.zip(tmp.resolve("dl/settings.zip"), outer), paths, "jasperserver-pro", files);
+    assertThat(c.noteLines())
+        .filteredOn(n -> n.contains("are overwritten"))
+        .singleElement()
+        .satisfies(
+            n ->
+                assertThat(n)
+                    .contains("webapps/jasperserver-pro/WEB-INF/web.xml")
+                    .contains("webapps/jasperserver-pro/WEB-INF/classes/jasperreports.properties")
+                    .contains("9 configuration templates under buildomatic")
+                    .doesNotContain("applicationContext-0.xml"));
+  }
+
+  @Test
   void should_skip_a_readme_deletion_that_climbs_out_with_a_note() throws Exception {
     PackagePaths paths = Packages.install(tmp.resolve("jrs"));
     PackageContents c =
