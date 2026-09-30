@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * The webapp's properties files the installer fills in for one site (the scheduler's public
@@ -23,7 +24,8 @@ import java.util.Set;
  * are merged, and only when the server has the file; a file larger than {@link #MAX_BYTES} is never
  * merged, so what is held in memory is bounded (these files are a few kilobytes; the bound is what
  * allows reading one whole, which the payload never is); bytes are read and written as ISO-8859-1,
- * which maps every byte to itself, in the package's line ends; nothing is written here.
+ * which maps every byte to itself, in the package's line ends; the site's XML files ({@link
+ * #keptAsItIs}) are not merged at all, the server's stays; nothing is written here.
  */
 public final class SiteSettings {
 
@@ -37,15 +39,34 @@ public final class SiteSettings {
           "web-inf/classes/hibernate.properties",
           "web-inf/classes/keystore.init.properties");
 
+  /**
+   * The webapp's XML files the installer writes for one site: the container's context with the
+   * database connection, and the data source definitions beside it. There is no merging XML by key,
+   * so a hotfix never replaces one the server has.
+   */
+  private static final Pattern SITE_XML = Pattern.compile("meta-inf/(context|[^/]+-jdbc)\\.xml");
+
   private SiteSettings() {}
+
+  /** True when {@code packagePath} is a site-written XML file under a webapp, never replaced. */
+  public static boolean keptAsItIs(String packagePath) {
+    return underWebapp(packagePath).filter(p -> SITE_XML.matcher(p).matches()).isPresent();
+  }
+
+  /** The lower-cased path under the webapp; empty for a path outside one. */
+  private static Optional<String> underWebapp(String packagePath) {
+    if (!packagePath.startsWith(PackagePaths.WEBAPPS_PREFIX)) {
+      return Optional.empty();
+    }
+    int webapp = packagePath.indexOf('/', PackagePaths.WEBAPPS_PREFIX.length());
+    return webapp > 0
+        ? Optional.of(packagePath.substring(webapp + 1).toLowerCase(Locale.ROOT))
+        : Optional.empty();
+  }
 
   /** True when {@code packagePath} is one of these files under a webapp. */
   public static boolean holdsSiteValues(String packagePath) {
-    if (!packagePath.startsWith(PackagePaths.WEBAPPS_PREFIX)) {
-      return false;
-    }
-    int webapp = packagePath.indexOf('/', PackagePaths.WEBAPPS_PREFIX.length());
-    return webapp > 0 && FILES.contains(packagePath.substring(webapp + 1).toLowerCase(Locale.ROOT));
+    return underWebapp(packagePath).filter(FILES::contains).isPresent();
   }
 
   /**

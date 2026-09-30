@@ -13,7 +13,9 @@ import java.util.Optional;
 
 /**
  * Everything the tool knows about one installation. Invariants: paths are absolute and normalised;
- * the base URL is used by the wait probe only; there are no credentials anywhere in this record.
+ * the base URL is used by the wait probe only; there are no credentials anywhere in this record;
+ * the two merge settings are absent until the operator sets them, and settings written before they
+ * existed read back without them.
  */
 public record Settings(
     Path installDir,
@@ -24,7 +26,9 @@ public record Settings(
     Optional<Path> serviceScriptPath,
     int stopTimeoutSeconds,
     Optional<Integer> forceStopAfterSeconds,
-    URI baseUrl) {
+    URI baseUrl,
+    Optional<String> mergeOnConflict,
+    Optional<String> mergeTool) {
 
   public static final List<String> KEYS =
       List.of(
@@ -36,7 +40,12 @@ public record Settings(
           "service.scriptPath",
           "service.stopTimeoutSeconds",
           "service.forceStopAfterSeconds",
-          "baseUrl");
+          "baseUrl",
+          "merge.onConflict",
+          "merge.tool");
+
+  /** What {@code merge.onConflict} may be. */
+  public static final List<String> ON_CONFLICT = List.of("ask", "mine", "theirs", "fail");
 
   public Settings {
     installDir = installDir.toAbsolutePath().normalize();
@@ -47,6 +56,33 @@ public record Settings(
     serviceScriptPath = serviceScriptPath.map(p -> p.toAbsolutePath().normalize());
     Objects.requireNonNull(forceStopAfterSeconds, "forceStopAfterSeconds");
     Objects.requireNonNull(baseUrl, "baseUrl");
+    mergeOnConflict = mergeOnConflict == null ? Optional.empty() : mergeOnConflict;
+    mergeTool = mergeTool == null ? Optional.empty() : mergeTool;
+  }
+
+  /** Settings without the merge settings. */
+  public Settings(
+      Path installDir,
+      Path tomcatDir,
+      String webappName,
+      ServiceConfig.Kind serviceKind,
+      Optional<String> serviceName,
+      Optional<Path> serviceScriptPath,
+      int stopTimeoutSeconds,
+      Optional<Integer> forceStopAfterSeconds,
+      URI baseUrl) {
+    this(
+        installDir,
+        tomcatDir,
+        webappName,
+        serviceKind,
+        serviceName,
+        serviceScriptPath,
+        stopTimeoutSeconds,
+        forceStopAfterSeconds,
+        baseUrl,
+        Optional.empty(),
+        Optional.empty());
   }
 
   public Path webappDir() {
@@ -77,114 +113,58 @@ public record Settings(
     m.put("service.stopTimeoutSeconds", Integer.toString(stopTimeoutSeconds));
     m.put("service.forceStopAfterSeconds", forceStopAfterSeconds.map(String::valueOf).orElse(""));
     m.put("baseUrl", baseUrl.toString());
+    m.put("merge.onConflict", mergeOnConflict.orElse(""));
+    m.put("merge.tool", mergeTool.orElse(""));
     return m;
   }
 
   public Settings withKey(String key, String value) {
     Optional<String> text = value.isBlank() ? Optional.empty() : Optional.of(value);
-    return switch (key) {
-      case "installDir" ->
-          new Settings(
-              Path.of(value),
-              tomcatDir,
-              webappName,
-              serviceKind,
-              serviceName,
-              serviceScriptPath,
-              stopTimeoutSeconds,
-              forceStopAfterSeconds,
-              baseUrl);
-      case "tomcatDir" ->
-          new Settings(
-              installDir,
-              Path.of(value),
-              webappName,
-              serviceKind,
-              serviceName,
-              serviceScriptPath,
-              stopTimeoutSeconds,
-              forceStopAfterSeconds,
-              baseUrl);
-      case "webappName" ->
-          new Settings(
-              installDir,
-              tomcatDir,
-              value,
-              serviceKind,
-              serviceName,
-              serviceScriptPath,
-              stopTimeoutSeconds,
-              forceStopAfterSeconds,
-              baseUrl);
+    Path install = installDir;
+    Path tomcat = tomcatDir;
+    String webapp = webappName;
+    ServiceConfig.Kind kind = serviceKind;
+    Optional<String> name = serviceName;
+    Optional<Path> script = serviceScriptPath;
+    int stopTimeout = stopTimeoutSeconds;
+    Optional<Integer> forceStop = forceStopAfterSeconds;
+    URI base = baseUrl;
+    Optional<String> onConflict = mergeOnConflict;
+    Optional<String> tool = mergeTool;
+    switch (key) {
+      case "installDir" -> install = Path.of(value);
+      case "tomcatDir" -> tomcat = Path.of(value);
+      case "webappName" -> webapp = value;
       case "service.kind" ->
-          new Settings(
-              installDir,
-              tomcatDir,
-              webappName,
-              ServiceConfig.Kind.valueOf(value.toUpperCase(Locale.ROOT).replace('-', '_')),
-              serviceName,
-              serviceScriptPath,
-              stopTimeoutSeconds,
-              forceStopAfterSeconds,
-              baseUrl);
-      case "service.name" ->
-          new Settings(
-              installDir,
-              tomcatDir,
-              webappName,
-              serviceKind,
-              text,
-              serviceScriptPath,
-              stopTimeoutSeconds,
-              forceStopAfterSeconds,
-              baseUrl);
-      case "service.scriptPath" ->
-          new Settings(
-              installDir,
-              tomcatDir,
-              webappName,
-              serviceKind,
-              serviceName,
-              text.map(Path::of),
-              stopTimeoutSeconds,
-              forceStopAfterSeconds,
-              baseUrl);
-      case "service.stopTimeoutSeconds" ->
-          new Settings(
-              installDir,
-              tomcatDir,
-              webappName,
-              serviceKind,
-              serviceName,
-              serviceScriptPath,
-              Integer.parseInt(value),
-              forceStopAfterSeconds,
-              baseUrl);
-      case "service.forceStopAfterSeconds" ->
-          new Settings(
-              installDir,
-              tomcatDir,
-              webappName,
-              serviceKind,
-              serviceName,
-              serviceScriptPath,
-              stopTimeoutSeconds,
-              text.map(Integer::parseInt),
-              baseUrl);
-      case "baseUrl" ->
-          new Settings(
-              installDir,
-              tomcatDir,
-              webappName,
-              serviceKind,
-              serviceName,
-              serviceScriptPath,
-              stopTimeoutSeconds,
-              forceStopAfterSeconds,
-              URI.create(value));
+          kind = ServiceConfig.Kind.valueOf(value.toUpperCase(Locale.ROOT).replace('-', '_'));
+      case "service.name" -> name = text;
+      case "service.scriptPath" -> script = text.map(Path::of);
+      case "service.stopTimeoutSeconds" -> stopTimeout = Integer.parseInt(value);
+      case "service.forceStopAfterSeconds" -> forceStop = text.map(Integer::parseInt);
+      case "baseUrl" -> base = URI.create(value);
+      case "merge.onConflict" -> {
+        onConflict = text.map(v -> v.strip().toLowerCase(Locale.ROOT));
+        if (onConflict.isPresent() && !ON_CONFLICT.contains(onConflict.get())) {
+          throw new IllegalArgumentException(
+              "merge.onConflict must be one of " + String.join(", ", ON_CONFLICT));
+        }
+      }
+      case "merge.tool" -> tool = text;
       default ->
           throw new IllegalArgumentException(
               "unknown setting " + key + "; the keys are " + String.join(", ", KEYS));
-    };
+    }
+    return new Settings(
+        install,
+        tomcat,
+        webapp,
+        kind,
+        name,
+        script,
+        stopTimeout,
+        forceStop,
+        base,
+        onConflict,
+        tool);
   }
 }

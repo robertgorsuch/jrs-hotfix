@@ -7,16 +7,25 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Merges a properties file of this server ("mine") into the one a hotfix ships ("theirs"), by key
- * and without a common ancestor: the result is theirs, comments, order and layout included, with
- * the server's value wherever the server has the key, and the keys only the server has carried over
- * under a heading at the end. It is meant for the files an installer fills in for one site, where
- * the server's value is the one that works there. Invariants: nothing is read or written, lines go
- * in and lines come out; a value is compared as one logical line, so a continuation broken
- * differently is the same value; of a key defined twice the last definition counts, as {@code
- * java.util.Properties} has it; merging the result with the same theirs gives the result again,
- * line for line, so a plan rebuilt after the swap sees the file it planned; the server's comments
- * are not carried (the file as it was is in the snapshot).
+ * Merges a properties file of this server ("mine") into the one a hotfix ships ("theirs"), by key.
+ * The result is always theirs, comments, order and layout included, with this server's values put
+ * in where the rules say so.
+ *
+ * <p>Without a common ancestor ({@link #merge(List, List)}) the server's value stands wherever the
+ * server has the key, and the keys only the server has are carried over under a heading at the end.
+ * It is meant for the files an installer fills in for one site, where the server's value is the one
+ * that works there.
+ *
+ * <p>With the vendor's earlier file as the ancestor ({@link #merge3}) a key only the vendor changed
+ * takes the vendor's value, a key only the site changed keeps the site's, and a key both changed is
+ * a conflict settled as the {@link Style} says (0.2 design, 4.2).
+ *
+ * <p>Invariants: nothing is read or written, lines go in and lines come out; a value is compared as
+ * one logical line, so a continuation broken differently is the same value; of a key defined twice
+ * the last definition counts, as {@code java.util.Properties} has it; under {@link
+ * Style#MINE_SILENT}, merging the result with the same theirs gives the result again, line for
+ * line, so a plan rebuilt after the swap sees the file it planned; the server's comments are not
+ * carried (the file as it was is in the snapshot).
  */
 public final class PropertiesMerge {
 
@@ -44,37 +53,217 @@ public final class PropertiesMerge {
   }
 
   public static Result merge(List<String> mine, List<String> theirs) {
-    Map<String, Entry> site = new LinkedHashMap<>();
-    for (Item item : parse(mine)) {
-      item.entry().ifPresent(e -> site.put(e.key(), e));
+    Merged m = merge3(List.of(), mine, theirs, Style.MINE_SILENT);
+    return new Result(m.lines(), m.kept(), m.carried());
+  }
+
+  /** How a key both the site and the vendor changed is settled. */
+  public enum Style {
+    /** The site's value stands and nothing is said in the file: the installer-written files. */
+    MINE_SILENT,
+    /** The site's value stands; the vendor's is written above it as a comment. */
+    MINE,
+    /** The vendor's value stands; the site's is written above it as a comment. */
+    THEIRS,
+    /** Neither stands: both are written between conflict markers for the operator. */
+    MARKERS
+  }
+
+  /** The first line of a conflict block; the three sides follow, each under its own marker. */
+  public static final String MARK_MINE = "<<<<<<< mine (on the server)";
+
+  public static final String MARK_BASE = "||||||| base (the vendor's file before this hotfix)";
+  public static final String MARK_SEPARATOR = "=======";
+  public static final String MARK_THEIRS = ">>>>>>> theirs (the hotfix)";
+
+  /**
+   * A three-way merge and what was done, by key name only (a value may be a secret): {@code kept}
+   * are the keys where the site's value stands against another of the vendor's; {@code carried} the
+   * keys only the site has; {@code removed} the keys the site removed and that stay removed; {@code
+   * conflicts} the keys both changed, in the order met, whatever the style did with them.
+   */
+  public record Merged(
+      List<String> lines,
+      List<String> kept,
+      List<String> carried,
+      List<String> removed,
+      List<String> conflicts) {
+    public Merged {
+      lines = List.copyOf(lines);
+      kept = List.copyOf(kept);
+      carried = List.copyOf(carried);
+      removed = List.copyOf(removed);
+      conflicts = List.copyOf(conflicts);
     }
+  }
+
+  /**
+   * Merges by key with {@code base} as the common ancestor; an empty {@code base} means the vendor
+   * had no such file, so every key the two sides disagree on is a conflict.
+   */
+  public static Merged merge3(
+      List<String> base, List<String> mine, List<String> theirs, Style style) {
+    Map<String, Entry> was = entries(base);
+    Map<String, Entry> site = entries(mine);
     List<String> lines = new ArrayList<>();
     List<String> kept = new ArrayList<>();
+    List<String> removed = new ArrayList<>();
+    List<String> conflicts = new ArrayList<>();
     Map<String, Entry> remaining = new LinkedHashMap<>(site);
+    java.util.Set<String> seen = new java.util.HashSet<>();
     for (Item item : parse(theirs)) {
-      Optional<Entry> vendor = item.entry();
-      Entry here = vendor.map(v -> site.get(v.key())).orElse(null);
-      if (vendor.isEmpty() || here == null || here.value().equals(vendor.get().value())) {
+      if (item.entry().isEmpty()) {
         lines.addAll(item.lines());
+        continue;
+      }
+      Entry vendor = item.entry().get();
+      Entry here = site.get(vendor.key());
+      Entry before = was.get(vendor.key());
+      remaining.remove(vendor.key());
+      boolean first = seen.add(vendor.key());
+      if (here == null) {
+        if (before == null) {
+          lines.addAll(item.lines());
+        } else if (before.value().equals(vendor.value())) {
+          // the site removed it and the vendor did not touch it: it stays removed
+          add(removed, vendor.key(), first);
+        } else {
+          add(conflicts, vendor.key(), first);
+          switch (style) {
+            case MINE_SILENT -> add(removed, vendor.key(), first);
+            case MINE -> {
+              lines.add("# jrs-hotfix: removed on this server; the hotfix ships:");
+              item.lines().forEach(l -> lines.add("# " + l));
+              add(removed, vendor.key(), first);
+            }
+            case THEIRS -> {
+              lines.add("# jrs-hotfix: this server had removed this key; the hotfix's value:");
+              lines.addAll(item.lines());
+            }
+            case MARKERS -> conflict(lines, List.of(), before.lines(), item.lines());
+          }
+        }
+        continue;
+      }
+      if (here.value().equals(vendor.value())
+          || (before != null && before.value().equals(here.value()))) {
+        // the same on both sides, or only the vendor changed it
+        lines.addAll(item.lines());
+      } else if (before != null && before.value().equals(vendor.value())) {
+        // only the site changed it
+        lines.addAll(inPlace(vendor, here));
+        add(kept, here.key(), first);
       } else {
-        lines.add(vendor.get().head() + here.firstValueLine());
-        lines.addAll(here.continuation());
-        if (!kept.contains(here.key())) {
-          kept.add(here.key());
+        add(conflicts, here.key(), first);
+        switch (style) {
+          case MINE_SILENT -> {
+            lines.addAll(inPlace(vendor, here));
+            add(kept, here.key(), first);
+          }
+          case MINE -> {
+            lines.add("# jrs-hotfix: the hotfix's value, not used on this server:");
+            item.lines().forEach(l -> lines.add("# " + l));
+            lines.addAll(inPlace(vendor, here));
+            add(kept, here.key(), first);
+          }
+          case THEIRS -> {
+            lines.add("# jrs-hotfix: this server's value, replaced by the hotfix's:");
+            here.lines().forEach(l -> lines.add("# " + l));
+            lines.addAll(item.lines());
+          }
+          case MARKERS ->
+              conflict(
+                  lines, here.lines(), before == null ? List.of() : before.lines(), item.lines());
         }
       }
-      vendor.ifPresent(v -> remaining.remove(v.key()));
     }
-    if (!remaining.isEmpty()) {
+    List<String> carried = new ArrayList<>();
+    List<String> tail = new ArrayList<>();
+    List<String> notes = new ArrayList<>();
+    for (Entry e : remaining.values()) {
+      Entry before = was.get(e.key());
+      if (before == null) {
+        carried.add(e.key());
+        tail.addAll(e.lines());
+      } else if (!before.value().equals(e.value())) {
+        // (a key the vendor removed and the site had not touched is simply gone)
+        conflicts.add(e.key());
+        switch (style) {
+          case MINE_SILENT -> {
+            carried.add(e.key());
+            tail.addAll(e.lines());
+          }
+          case MINE -> {
+            carried.add(e.key());
+            tail.add("# jrs-hotfix: the hotfix removes this key; kept as this server has it:");
+            tail.addAll(e.lines());
+          }
+          case THEIRS -> {
+            notes.add("# jrs-hotfix: removed by the hotfix; this server had:");
+            e.lines().forEach(l -> notes.add("# " + l));
+          }
+          case MARKERS -> conflict(notes, e.lines(), before.lines(), List.of());
+        }
+      }
+    }
+    if (!tail.isEmpty()) {
       if (!lines.isEmpty() && !lines.get(lines.size() - 1).isBlank()) {
         lines.add("");
       }
       lines.add(CARRIED_HEADING);
-      for (Entry e : remaining.values()) {
-        lines.addAll(e.lines());
-      }
+      lines.addAll(tail);
     }
-    return new Result(lines, kept, List.copyOf(remaining.keySet()));
+    if (!notes.isEmpty()) {
+      if (!lines.isEmpty() && !lines.get(lines.size() - 1).isBlank()) {
+        lines.add("");
+      }
+      lines.addAll(notes);
+    }
+    return new Merged(lines, kept, carried, removed, conflicts);
+  }
+
+  /** True when {@code lines} still hold a conflict marker of {@link Style#MARKERS}. */
+  public static boolean hasMarkers(List<String> lines) {
+    return lines.stream()
+        .anyMatch(
+            l ->
+                l.startsWith("<<<<<<< ")
+                    || l.startsWith("||||||| ")
+                    || l.equals(MARK_SEPARATOR)
+                    || l.startsWith(">>>>>>> "));
+  }
+
+  private static void conflict(
+      List<String> out, List<String> mine, List<String> base, List<String> theirs) {
+    out.add(MARK_MINE);
+    out.addAll(mine);
+    out.add(MARK_BASE);
+    out.addAll(base);
+    out.add(MARK_SEPARATOR);
+    out.addAll(theirs);
+    out.add(MARK_THEIRS);
+  }
+
+  /** The site's value where the vendor's key stands: the vendor's key and separator kept. */
+  private static List<String> inPlace(Entry vendor, Entry here) {
+    List<String> out = new ArrayList<>();
+    out.add(vendor.head() + here.firstValueLine());
+    out.addAll(here.continuation());
+    return out;
+  }
+
+  private static void add(List<String> keys, String key, boolean first) {
+    if (first || !keys.contains(key)) {
+      keys.add(key);
+    }
+  }
+
+  private static Map<String, Entry> entries(List<String> lines) {
+    Map<String, Entry> out = new LinkedHashMap<>();
+    for (Item item : parse(lines)) {
+      item.entry().ifPresent(e -> out.put(e.key(), e));
+    }
+    return out;
   }
 
   /** One natural line that is blank or a comment, or one key with every line of its value. */

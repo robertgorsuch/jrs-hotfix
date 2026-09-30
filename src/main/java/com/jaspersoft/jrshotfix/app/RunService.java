@@ -1,5 +1,7 @@
 package com.jaspersoft.jrshotfix.app;
 
+import com.jaspersoft.jrshotfix.baseline.BaselineManifest;
+import com.jaspersoft.jrshotfix.baseline.BaselineStore;
 import com.jaspersoft.jrshotfix.engine.CancellationToken;
 import com.jaspersoft.jrshotfix.engine.Context;
 import com.jaspersoft.jrshotfix.engine.Plan;
@@ -14,8 +16,11 @@ import com.jaspersoft.jrshotfix.engine.Sleeper;
 import com.jaspersoft.jrshotfix.engine.TerminalState;
 import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
+import com.jaspersoft.jrshotfix.home.InstalledBuild;
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
+import com.jaspersoft.jrshotfix.merge.MergeDoc;
+import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
 import com.jaspersoft.jrshotfix.platform.Durability;
 import com.jaspersoft.jrshotfix.platform.Trees;
 import com.jaspersoft.jrshotfix.redact.RedactingEventSink;
@@ -35,6 +40,7 @@ import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -55,13 +61,22 @@ import java.util.function.Supplier;
  */
 final class RunService {
 
-  /** What {@link #prune} removed: run ids, {@code runId/stepId} snapshots and ledger ids. */
+  /**
+   * What {@link #prune} removed: run ids, {@code runId/stepId} snapshots, ledger ids, hotfix
+   * baseline ids and merge ids.
+   */
   record PruneResult(
-      List<String> runsRemoved, List<String> snapshotsRemoved, List<String> ledgerEntriesRemoved) {
+      List<String> runsRemoved,
+      List<String> snapshotsRemoved,
+      List<String> ledgerEntriesRemoved,
+      List<String> baselinesRemoved,
+      List<String> mergesRemoved) {
     PruneResult {
       runsRemoved = List.copyOf(runsRemoved);
       snapshotsRemoved = List.copyOf(snapshotsRemoved);
       ledgerEntriesRemoved = List.copyOf(ledgerEntriesRemoved);
+      baselinesRemoved = List.copyOf(baselinesRemoved);
+      mergesRemoved = List.copyOf(mergesRemoved);
     }
   }
 
@@ -238,9 +253,56 @@ final class RunService {
   }
 
   /**
+   * Removes the hotfix baselines older than the newest two, whatever their age: a base is needed
+   * for the level the webapp is at, and for the one a rollback returns to. The baseline of the
+   * build the webapp states is kept in any case; release baselines are never pruned.
+   */
+  private List<String> pruneBaselines() throws IOException {
+    BaselineStore store = new BaselineStore(boot.home(), boot.clock());
+    Optional<String> stated =
+        boot.settings()
+            .flatMap(s -> InstalledBuild.ofWebapp(s.webappDir()))
+            .map(InstalledBuild::build);
+    List<BaselineManifest> hotfixes =
+        store.list().stream()
+            .filter(b -> b.kind() == BaselineManifest.Kind.HOTFIX)
+            .sorted(Comparator.comparing(BaselineManifest::build).reversed())
+            .toList();
+    List<String> removed = new ArrayList<>();
+    for (BaselineManifest b : hotfixes.subList(Math.min(2, hotfixes.size()), hotfixes.size())) {
+      if (!stated.equals(Optional.of(b.build())) && store.remove(b.id())) {
+        removed.add(b.id());
+      }
+    }
+    return removed;
+  }
+
+  /**
+   * Removes the merges prepared before {@code cutoff} that no installed hotfix was applied with: a
+   * merge is the record of how its hotfix was applied for as long as that hotfix is installed.
+   */
+  private List<String> pruneMerges(Ledger ledger, Instant cutoff) throws IOException {
+    MergeWorkspace merges = new MergeWorkspace(boot.home(), boot.clock());
+    Set<String> inUse = new HashSet<>();
+    for (LedgerEntry e : ledger.installed()) {
+      e.mergeId().ifPresent(inUse::add);
+    }
+    List<String> removed = new ArrayList<>();
+    for (MergeDoc doc : merges.list()) {
+      if (!inUse.contains(doc.id())
+          && doc.createdAt().isBefore(cutoff)
+          && merges.discard(doc.id())) {
+        removed.add(doc.id());
+      }
+    }
+    return removed;
+  }
+
+  /**
    * Removes what is older than {@code olderThan}: the directories of ended runs; snapshots, except
-   * those of pending runs, of failed runs and of hotfixes the ledger has installed; and rolled-back
-   * ledger entries whose snapshot is gone.
+   * those of pending runs, of failed runs and of hotfixes the ledger has installed; rolled-back
+   * ledger entries whose snapshot is gone; merges no installed hotfix was applied with; and,
+   * whatever their age, the hotfix baselines older than the newest two.
    */
   PruneResult prune(Duration olderThan) {
     return prune(olderThan, false);
@@ -290,7 +352,12 @@ final class RunService {
           ledgerRemoved.add(e.id());
         }
       }
-      return new PruneResult(runsRemoved, snapshotsRemoved, ledgerRemoved);
+      return new PruneResult(
+          runsRemoved,
+          snapshotsRemoved,
+          ledgerRemoved,
+          pruneBaselines(),
+          pruneMerges(ledger, cutoff));
     } catch (IOException e) {
       throw new UncheckedIOException("cannot prune " + boot.home().root(), e);
     }

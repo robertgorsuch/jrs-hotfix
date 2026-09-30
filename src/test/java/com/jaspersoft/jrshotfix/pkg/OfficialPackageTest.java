@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -181,7 +182,13 @@ class OfficialPackageTest {
     assertThat(c.noteLines())
         .containsSubsequence(
             "Details for fix A:", "   UPDATE T", "      SET a = 1;", "", "Details for fix B:");
-    assertThat(c.noteLines().get(c.noteLines().size() - 1)).isEqualTo("Details for fix B:");
+    // the blank lines after the section's last line are not part of it
+    List<String> quoted =
+        c.notes().stream()
+            .filter(PackageContents.Note::quoted)
+            .map(PackageContents.Note::text)
+            .toList();
+    assertThat(quoted.get(quoted.size() - 1)).isEqualTo("Details for fix B:");
   }
 
   @Test
@@ -307,7 +314,7 @@ class OfficialPackageTest {
         c.replaces().stream().filter(r -> r.path().equals(QUARTZ)).findFirst().orElseThrow();
     assertThat(e.sha256()).contains(sha256(theirs));
     assertThat(e.packageSha256()).isEmpty();
-    assertThat(c.noteLines()).noneSatisfy(n -> assertThat(n).contains("merged"));
+    assertThat(c.noteLines()).noneSatisfy(n -> assertThat(n).contains("is merged, not replaced"));
   }
 
   @Test
@@ -319,6 +326,104 @@ class OfficialPackageTest {
         OfficialPackage.read(
             packageWith("fresh.zip", payload, null), paths, "jasperserver-pro", files);
     assertThat(c.adds()).singleElement().satisfies(e -> assertThat(e.packageSha256()).isEmpty());
+  }
+
+  private static final String CONTEXT = "webapps/jasperserver-pro/META-INF/context.xml";
+
+  private PackageContents readWithContext(String mine, String theirs) throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    Path context = paths.resolve(CONTEXT);
+    Files.createDirectories(context.getParent());
+    Files.writeString(context, mine, StandardCharsets.ISO_8859_1);
+    Map<String, String> payload = new LinkedHashMap<>();
+    payload.put("META-INF/context.xml", theirs);
+    payload.put(Packages.LIB + "foo-1.2.3.jar", "x");
+    return OfficialPackage.read(
+        packageWith("context.zip", payload, "Deleted files:\nMETA-INF/context.xml\n"),
+        paths,
+        "jasperserver-pro",
+        files);
+  }
+
+  @Test
+  void should_keep_the_servers_context_and_show_the_packages_copy_when_the_package_ships_one()
+      throws Exception {
+    String theirs = "<Context>\n  <Resource username=\"@@BITROCK_DB_USER@@\"/>\n</Context>\n";
+    PackageContents c =
+        readWithContext("<Context><Resource username=\"jasperdb\"/></Context>\n", theirs);
+    // no entry: nothing snapshots, stages, swaps or deletes it
+    assertThat(c.entries()).extracting(PackageContents.Entry::path).doesNotContain(CONTEXT);
+    assertThat(c.kept())
+        .singleElement()
+        .satisfies(
+            k -> {
+              assertThat(k.path()).isEqualTo(CONTEXT);
+              assertThat(k.vendorSha256()).isEqualTo(sha256(theirs));
+            });
+    assertThat(c.noteLines())
+        .anySatisfy(n -> assertThat(n).contains(CONTEXT).contains("is not replaced"))
+        .containsSubsequence(
+            "<Context>", "  <Resource username=\"@@BITROCK_DB_USER@@\"/>", "</Context>");
+    assertThat(c.noteLines()).noneSatisfy(n -> assertThat(n).contains("are overwritten"));
+  }
+
+  @Test
+  void should_say_nothing_about_the_context_when_the_package_ships_the_servers_copy()
+      throws Exception {
+    String same = "<Context/>\n";
+    PackageContents c = readWithContext(same, same);
+    assertThat(c.kept()).extracting(PackageContents.Kept::path).containsExactly(CONTEXT);
+    assertThat(c.noteLines()).noneSatisfy(n -> assertThat(n).contains("context.xml"));
+  }
+
+  @Test
+  void should_add_the_context_when_the_server_has_none() throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    PackageContents c =
+        OfficialPackage.read(
+            packageWith("fresh-context.zip", Map.of("META-INF/context.xml", "<Context/>"), null),
+            paths,
+            "jasperserver-pro",
+            files);
+    assertThat(c.adds()).extracting(PackageContents.Entry::path).containsExactly(CONTEXT);
+    assertThat(c.kept()).isEmpty();
+  }
+
+  @Test
+  void should_report_and_not_delete_an_older_version_of_a_library_the_package_brings()
+      throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    Path lib = paths.resolve("webapps/jasperserver-pro/" + Packages.LIB + "x").getParent();
+    Files.writeString(lib.resolve("widget-2.0.1.jar"), "old widget");
+    Files.writeString(lib.resolve("widget-extras-2.0.1.jar"), "another artifact");
+    Files.writeString(lib.resolve("widget-3.0.0.jar"), "a newer one than the package's");
+    PackageContents c =
+        OfficialPackage.read(
+            packageWith("widget.zip", Map.of(Packages.LIB + "widget-2.1.0.jar", "new"), null),
+            paths,
+            "jasperserver-pro",
+            files);
+    assertThat(c.deletes()).isEmpty();
+    assertThat(c.noteLines())
+        .filteredOn(n -> n.contains("older version"))
+        .singleElement()
+        .satisfies(
+            n ->
+                assertThat(n)
+                    .contains("widget-2.0.1.jar (the package brings widget-2.1.0.jar)")
+                    .contains("nothing is deleted")
+                    .doesNotContain("widget-extras")
+                    .doesNotContain("widget-3.0.0"));
+  }
+
+  @Test
+  void should_not_report_a_library_the_readme_already_deletes() throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    // the standard package replaces foo-1.2.3.jar and its readme's glob deletes foo-1.0.0.jar
+    PackageContents c =
+        OfficialPackage.read(
+            Packages.standard(tmp.resolve("dl/hotfix.zip")), paths, "jasperserver-pro", files);
+    assertThat(c.noteLines()).noneSatisfy(n -> assertThat(n).contains("older version"));
   }
 
   @Test

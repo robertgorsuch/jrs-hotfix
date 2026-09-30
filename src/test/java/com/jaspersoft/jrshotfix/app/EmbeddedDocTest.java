@@ -17,7 +17,7 @@ class EmbeddedDocTest {
   @TempDir Path tmp;
 
   @Test
-  void should_read_the_page_with_the_nine_sections_in_order() {
+  void should_read_the_page_with_the_ten_sections_in_order() {
     String text = EmbeddedDoc.text();
     List<String> headings = text.lines().filter(l -> l.startsWith("#")).toList();
     assertThat(headings)
@@ -26,6 +26,7 @@ class EmbeddedDocTest {
             "## Start",
             "## Commands",
             "## What apply does",
+            "## Customized servers",
             "## Rollback",
             "## Manual steps",
             "## If something goes wrong",

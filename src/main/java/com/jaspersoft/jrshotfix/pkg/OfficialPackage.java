@@ -2,6 +2,7 @@ package com.jaspersoft.jrshotfix.pkg;
 
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.platform.FileOps;
+import com.jaspersoft.jrshotfix.platform.Sums;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,7 +13,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.DigestInputStream;
-import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -37,8 +37,10 @@ import java.util.zip.ZipInputStream;
  * the package carries the SHA-256 of the whole file; an entry is {@code replace} only when the file
  * exists on this server now and {@code add} otherwise; deletes come from the readme's "Deleted
  * files" list and its "Important" globs, expanded against this installation and never covering a
- * file the package itself lays down; the readme's manual steps are carried verbatim and whole, a
- * section both inner readmes hold only once; nothing on the server is touched here.
+ * file the package itself lays down; a site-written XML file the server has is kept, not replaced;
+ * an older version of a library the package brings is reported, never deleted; the readme's manual
+ * steps are carried verbatim and whole, a section both inner readmes hold only once; nothing on the
+ * server is touched here.
  */
 public final class OfficialPackage {
 
@@ -237,8 +239,19 @@ public final class OfficialPackage {
    */
   public static PackageContents read(
       Path source, PackagePaths paths, String webappName, FileOps files) throws IOException {
+    return read(source, paths, webappName, files, SiteDecisions.NONE);
+  }
+
+  /**
+   * As {@link #read(Path, PackagePaths, String, FileOps)}, with what a prepared merge decided about
+   * the files under the webapp: a kept file gets no entry, a merged one lands as the merged file,
+   * and the reader's own rules for the installer-written files are not applied.
+   */
+  public static PackageContents read(
+      Path source, PackagePaths paths, String webappName, FileOps files, SiteDecisions decisions)
+      throws IOException {
     try {
-      return readChecked(source, paths, webappName);
+      return readChecked(source, paths, webappName, decisions);
     } catch (IllegalArgumentException e) {
       // an InvalidPathException among them: a name this file system cannot hold
       throw unusable(e.getMessage(), Optional.of(e));
@@ -264,7 +277,8 @@ public final class OfficialPackage {
     return out.toString();
   }
 
-  private static PackageContents readChecked(Path source, PackagePaths paths, String webappName)
+  private static PackageContents readChecked(
+      Path source, PackagePaths paths, String webappName, SiteDecisions decisions)
       throws IOException {
     Shape shape =
         shape(source)
@@ -290,10 +304,14 @@ public final class OfficialPackage {
     Header header = null;
     Readme treeReadme = null;
     List<PackageContents.Entry> entries = new ArrayList<>();
+    List<PackageContents.Kept> kept = new ArrayList<>();
+    List<PackageContents.VendorFile> vendorFiles = new ArrayList<>();
+    List<String> listed = new ArrayList<>();
     Set<String> added = new LinkedHashSet<>();
     List<Readme> readmes = new ArrayList<>();
     Notes notes = new Notes();
-    Payload payload = new Payload(paths, entries, added, notes);
+    Payload payload =
+        new Payload(paths, entries, kept, vendorFiles, added, notes, decisions, webappPrefix);
     MessageDigest whole = sha256();
     try (InputStream in = new DigestInputStream(Files.newInputStream(source), whole);
         ZipInputStream outer = new ZipInputStream(in)) {
@@ -328,7 +346,7 @@ public final class OfficialPackage {
           "no readme.txt in " + source,
           "point jrs-hotfix at the hotfix ZIP as it was downloaded, not at an unpacked copy");
     }
-    if (entries.isEmpty()) {
+    if (entries.isEmpty() && kept.isEmpty()) {
       throw new HotfixException(
           HotfixException.PRECHECK,
           "no jasperserver or js-install archive in " + source,
@@ -339,12 +357,18 @@ public final class OfficialPackage {
     }
     for (Readme r : readmes) {
       List<String> said = new ArrayList<>();
-      entries.addAll(deletions(r, added, paths, said));
+      entries.addAll(deletions(r, added, paths, said, decisions));
       said.forEach(notes::say);
+      listed.addAll(r.deleted());
+      listed.addAll(r.globs());
       notes.conditions(r.conditions());
       notes.manual(r.manual());
     }
-    configNotes(entries).forEach(notes::say);
+    if (!decisions.active()) {
+      // with a merge, what happens to each changed file is said by the merge, not guessed here
+      configNotes(entries).forEach(notes::say);
+    }
+    superseded(entries, paths, webappPrefix).ifPresent(notes::say);
     return new PackageContents(
         header.id(),
         header.release(),
@@ -353,6 +377,11 @@ public final class OfficialPackage {
         header.title(),
         HexFormat.of().formatHex(whole.digest()),
         entries,
+        kept,
+        vendorFiles,
+        listed.stream()
+            .filter(p -> PackagePaths.pathProblems(p.replace('*', '_')).isEmpty())
+            .toList(),
         notes.lines());
   }
 
@@ -372,6 +401,12 @@ public final class OfficialPackage {
       if (said.add(sentence)) {
         lines.add(PackageContents.Note.said(sentence));
       }
+    }
+
+    /** A sentence of jrs-hotfix's own, then lines of a file of the package as the file has them. */
+    void sayAndQuote(String sentence, List<String> fileLines) {
+      say(sentence);
+      quote(fileLines);
     }
 
     private void quote(List<String> readmeLines) {
@@ -434,12 +469,21 @@ public final class OfficialPackage {
 
   /** Where the files of the package are collected while it is read. */
   private record Payload(
-      PackagePaths paths, List<PackageContents.Entry> entries, Set<String> added, Notes notes) {
+      PackagePaths paths,
+      List<PackageContents.Entry> entries,
+      List<PackageContents.Kept> kept,
+      List<PackageContents.VendorFile> vendorFiles,
+      Set<String> added,
+      Notes notes,
+      SiteDecisions decisions,
+      String webappPrefix) {
 
     /**
      * Streams one file of the package through a digest, writing nothing, and adds its entry: {@code
      * replace} when the file exists here now, else {@code add}. A settings file this server has
-     * values of its own in ({@link SiteSettings}) is planned as the merged file.
+     * values of its own in ({@link SiteSettings}) is planned as the merged file, and a site-written
+     * XML file the server has gets no entry at all: it stays, and the package's copy goes into the
+     * notes.
      */
     void hash(InputStream in, String path, Optional<String> source, String entryName)
         throws IOException {
@@ -448,20 +492,61 @@ public final class OfficialPackage {
       }
       Path target = paths.resolve(path);
       Action action = Files.isRegularFile(target) ? Action.REPLACE : Action.ADD;
-      MessageDigest md = sha256();
+      Sums.Sink sink = new Sums.Sink(OutputStream.nullOutputStream());
+      Optional<SiteDecisions.Decision> decision = decisions.of(path);
+      if (decisions.active() && decision.isEmpty() && path.startsWith(webappPrefix)) {
+        throw new HotfixException(
+            HotfixException.PRECHECK,
+            "the merge was not prepared for this package: it says nothing about " + path,
+            "prepare it again with `jrs-hotfix merge prepare <package.zip>`");
+      }
       Optional<SiteSettings.Merged> merged = Optional.empty();
-      if (action == Action.REPLACE && SiteSettings.holdsSiteValues(path)) {
+      Optional<byte[]> theirs = Optional.empty();
+      // the reader's own rules for the installer's files hold only where no merge decided
+      boolean own = decision.isEmpty() && action == Action.REPLACE;
+      boolean stays = own && SiteSettings.keptAsItIs(path);
+      if (stays || (own && SiteSettings.holdsSiteValues(path))) {
         byte[] head = in.readNBytes(SiteSettings.MAX_BYTES + 1);
-        md.update(head);
+        sink.write(head, 0, head.length);
         if (head.length <= SiteSettings.MAX_BYTES) {
-          merged = SiteSettings.merge(target, head);
+          theirs = Optional.of(head);
+          if (!stays) {
+            merged = SiteSettings.merge(target, head);
+          }
         }
       }
-      try (OutputStream digest = new DigestOutputStream(OutputStream.nullOutputStream(), md)) {
-        in.transferTo(digest);
-      }
-      String payload = HexFormat.of().formatHex(md.digest());
+      in.transferTo(sink);
+      Sums sums = sink.sums();
+      String payload = sums.sha256();
+      vendorFiles.add(
+          new PackageContents.VendorFile(
+              path, payload, sums.textSha256(), sums.size(), source, entryName));
+      // a file that stays is "laid down" too: no readme deletion may remove it
       added.add(path);
+      if (stays) {
+        keep(path, target, payload, theirs);
+        return;
+      }
+      if (decision.isPresent()) {
+        SiteDecisions.Decision d = decision.get();
+        switch (d.kind()) {
+          case KEEP -> kept.add(new PackageContents.Kept(path, payload, d.reason()));
+          case PLAIN ->
+              entries.add(
+                  new PackageContents.Entry(path, action, Optional.of(payload), source, entryName));
+          case MERGED ->
+              entries.add(
+                  new PackageContents.Entry(
+                      path,
+                      action,
+                      d.mergedSha256(),
+                      source,
+                      entryName,
+                      Optional.of(payload),
+                      d.mergedFile()));
+        }
+        return;
+      }
       if (merged.isEmpty()) {
         entries.add(
             new PackageContents.Entry(path, action, Optional.of(payload), source, entryName));
@@ -482,6 +567,34 @@ public final class OfficialPackage {
               + " was is in the snapshot");
     }
 
+    /**
+     * The server's site-written XML file stays. When the package's copy differs from it, the copy
+     * is shown in the notes, since what the vendor changed in it must be carried over by hand.
+     */
+    private void keep(String path, Path target, String payload, Optional<byte[]> theirs)
+        throws IOException {
+      kept.add(
+          new PackageContents.Kept(
+              path, payload, "written by the installer for this server; never replaced"));
+      if (payload.equals(Sums.of(target).sha256())) {
+        return;
+      }
+      String sentence =
+          path
+              + " holds this server's database connection and is not replaced. The package ships"
+              + " another copy of it; carry over by hand what the hotfix changed in it";
+      if (theirs.isEmpty()) {
+        notes.say(sentence + " (the copy is too large to show here; it is in the package)");
+        return;
+      }
+      String text = new String(theirs.get(), StandardCharsets.ISO_8859_1);
+      List<String> lines = new ArrayList<>(List.of(text.split("\\r?\\n", -1)));
+      if (lines.get(lines.size() - 1).isEmpty()) {
+        lines.remove(lines.size() - 1);
+      }
+      notes.sayAndQuote(sentence + ". The package's copy:", lines);
+    }
+
     private static String keys(List<String> keys) {
       if (keys.isEmpty()) {
         return "none";
@@ -498,7 +611,11 @@ public final class OfficialPackage {
    * lays down.
    */
   private static List<PackageContents.Entry> deletions(
-      Readme readme, Set<String> added, PackagePaths paths, List<String> notes) {
+      Readme readme,
+      Set<String> added,
+      PackagePaths paths,
+      List<String> notes,
+      SiteDecisions decisions) {
     List<PackageContents.Entry> out = new ArrayList<>();
     Set<String> seen = new LinkedHashSet<>();
     // compared as resolved paths too: WindowsPath equality ignores case, as the file system does,
@@ -536,6 +653,13 @@ public final class OfficialPackage {
             && !laidDown.contains(target)
             && seen.add(path)
             && seenTargets.add(target)) {
+          if (decisions.of(path).filter(d -> d.kind() == SiteDecisions.Kind.KEEP).isPresent()) {
+            notes.add(
+                path
+                    + " matches a pattern the package readme deletes, but it is this site's own"
+                    + " file, not the vendor's leftover: it is not deleted");
+            continue;
+          }
           out.add(deletion(path));
           fromGlobs++;
         }
@@ -596,6 +720,62 @@ public final class OfficialPackage {
   }
 
   /**
+   * The libraries under {@code WEB-INF/lib} that look like an older version of one the package lays
+   * down and that neither the package nor the readme's lists touch. It is a warning and nothing is
+   * deleted: the rule goes by file names, and no package has yet left such a file behind.
+   */
+  private static Optional<String> superseded(
+      List<PackageContents.Entry> entries, PackagePaths paths, String webappPrefix) {
+    String lib = webappPrefix + "WEB-INF/lib/";
+    List<String> brought = new ArrayList<>();
+    Set<String> touched = new HashSet<>();
+    for (PackageContents.Entry e : entries) {
+      if (e.path().startsWith(lib) && e.path().indexOf('/', lib.length()) < 0) {
+        String name = e.path().substring(lib.length());
+        touched.add(name.toLowerCase(Locale.ROOT));
+        if (e.action() != Action.DELETE) {
+          brought.add(name);
+        }
+      }
+    }
+    if (brought.isEmpty()) {
+      return Optional.empty();
+    }
+    Path directory = paths.resolve(lib + "_").getParent();
+    if (directory == null || !Files.isDirectory(directory)) {
+      return Optional.empty();
+    }
+    List<String> onDisk;
+    try (Stream<Path> list = Files.list(directory)) {
+      onDisk =
+          list.filter(Files::isRegularFile).map(p -> p.getFileName().toString()).sorted().toList();
+    } catch (IOException e) {
+      throw new UncheckedIOException("cannot list " + directory, e);
+    }
+    List<String> found = new ArrayList<>();
+    for (String name : onDisk) {
+      Optional<JarName> here = JarName.of(name);
+      if (here.isEmpty() || touched.contains(name.toLowerCase(Locale.ROOT))) {
+        continue;
+      }
+      brought.stream()
+          .filter(b -> JarName.of(b).filter(newer -> here.get().olderThan(newer)).isPresent())
+          .findFirst()
+          .ifPresent(b -> found.add(name + " (the package brings " + b + ")"));
+    }
+    if (found.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        "WEB-INF/lib holds "
+            + (found.size() == 1 ? "a library" : found.size() + " libraries")
+            + " in an older version than the package brings, outside the readme's lists: "
+            + String.join(", ", found)
+            + "; nothing is deleted, check by hand whether it is a leftover and remove it while"
+            + " the server is stopped");
+  }
+
+  /**
    * The warning about files that usually hold site settings and are about to be replaced: the
    * webapp's files by name, because the running server reads them, and the installation's templates
    * as a count.
@@ -638,7 +818,9 @@ public final class OfficialPackage {
         "settings you changed in these files are overwritten and must be applied again: "
             + String.join(", ", shown)
             + more
-            + (templates.isEmpty() ? "" : "; so are " + counted));
+            + (templates.isEmpty() ? "" : "; so are " + counted)
+            + ". With the vendor's WAR as a baseline (`jrs-hotfix baseline add`), the webapp's"
+            + " files you changed are kept or merged instead");
   }
 
   /** True for the configuration files a site edits, as opposed to code the hotfix ships. */

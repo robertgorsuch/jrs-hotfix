@@ -3,6 +3,7 @@ package com.jaspersoft.jrshotfix.app;
 import com.jaspersoft.jrshotfix.engine.Plan;
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
+import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,7 +17,9 @@ import picocli.CommandLine.Parameters;
  * {@code jrs-hotfix apply <package.zip>}. Invariants: at a terminal without {@code --yes} the
  * operator confirms the package checksum against the support portal before anything is planned, and
  * a "no" is exit 2 with nothing touched; {@code --yes} skips only the questions, never a check;
- * whether the checksum was confirmed or skipped is written to the run log.
+ * whether the checksum was confirmed or skipped is written to the run log; on a server with a
+ * baseline the package is applied with a prepared merge, and never while a file in it waits for a
+ * decision.
  */
 @Command(
     name = "apply",
@@ -32,8 +35,27 @@ final class ApplyCommand extends AppCommand {
   @Parameters(index = "0", paramLabel = "<package.zip>", description = "The hotfix ZIP.")
   Path file;
 
-  @Option(names = "--plan", description = "Show the plan and stop; nothing is changed.")
+  @Option(
+      names = "--plan",
+      description = "Show the plan and stop; nothing is changed on the server.")
   boolean plan;
+
+  @Option(
+      names = "--merge",
+      paramLabel = "<mergeId>",
+      description =
+          "Apply with this prepared merge. Without it, on a server with a baseline, the newest"
+              + " merge still valid for the package is used, or one is prepared.")
+  String merge;
+
+  @Option(
+      names = "--on-conflict",
+      paramLabel = "<rule>",
+      description =
+          "When a merge is prepared here, a properties key both changed: ask, mine, theirs or"
+              + " fail. Default: the setting merge.onConflict, else ask at a terminal and fail"
+              + " otherwise.")
+  MergeWorkspace.OnConflict onConflict;
 
   @Override
   public Integer call() {
@@ -60,8 +82,17 @@ final class ApplyCommand extends AppCommand {
             Optional.of("download the package again from the support portal"));
       }
     }
-    HotfixPlans.ApplyArgs args = new HotfixPlans.ApplyArgs(file, confirmed);
-    Plan p = boot.plans().planApply(args);
+    // with a baseline, what this site changed is compared, kept and merged before anything is
+    // planned; a file that waits for the operator stops the apply here, with exit 2
+    HotfixPlans plans = boot.plans();
+    HotfixPlans.ApplyArgs args =
+        plans.resolveApply(
+            file,
+            confirmed,
+            Optional.ofNullable(merge),
+            Optional.ofNullable(onConflict),
+            MergeCommand.fallback(boot));
+    Plan p = plans.planApply(args);
     List<String> audit =
         global.yes()
             ? List.of(HotfixPlans.AUDIT_CHECKSUM_CONFIRMED + " skipped with --yes")

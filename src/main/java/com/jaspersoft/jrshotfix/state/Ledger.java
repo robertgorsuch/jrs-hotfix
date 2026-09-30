@@ -44,21 +44,7 @@ public final class Ledger {
   public synchronized void updateState(String id, HotfixState state) {
     List<LedgerEntry> all = new ArrayList<>();
     for (LedgerEntry e : all()) {
-      all.add(
-          e.id().equals(id)
-              ? new LedgerEntry(
-                  e.id(),
-                  e.release(),
-                  e.edition(),
-                  e.build(),
-                  e.title(),
-                  state,
-                  e.origin(),
-                  e.runId(),
-                  e.snapshotRef(),
-                  e.installedAt(),
-                  e.files())
-              : e);
+      all.add(e.id().equals(id) ? e.withState(state) : e);
     }
     write(all);
   }

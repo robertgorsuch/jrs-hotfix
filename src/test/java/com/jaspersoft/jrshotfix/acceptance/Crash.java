@@ -23,8 +23,12 @@ final class Crash {
    * Starts {@code apply <standard package> --yes} and returns once it is paused at {@code step}.
    */
   static Cli.Running startAndPauseAt(Fixture f, String step) throws Exception {
-    Cli.Running r =
-        f.cli.withEnv("JRS_HOTFIX_TEST_PAUSE_AT", step).start("apply", f.pkg().toString(), "--yes");
+    return startAndPauseAt(f, step, "apply", f.pkg().toString(), "--yes");
+  }
+
+  /** Starts {@code args} and returns once the run is paused at {@code step}. */
+  static Cli.Running startAndPauseAt(Fixture f, String step, String... args) throws Exception {
+    Cli.Running r = f.cli.withEnv("JRS_HOTFIX_TEST_PAUSE_AT", step).start(args);
     Path runs = f.home.resolve("runs");
     for (int i = 0; i < 300; i++) {
       if (pausedMarker(runs)) {

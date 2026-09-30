@@ -231,8 +231,10 @@ final class PlanExecutor {
 
   /**
    * The inputs recovery compares: a half-done run has changed the target files by design, so only
-   * what identifies the request and the installation counts. Apply: the package, the settings and
-   * the installed release. Rollback: the settings and each hotfix's installing run.
+   * what identifies the request and the installation counts. Apply: the package, the settings, the
+   * installed release, and the merge it was planned with, by id and by the hash of its document, so
+   * a merge edited after the run began is refused. Rollback: the settings and each hotfix's
+   * installing run.
    */
   static List<String> changedStableKeys(
       String operation, Map<String, String> stored, Map<String, String> rebuilt) {
@@ -243,7 +245,11 @@ final class PlanExecutor {
     for (String key : keys) {
       boolean stable =
           operation.equals(HotfixPlans.APPLY)
-              ? key.equals("package") || key.equals("settings") || key.equals("installed")
+              ? key.equals("package")
+                  || key.equals("settings")
+                  || key.equals("installed")
+                  || key.equals(HotfixPlans.MERGE_INPUT)
+                  || key.equals(HotfixPlans.MERGE_DOC_INPUT)
               : key.equals("settings") || key.startsWith("hotfix:");
       if (stable && !Objects.equals(stored.get(key), rebuilt.get(key))) {
         changed.add(key);
