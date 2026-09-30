@@ -21,7 +21,7 @@ about to run, so using the menu also teaches the scripted form.
 
 ```
 jrs-hotfix                                   menu at a terminal; usage otherwise
-jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--plan] [--yes]
+jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--keep-superseded] [--plan] [--yes]
 jrs-hotfix apply <package.zip> --war <in.war> --out <out.war> [--merge <mergeId>]
 jrs-hotfix rollback <id> [--cascade] [--plan] [--yes]
 jrs-hotfix verify <package.zip>
@@ -91,9 +91,21 @@ the files on disk whoever put them there.
   applied outside jrs-hotfix, and the run goes on;
 - the webapp states no build: a warning, and the run goes on.
 
-A library under `WEB-INF/lib` that looks like an older version of one the
-package brings, and that the readme's lists do not name, is reported in the
-plan. Nothing is deleted on that ground: the rule goes by file names.
+A library under `WEB-INF/lib` that is an older version of one the package
+brings, and that the readme's lists do not name, is deleted as superseded
+when the ledger or a baseline knows it as the vendor's (a library an earlier
+hotfix brought, or the release's). The plan lists them under their own
+heading, they go into the snapshot, and a rollback puts them back;
+`--keep-superseded` leaves them. A library nothing knows may be the site's
+own: it is reported and left, with one exception. When such a library is a
+web fragment (it holds `META-INF/web-fragment.xml`, as `log4j-jakarta-web`
+does), leaving it beside the newer one makes Tomcat refuse to deploy the
+whole webapp ("More than one fragment with the name"), so `apply` and
+`verify` refuse with exit 2 and say what to do: `record` or `baseline add`
+the hotfix that brought it, and it is deleted as superseded; or remove it by
+hand if it is the site's. This came from a field test where a hotfix brought
+log4j 2.25.4 and deleted the release's 2.24.3 while the 2.25.3 of the hotfix
+before it stayed, named by no list, and the server would not start.
 
 ## Settings files
 

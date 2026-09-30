@@ -91,7 +91,8 @@ public final class HotfixPlans {
       boolean checksumConfirmed,
       Optional<String> mergeId,
       Optional<Path> war,
-      Optional<Path> out) {
+      Optional<Path> out,
+      boolean keepSuperseded) {
     public ApplyArgs {
       Objects.requireNonNull(packageFile, "packageFile");
       Objects.requireNonNull(mergeId, "mergeId");
@@ -102,8 +103,22 @@ public final class HotfixPlans {
       }
     }
 
+    public ApplyArgs(
+        Path packageFile,
+        boolean checksumConfirmed,
+        Optional<String> mergeId,
+        Optional<Path> war,
+        Optional<Path> out) {
+      this(packageFile, checksumConfirmed, mergeId, war, out, false);
+    }
+
     public ApplyArgs(Path packageFile, boolean checksumConfirmed, Optional<String> mergeId) {
       this(packageFile, checksumConfirmed, mergeId, Optional.empty(), Optional.empty());
+    }
+
+    /** These arguments with superseded libraries left where they are. */
+    public ApplyArgs keepingSuperseded() {
+      return new ApplyArgs(packageFile, checksumConfirmed, mergeId, war, out, true);
     }
 
     public ApplyArgs(Path packageFile, boolean checksumConfirmed) {
@@ -113,7 +128,12 @@ public final class HotfixPlans {
     /** These arguments with a WAR as the target. */
     public ApplyArgs intoWar(Path warFile, Path outFile) {
       return new ApplyArgs(
-          packageFile, checksumConfirmed, mergeId, Optional.of(warFile), Optional.of(outFile));
+          packageFile,
+          checksumConfirmed,
+          mergeId,
+          Optional.of(warFile),
+          Optional.of(outFile),
+          keepSuperseded);
     }
   }
 
@@ -208,7 +228,7 @@ public final class HotfixPlans {
     MergePlans merges = new MergePlans(rt);
     Optional<MergeDoc> merge = args.mergeId().map(merges::forApply);
     PackageContents contents =
-        merge.isPresent() ? readPackage(file, merges.decisions(merge.get())) : readPackage(file);
+        readPackage(file, merge.map(merges::decisions).orElse(SiteDecisions.NONE), args);
     merge.ifPresent(m -> merges.check(m, contents));
     List<FileTarget> targets = FileTarget.resolve(contents, rt.paths(), rt.files());
     ApplyInput in = new ApplyInput(file, contents, rt.paths(), targets, merge);
@@ -232,6 +252,7 @@ public final class HotfixPlans {
     warnings.add(
         "the service is stopped for the swap; this node only, other cluster nodes are not touched");
     List<String> changes = new ArrayList<>(applyChanges(targets));
+    changes.addAll(supersededChanges(contents));
     merge.ifPresent(m -> changes.addAll(MergePlans.changes(m)));
 
     List<Step> steps = new ArrayList<>();
@@ -301,7 +322,7 @@ public final class HotfixPlans {
     MergePlans merges = new MergePlans(rt);
     Optional<MergeDoc> merge = args.mergeId().map(merges::forApply);
     PackageContents contents =
-        merge.isPresent() ? readPackage(file, merges.decisions(merge.get())) : readPackage(file);
+        readPackage(file, merge.map(merges::decisions).orElse(SiteDecisions.NONE), args);
     merge.ifPresent(m -> merges.check(m, contents));
     List<FileTarget> targets = FileTarget.resolve(contents, rt.paths(), rt.files());
     ApplyInput in = new ApplyInput(file, contents, rt.paths(), targets, merge);
@@ -339,6 +360,7 @@ public final class HotfixPlans {
             + " is written beside its record "
             + target.sidecar().getFileName());
     List<String> changes = new ArrayList<>(applyChanges(targets));
+    changes.addAll(supersededChanges(contents));
     merge.ifPresent(m -> changes.addAll(MergePlans.changes(m)));
 
     List<Step> steps = new ArrayList<>();
@@ -399,10 +421,37 @@ public final class HotfixPlans {
    * unreadable and (exit 6) one that is not an official package. Writes nothing.
    */
   public PackageContents readPackage(Path packageFile) {
-    return readPackage(packageFile, SiteDecisions.NONE);
+    return readPackage(packageFile, SiteDecisions.NONE, Optional.empty());
   }
 
-  private PackageContents readPackage(Path packageFile, SiteDecisions decisions) {
+  private PackageContents readPackage(Path packageFile, SiteDecisions decisions, ApplyArgs args) {
+    return readPackage(packageFile, decisions, Optional.of(args));
+  }
+
+  /**
+   * The webapp paths known to be the vendor's: every file of every baseline, and every file a
+   * ledger entry owns under the webapp. A library among them that the package supersedes is
+   * deleted; one outside them is the site's and stays.
+   */
+  static Set<String> vendorFiles(HotfixRuntime rt) {
+    Set<String> known = new HashSet<>();
+    for (BaselineManifest b : rt.baselines().list()) {
+      b.files().forEach(f -> known.add(f.path()));
+    }
+    Path webapp = rt.settings().webappDir();
+    for (LedgerEntry e : rt.ledger().all()) {
+      for (OwnedFile f : e.files()) {
+        Path p = f.path().toAbsolutePath().normalize();
+        if (p.startsWith(webapp)) {
+          known.add(webapp.relativize(p).toString().replace('\\', '/'));
+        }
+      }
+    }
+    return known;
+  }
+
+  private PackageContents readPackage(
+      Path packageFile, SiteDecisions decisions, Optional<ApplyArgs> args) {
     Path file = packageFile.toAbsolutePath().normalize();
     if (!Files.isRegularFile(file)) {
       throw new HotfixException(HotfixException.PRECHECK, file + " does not exist", AS_PUBLISHED);
@@ -411,9 +460,12 @@ public final class HotfixPlans {
       throw new HotfixException(
           HotfixException.UNSUPPORTED, file + OfficialPackage.NEITHER_SHAPE_SHORT, AS_PUBLISHED);
     }
+    boolean keep = args.map(ApplyArgs::keepSuperseded).orElse(false);
+    OfficialPackage.Superseded superseded =
+        new OfficialPackage.Superseded(vendorFiles(rt)::contains, !keep);
     try {
       return OfficialPackage.read(
-          file, rt.paths(), rt.settings().webappName(), rt.files(), decisions);
+          file, rt.paths(), rt.settings().webappName(), rt.files(), decisions, superseded);
     } catch (IOException | UncheckedIOException e) {
       throw new HotfixException(
           HotfixException.PRECHECK,
@@ -520,6 +572,19 @@ public final class HotfixPlans {
               String.join(", ", parts)));
     }
     out.add("every path: jrs-hotfix verify <package.zip>");
+    return out;
+  }
+
+  /** The preview's heading for the libraries deleted as superseded, when there are any. */
+  private static List<String> supersededChanges(PackageContents contents) {
+    if (contents.superseded().isEmpty()) {
+      return List.of();
+    }
+    List<String> out = new ArrayList<>();
+    out.add("Superseded libraries deleted (" + contents.superseded().size() + ")");
+    for (String path : contents.superseded()) {
+      out.add("  " + path.substring(path.lastIndexOf('/') + 1));
+    }
     return out;
   }
 
@@ -828,10 +893,11 @@ public final class HotfixPlans {
     }
     PackageContents c;
     try {
-      c = OfficialPackage.read(file, rt.paths(), rt.settings().webappName(), rt.files());
+      // as the apply reads it: what the ledger and the baselines know decides the superseded ones
+      c = readPackage(file);
     } catch (HotfixException e) {
       return unreadable(e.getMessage());
-    } catch (IOException | UncheckedIOException e) {
+    } catch (UncheckedIOException e) {
       return unreadable("cannot read " + file + ": " + e.getMessage());
     }
     List<String> problems;
@@ -924,6 +990,7 @@ public final class HotfixPlans {
               + " edition but the webapp is "
               + rt.settings().webappName());
     }
+    problems.addAll(c.conflicts());
     List<String> build = problems.isEmpty() ? buildCheck(rt, c).problems() : List.of();
     if (!build.isEmpty()) {
       // the build says the webapp is not what the ledger describes: "already installed" would
@@ -1016,6 +1083,9 @@ public final class HotfixPlans {
     a.mergeId().ifPresent(id -> m.put("mergeId", id));
     a.war().ifPresent(w -> m.put("war", w.toString()));
     a.out().ifPresent(o -> m.put("out", o.toString()));
+    if (a.keepSuperseded()) {
+      m.put("keepSuperseded", true);
+    }
     return Json.write(m);
   }
 
@@ -1031,7 +1101,8 @@ public final class HotfixPlans {
         n.get("checksumConfirmed").asBoolean(),
         n.hasNonNull("mergeId") ? Optional.of(n.get("mergeId").asText()) : Optional.empty(),
         n.hasNonNull("war") ? Optional.of(Path.of(n.get("war").asText())) : Optional.empty(),
-        n.hasNonNull("out") ? Optional.of(Path.of(n.get("out").asText())) : Optional.empty());
+        n.hasNonNull("out") ? Optional.of(Path.of(n.get("out").asText())) : Optional.empty(),
+        n.path("keepSuperseded").asBoolean(false));
   }
 
   public static String rollbackArgsJson(RollbackArgs a) {

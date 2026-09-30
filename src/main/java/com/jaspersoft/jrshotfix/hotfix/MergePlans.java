@@ -1,20 +1,16 @@
 package com.jaspersoft.jrshotfix.hotfix;
 
 import com.jaspersoft.jrshotfix.baseline.BaseView;
-import com.jaspersoft.jrshotfix.baseline.BaselineManifest;
 import com.jaspersoft.jrshotfix.merge.MergeDoc;
 import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
 import com.jaspersoft.jrshotfix.pkg.FileTarget;
 import com.jaspersoft.jrshotfix.pkg.PackageContents;
 import com.jaspersoft.jrshotfix.pkg.PackagePaths;
 import com.jaspersoft.jrshotfix.pkg.SiteDecisions;
-import com.jaspersoft.jrshotfix.state.LedgerEntry;
-import com.jaspersoft.jrshotfix.state.OwnedFile;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -198,19 +194,8 @@ final class MergePlans {
   /** Prepares a new merge of {@code contents} against {@code view}. */
   MergeDoc prepare(
       Path file, PackageContents contents, BaseView view, MergeWorkspace.OnConflict onConflict) {
-    Set<String> known = new HashSet<>();
-    for (BaselineManifest b : rt.baselines().list()) {
-      b.files().forEach(f -> known.add(f.path()));
-    }
+    Set<String> known = HotfixPlans.vendorFiles(rt);
     Path webapp = rt.settings().webappDir();
-    for (LedgerEntry e : rt.ledger().all()) {
-      for (OwnedFile f : e.files()) {
-        Path p = f.path().toAbsolutePath().normalize();
-        if (p.startsWith(webapp)) {
-          known.add(webapp.relativize(p).toString().replace('\\', '/'));
-        }
-      }
-    }
     try {
       return rt.merges()
           .prepare(

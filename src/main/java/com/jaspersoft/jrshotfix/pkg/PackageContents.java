@@ -11,8 +11,12 @@ import java.util.Optional;
  * deletions last; a file the package ships that must not land here is in {@code kept}, never in
  * {@code entries}, so no step touches it; {@code vendorFiles} is every file the package ships, as
  * it ships it, whatever happens to it here, and {@code deletions} every path and glob its readmes
- * list for deletion, whether or not such a file is here; notes are what the operator must know or
- * do by hand, the readme's own lines among them in the readme's order, never executed.
+ * list for deletion, whether or not such a file is here; {@code superseded} are the deletions among
+ * {@code entries} that no readme named: libraries of an older version than the package brings,
+ * known to be the vendor's; {@code conflicts} are what would make the server refuse to start once
+ * the package is applied, each a sentence, and the apply is refused for them; notes are what the
+ * operator must know or do by hand, the readme's own lines among them in the readme's order, never
+ * executed.
  */
 public record PackageContents(
     String id,
@@ -25,12 +29,16 @@ public record PackageContents(
     List<Kept> kept,
     List<VendorFile> vendorFiles,
     List<String> deletions,
+    List<String> superseded,
+    List<String> conflicts,
     List<Note> notes) {
   public PackageContents {
     entries = List.copyOf(entries);
     kept = List.copyOf(kept);
     vendorFiles = List.copyOf(vendorFiles);
     deletions = List.copyOf(deletions);
+    superseded = List.copyOf(superseded);
+    conflicts = List.copyOf(conflicts);
     notes = List.copyOf(notes);
   }
 
@@ -79,6 +87,8 @@ public record PackageContents(
         entries,
         List.of(),
         vendorFilesOf(entries),
+        List.of(),
+        List.of(),
         List.of(),
         notes);
   }

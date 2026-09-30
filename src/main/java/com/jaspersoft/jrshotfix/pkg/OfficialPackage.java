@@ -22,8 +22,10 @@ import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -250,8 +252,39 @@ public final class OfficialPackage {
   public static PackageContents read(
       Path source, PackagePaths paths, String webappName, FileOps files, SiteDecisions decisions)
       throws IOException {
+    return read(source, paths, webappName, files, decisions, Superseded.REPORT_ONLY);
+  }
+
+  /**
+   * What the reader does with a library under {@code WEB-INF/lib} that is an older version of one
+   * the package brings and that no readme names (0.2 design, section 6). {@code vendors} says
+   * whether a webapp path is known to be the vendor's, from a baseline or a ledger entry: only such
+   * a library is deleted, so one the site added never is. With {@code delete} false, or for a
+   * library not known, the library is reported and left.
+   */
+  public record Superseded(Predicate<String> vendors, boolean delete) {
+    /** Nothing is known to be the vendor's: every such library is a warning. */
+    public static final Superseded REPORT_ONLY = new Superseded(p -> false, true);
+
+    public Superseded {
+      Objects.requireNonNull(vendors, "vendors");
+    }
+  }
+
+  /**
+   * As {@link #read(Path, PackagePaths, String, FileOps, SiteDecisions)}, with what to do about
+   * superseded libraries.
+   */
+  public static PackageContents read(
+      Path source,
+      PackagePaths paths,
+      String webappName,
+      FileOps files,
+      SiteDecisions decisions,
+      Superseded superseded)
+      throws IOException {
     try {
-      return readChecked(source, paths, webappName, decisions);
+      return readChecked(source, paths, webappName, decisions, superseded);
     } catch (IllegalArgumentException e) {
       // an InvalidPathException among them: a name this file system cannot hold
       throw unusable(e.getMessage(), Optional.of(e));
@@ -278,7 +311,11 @@ public final class OfficialPackage {
   }
 
   private static PackageContents readChecked(
-      Path source, PackagePaths paths, String webappName, SiteDecisions decisions)
+      Path source,
+      PackagePaths paths,
+      String webappName,
+      SiteDecisions decisions,
+      Superseded policy)
       throws IOException {
     Shape shape =
         shape(source)
@@ -368,7 +405,12 @@ public final class OfficialPackage {
       // with a merge, what happens to each changed file is said by the merge, not guessed here
       configNotes(entries).forEach(notes::say);
     }
-    superseded(entries, paths, webappPrefix).ifPresent(notes::say);
+    List<String> supersededPaths = new ArrayList<>();
+    List<String> conflicts = new ArrayList<>();
+    for (String note :
+        superseded(entries, paths, webappPrefix, policy, supersededPaths, conflicts)) {
+      notes.say(note);
+    }
     return new PackageContents(
         header.id(),
         header.release(),
@@ -382,6 +424,8 @@ public final class OfficialPackage {
         listed.stream()
             .filter(p -> PackagePaths.pathProblems(p.replace('*', '_')).isEmpty())
             .toList(),
+        supersededPaths,
+        conflicts,
         notes.lines());
   }
 
@@ -720,12 +764,19 @@ public final class OfficialPackage {
   }
 
   /**
-   * The libraries under {@code WEB-INF/lib} that look like an older version of one the package lays
-   * down and that neither the package nor the readme's lists touch. It is a warning and nothing is
-   * deleted: the rule goes by file names, and no package has yet left such a file behind.
+   * The libraries under {@code WEB-INF/lib} that are an older version of one the package lays down
+   * and that neither the package nor the readme's lists touch. One known to be the vendor's is
+   * deleted (the entry is added to {@code entries} and its path to {@code deleted}); any other is
+   * reported and left. Seen for real on 2026-09-30: a package brought log4j 2.25.4 and deleted the
+   * release's 2.24.3, while the 2.25.3 of the hotfix before it stayed, unnamed by any list.
    */
-  private static Optional<String> superseded(
-      List<PackageContents.Entry> entries, PackagePaths paths, String webappPrefix) {
+  private static List<String> superseded(
+      List<PackageContents.Entry> entries,
+      PackagePaths paths,
+      String webappPrefix,
+      Superseded policy,
+      List<String> deleted,
+      List<String> conflicts) {
     String lib = webappPrefix + "WEB-INF/lib/";
     List<String> brought = new ArrayList<>();
     Set<String> touched = new HashSet<>();
@@ -739,11 +790,11 @@ public final class OfficialPackage {
       }
     }
     if (brought.isEmpty()) {
-      return Optional.empty();
+      return List.of();
     }
     Path directory = paths.resolve(lib + "_").getParent();
     if (directory == null || !Files.isDirectory(directory)) {
-      return Optional.empty();
+      return List.of();
     }
     List<String> onDisk;
     try (Stream<Path> list = Files.list(directory)) {
@@ -752,28 +803,104 @@ public final class OfficialPackage {
     } catch (IOException e) {
       throw new UncheckedIOException("cannot list " + directory, e);
     }
-    List<String> found = new ArrayList<>();
+    List<String> known = new ArrayList<>();
+    List<String> unknown = new ArrayList<>();
     for (String name : onDisk) {
       Optional<JarName> here = JarName.of(name);
       if (here.isEmpty() || touched.contains(name.toLowerCase(Locale.ROOT))) {
         continue;
       }
-      brought.stream()
-          .filter(b -> JarName.of(b).filter(newer -> here.get().olderThan(newer)).isPresent())
-          .findFirst()
-          .ifPresent(b -> found.add(name + " (the package brings " + b + ")"));
+      Optional<String> newer =
+          brought.stream()
+              .filter(b -> JarName.of(b).filter(n -> here.get().olderThan(n)).isPresent())
+              .findFirst();
+      if (newer.isEmpty()) {
+        continue;
+      }
+      String said = name + " (the package brings " + newer.get() + ")";
+      if (policy.delete() && policy.vendors().test("WEB-INF/lib/" + name)) {
+        known.add(said);
+        entries.add(deletion(lib + name));
+        deleted.add(lib + name);
+      } else {
+        unknown.add(said);
+        // two web fragments of one name make Tomcat refuse the whole webapp (Servlet 8.2.2 2c;
+        // seen 2026-09-30 with log4j-jakarta-web 2.25.3 beside 2.25.4): a jar that would be
+        // left beside its newer self and is a fragment is a refusal, not a warning
+        fragmentName(directory.resolve(name))
+            .ifPresent(
+                fragment ->
+                    conflicts.add(
+                        "WEB-INF/lib/"
+                            + name
+                            + " is a web fragment named "
+                            + fragment
+                            + " and the package brings "
+                            + newer.get()
+                            + ": Tomcat refuses to deploy a webapp with two fragments of one"
+                            + " name, so the older one must go first. "
+                            + (policy.delete()
+                                ? "Neither the ledger nor a baseline knows it as the vendor's:"
+                                    + " if an earlier hotfix brought it, `jrs-hotfix record` that"
+                                    + " hotfix's package or `jrs-hotfix baseline add` it, and the"
+                                    + " jar is deleted as superseded; if it is this site's own,"
+                                    + " remove it by hand"
+                                : "--keep-superseded would leave it; run without, or remove it"
+                                    + " by hand")));
+      }
     }
-    if (found.isEmpty()) {
+    List<String> notes = new ArrayList<>();
+    if (!known.isEmpty()) {
+      notes.add(
+          (known.size() == 1 ? "a library" : known.size() + " libraries")
+              + " under WEB-INF/lib in an older version than the package brings, and named by"
+              + " none of the readme's lists, "
+              + (known.size() == 1 ? "is" : "are")
+              + " deleted as superseded: "
+              + String.join(", ", known)
+              + "; the ledger or a baseline knows "
+              + (known.size() == 1 ? "it" : "them")
+              + " as the vendor's, and a rollback puts "
+              + (known.size() == 1 ? "it" : "them")
+              + " back from the snapshot (--keep-superseded leaves them)");
+    }
+    if (!unknown.isEmpty()) {
+      notes.add(
+          "WEB-INF/lib holds "
+              + (unknown.size() == 1 ? "a library" : unknown.size() + " libraries")
+              + " in an older version than the package brings, outside the readme's lists: "
+              + String.join(", ", unknown)
+              + "; "
+              + (policy.delete()
+                  ? "neither the ledger nor a baseline knows "
+                      + (unknown.size() == 1 ? "it" : "them")
+                      + " as the vendor's, so nothing is deleted"
+                  : "left as --keep-superseded asks")
+              + "; check by hand whether it is a leftover and remove it while the server is"
+              + " stopped");
+    }
+    return notes;
+  }
+
+  /** The name of the web fragment {@code jar} declares, when it is one; empty otherwise. */
+  private static Optional<String> fragmentName(Path jar) {
+    try (InputStream in = Files.newInputStream(jar);
+        ZipInputStream zip = new ZipInputStream(in)) {
+      ZipEntry entry;
+      while ((entry = zip.getNextEntry()) != null) {
+        if (entry.getName().equals("META-INF/web-fragment.xml")) {
+          String xml = new String(zip.readAllBytes(), StandardCharsets.UTF_8);
+          Matcher m = FRAGMENT_NAME.matcher(xml);
+          return Optional.of(m.find() ? m.group(1).strip() : "(unnamed)");
+        }
+      }
+      return Optional.empty();
+    } catch (IOException | RuntimeException e) {
       return Optional.empty();
     }
-    return Optional.of(
-        "WEB-INF/lib holds "
-            + (found.size() == 1 ? "a library" : found.size() + " libraries")
-            + " in an older version than the package brings, outside the readme's lists: "
-            + String.join(", ", found)
-            + "; nothing is deleted, check by hand whether it is a leftover and remove it while"
-            + " the server is stopped");
   }
+
+  private static final Pattern FRAGMENT_NAME = Pattern.compile("<name>\\s*([^<]+?)\\s*</name>");
 
   /**
    * The warning about files that usually hold site settings and are about to be replaced: the
