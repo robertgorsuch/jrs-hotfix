@@ -32,6 +32,7 @@ jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] | status [<mergeI
                   | discard <mergeId>]
 jrs-hotfix list
 jrs-hotfix record <package.zip>
+jrs-hotfix forget <id>
 jrs-hotfix runs [list | show <id> | resume <id> | rollback <id> | prune --older-than <days> [--include-failed]]
 jrs-hotfix settings [show | set <key> <value> | detect]
 jrs-hotfix --docs | --version | --help
@@ -81,7 +82,10 @@ the files on disk whoever put them there.
 - the webapp states the package's build and the ledger has no installed entry
   for it: refused with exit 2, as above, even when a file or two differ;
 - the webapp states an older build than the newest installed entry: refused
-  with exit 2, because the webapp was replaced under the ledger;
+  with exit 2, because the webapp was replaced under the ledger. After a
+  redeploy from a WAR that is expected: `jrs-hotfix forget <id>` takes the
+  entry out of the ledger (the snapshot stays until `runs prune`), and the
+  package applies again;
 - the webapp states a newer build than every entry: a warning that a hotfix was
   applied outside jrs-hotfix, and the run goes on;
 - the webapp states no build: a warning, and the run goes on.

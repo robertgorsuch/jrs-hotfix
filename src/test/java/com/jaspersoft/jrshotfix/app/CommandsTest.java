@@ -72,6 +72,27 @@ class CommandsTest {
   }
 
   @Test
+  void should_forget_a_hotfix_the_webapp_no_longer_holds() throws Exception {
+    Fixture f = fixture();
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
+    // the operator redeploys the webapp from the WAR: the files are the old ones again
+    Files.writeString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar"), "old foo");
+    // --non-interactive without --yes: a confirmation is needed
+    assertThat(f.run("forget", "JRSHF-10.0.0-20260730-0457")).isEqualTo(2);
+    assertThat(f.err()).contains("needs a confirmation");
+    assertThat(f.run("forget", "JRSHF-10.0.0-20260730-0457", "--yes")).isEqualTo(0);
+    assertThat(f.out())
+        .contains("forgot JRSHF-10.0.0-20260730-0457")
+        .contains("nothing was changed");
+    assertThat(f.run("list")).isEqualTo(0);
+    assertThat(f.out()).doesNotContain("JRSHF-10.0.0-20260730-0457");
+    assertThat(f.run("forget", "JRSHF-10.0.0-20260730-0457", "--yes")).isEqualTo(2);
+    assertThat(f.err()).contains("unknown hotfix");
+    // the package applies again
+    assertThat(f.run("apply", f.pkg.toString(), "--plan")).isEqualTo(0);
+  }
+
+  @Test
   void should_print_the_readme_notes_in_the_plan_preview_when_planning() throws Exception {
     Fixture f = fixture();
     assertThat(f.run("apply", f.pkg.toString(), "--plan")).isEqualTo(0);

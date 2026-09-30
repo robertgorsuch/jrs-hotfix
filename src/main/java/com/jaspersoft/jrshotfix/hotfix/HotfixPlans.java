@@ -578,6 +578,26 @@ public final class HotfixPlans {
   }
 
   /**
+   * Takes a hotfix out of the ledger because the webapp no longer holds it: it was redeployed from
+   * a WAR, or the hotfix was removed by hand. Touches nothing on the server; the entry's snapshot
+   * stays until {@code runs prune}, and the hotfix's baseline stays too. Refuses (exit 2) an id the
+   * ledger does not have.
+   */
+  public LedgerEntry forget(String id) {
+    LedgerEntry entry =
+        rt.ledger()
+            .find(id)
+            .orElseThrow(
+                () ->
+                    new HotfixException(
+                        HotfixException.PRECHECK,
+                        "unknown hotfix " + id,
+                        "run `jrs-hotfix list` for the ids"));
+    rt.ledger().delete(id);
+    return entry;
+  }
+
+  /**
    * Records a hotfix applied by hand from its package. Touches nothing on the server: the entry's
    * files are the package's adds and replaces, with the hash on disk now as the before-hash and the
    * package's payload hash as the after-hash; there is no snapshot, so a recorded entry cannot be
@@ -777,11 +797,15 @@ public final class HotfixPlans {
               + rt.settings().webappName());
     }
     List<String> build = problems.isEmpty() ? buildCheck(rt, c).problems() : List.of();
-    if (rt.ledger().find(c.id()).filter(e -> e.state() == HotfixState.INSTALLED).isPresent()) {
+    if (!build.isEmpty()) {
+      // the build says the webapp is not what the ledger describes: "already installed" would
+      // be the ledger's word against the webapp's, so only the build is reported
+      problems.addAll(build);
+    } else if (rt.ledger()
+        .find(c.id())
+        .filter(e -> e.state() == HotfixState.INSTALLED)
+        .isPresent()) {
       problems.add(c.id() + " is already installed");
-      problems.addAll(build);
-    } else if (!build.isEmpty()) {
-      problems.addAll(build);
     } else if (problems.isEmpty() && inPlace(targets)) {
       problems.add(
           c.id()

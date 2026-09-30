@@ -68,10 +68,11 @@ record BuildCheck(List<String> problems, List<String> warnings) {
               + installed
               + ", older than "
               + newest.get().id()
-              + " which the ledger lists as installed: the webapp was replaced under the ledger;"
-              + " put back the webapp the ledger describes, or take that entry out of "
-              + rt.home().ledgerFile()
-              + " by hand");
+              + " which the ledger lists as installed: the webapp was replaced under the ledger"
+              + " (redeployed from a WAR?). If the webapp is right, run `jrs-hotfix forget "
+              + newest.get().id()
+              + "` for it and for every later entry; if the ledger is right, put back the webapp"
+              + " it describes");
       return new BuildCheck(problems, warnings);
     }
     boolean known =
