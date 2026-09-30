@@ -114,9 +114,17 @@ final class MergeCommand implements Callable<Integer> {
                 + " terminal and fail otherwise.")
     MergeWorkspace.OnConflict onConflict;
 
+    @Option(
+        names = "--war",
+        paramLabel = "<file.war>",
+        description =
+            "Merge into this WAR instead of the server; the same WAR is then given to `apply"
+                + " --war`. The home is --home, else jrs-hotfix beside the WAR.")
+    Path war;
+
     @Override
     public Integer call() {
-      Bootstrap boot = open();
+      Bootstrap boot = war == null ? open() : open().forWar(war);
       return executor(boot).mutate("merge prepare", () -> prepare(boot));
     }
 

@@ -22,11 +22,12 @@ about to run, so using the menu also teaches the scripted form.
 ```
 jrs-hotfix                                   menu at a terminal; usage otherwise
 jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--plan] [--yes]
+jrs-hotfix apply <package.zip> --war <in.war> --out <out.war> [--merge <mergeId>]
 jrs-hotfix rollback <id> [--cascade] [--plan] [--yes]
 jrs-hotfix verify <package.zip>
-jrs-hotfix scan [--package <package.zip>]
+jrs-hotfix scan [--package <package.zip>] [--war <file.war>]
 jrs-hotfix baseline [list | add <war | dir | package.zip> | remove <id>]
-jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] | status [<mergeId>]
+jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war>] | status [<mergeId>]
                   | show <mergeId> <path> | edit <mergeId> <path>
                   | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
                   | discard <mergeId>]
@@ -121,6 +122,13 @@ terminal and `fail` otherwise.
 A rollback brings the site's files back byte for byte. Without a baseline
 every file the package ships is replaced, as before.
 
+`apply <package.zip> --war <in.war> --out <out.war>` does the same to a WAR
+instead of a server: no service, no snapshot; the input is never modified, the
+output is written beside its record `<out.war>.jrs-hotfix.json`, and the home
+is `jrs-hotfix` beside the WAR unless `--home` says otherwise. `scan --war` and
+`merge prepare --war` read the site's files from the WAR. Files of
+`js-install.zip` are not part of a WAR and are left out.
+
 ## Rollback
 
 `jrs-hotfix rollback <id>` restores a hotfix's snapshot: replaced files come
@@ -197,6 +205,7 @@ baselines/<id>/payload/...    the content of the mergeable ones (settings, XML, 
 merges/<mergeId>/merge.json   a prepared merge: what an apply does with every file the package ships
 merges/<mergeId>/report.txt   the same, as `merge status` prints it
 merges/<mergeId>/files/<path>/base|mine|theirs|merged   the three sides of a file that needed a merge, and the result
+wars/webapps/<name>/          the unpacked copy of the WAR being worked on (--war); may be deleted at any time
 ```
 
 ## Settings

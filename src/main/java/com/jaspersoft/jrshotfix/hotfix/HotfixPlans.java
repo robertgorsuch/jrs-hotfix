@@ -47,6 +47,10 @@ import java.util.Set;
  */
 public final class HotfixPlans {
   public static final String APPLY = "hotfix.apply";
+
+  /** The operation of an apply whose target is a WAR; rebuilt as {@link #APPLY} is. */
+  public static final String APPLY_WAR = "hotfix.apply-war";
+
   public static final String ROLLBACK = "hotfix.rollback";
 
   /** The audit kind the front end writes to the run log when the package checksum is confirmed. */
@@ -82,14 +86,34 @@ public final class HotfixPlans {
    * mergeId} names the prepared merge that says what happens to the files this site changed; empty
    * means there was no baseline to compare with, and the package is applied as 0.1 applied it.
    */
-  public record ApplyArgs(Path packageFile, boolean checksumConfirmed, Optional<String> mergeId) {
+  public record ApplyArgs(
+      Path packageFile,
+      boolean checksumConfirmed,
+      Optional<String> mergeId,
+      Optional<Path> war,
+      Optional<Path> out) {
     public ApplyArgs {
       Objects.requireNonNull(packageFile, "packageFile");
       Objects.requireNonNull(mergeId, "mergeId");
+      Objects.requireNonNull(war, "war");
+      Objects.requireNonNull(out, "out");
+      if (war.isPresent() != out.isPresent()) {
+        throw new IllegalArgumentException("--war and --out go together");
+      }
+    }
+
+    public ApplyArgs(Path packageFile, boolean checksumConfirmed, Optional<String> mergeId) {
+      this(packageFile, checksumConfirmed, mergeId, Optional.empty(), Optional.empty());
     }
 
     public ApplyArgs(Path packageFile, boolean checksumConfirmed) {
       this(packageFile, checksumConfirmed, Optional.empty());
+    }
+
+    /** These arguments with a WAR as the target. */
+    public ApplyArgs intoWar(Path warFile, Path outFile) {
+      return new ApplyArgs(
+          packageFile, checksumConfirmed, mergeId, Optional.of(warFile), Optional.of(outFile));
     }
   }
 
@@ -177,6 +201,9 @@ public final class HotfixPlans {
    * JSP cache, start, wait, record.
    */
   public Plan planApply(ApplyArgs args) {
+    if (args.war().isPresent()) {
+      return planApplyWar(args);
+    }
     Path file = args.packageFile().toAbsolutePath().normalize();
     MergePlans merges = new MergePlans(rt);
     Optional<MergeDoc> merge = args.mergeId().map(merges::forApply);
@@ -258,6 +285,107 @@ public final class HotfixPlans {
     }
     return new Plan(
         "hotfix-apply-" + RunIds.next(rt.clock()), steps, summary, PlanFingerprint.of(inputs));
+  }
+
+  /**
+   * The five-step plan that hotfixes a WAR instead of a server (0.2 design, section 7): preflight,
+   * stage, assemble the output from the input and the staged files, check it, name it and write its
+   * record. The runtime must be turned towards the WAR (its unpacked copy is the webapp); the input
+   * WAR is never modified, and there is no service, no snapshot and no rollback.
+   */
+  private Plan planApplyWar(ApplyArgs args) {
+    Path file = args.packageFile().toAbsolutePath().normalize();
+    WarSteps.Target target =
+        new WarSteps.Target(
+            args.war().orElseThrow(), args.out().orElseThrow(), rt.settings().webappName());
+    MergePlans merges = new MergePlans(rt);
+    Optional<MergeDoc> merge = args.mergeId().map(merges::forApply);
+    PackageContents contents =
+        merge.isPresent() ? readPackage(file, merges.decisions(merge.get())) : readPackage(file);
+    merge.ifPresent(m -> merges.check(m, contents));
+    List<FileTarget> targets = FileTarget.resolve(contents, rt.paths(), rt.files());
+    ApplyInput in = new ApplyInput(file, contents, rt.paths(), targets, merge);
+    List<String> warnings = new ArrayList<>();
+    for (String problem : applicability(rt, contents, targets)) {
+      warnings.add("this plan will be refused before anything is written: " + problem);
+    }
+    if (Files.exists(target.out())) {
+      warnings.add(
+          "this plan will be refused before anything is written: " + target.out() + " exists");
+    }
+    warnings.addAll(buildWarnings(rt, contents));
+    warnings.add(
+        "package "
+            + file.getFileName()
+            + " (sha256 "
+            + contents.sha256()
+            + "); compare it with the checksum on the support portal"
+            + (args.checksumConfirmed() ? " (confirmed)" : ""));
+    for (PackageContents.Note note : contents.notes()) {
+      warnings.add((note.quoted() ? QUOTE_PREFIX : NOTE_PREFIX) + note.text());
+    }
+    long outside = targets.stream().filter(t -> target.pathOf(t).isEmpty()).count();
+    if (outside > 0) {
+      warnings.add(
+          outside
+              + " file(s) of the package belong to the installation tree (js-install.zip), not to"
+              + " a WAR, and are left out; apply them on the server the WAR is deployed to");
+    }
+    warnings.add(
+        "no server is touched: "
+            + target.war().getFileName()
+            + " is read, "
+            + target.out().getFileName()
+            + " is written beside its record "
+            + target.sidecar().getFileName());
+    List<String> changes = new ArrayList<>(applyChanges(targets));
+    merge.ifPresent(m -> changes.addAll(MergePlans.changes(m)));
+
+    List<Step> steps = new ArrayList<>();
+    steps.add(new WarSteps.Preflight(rt, in, target));
+    steps.add(new ApplyPhaseSteps.StageFiles(rt, in));
+    steps.add(new WarSteps.Assemble(rt, in, target));
+    steps.add(new WarSteps.Check(rt, in, target));
+    steps.add(new WarSteps.WriteOut(rt, in, target));
+
+    Map<String, String> rollbackPoints = new LinkedHashMap<>();
+    rollbackPoints.put(ApplySteps.VERIFY, "nothing written");
+    rollbackPoints.put(ApplySteps.APPLY, "staging removed; the input WAR was never modified");
+    rollbackPoints.put(WarSteps.PHASE_ASSEMBLE, "the temporary output removed");
+    rollbackPoints.put(ApplySteps.RECORD, "the output and its record removed");
+    PlanSummary summary =
+        new PlanSummary(
+            APPLY_WAR,
+            contents.id() + " into " + target.out().getFileName(),
+            in.touched(),
+            List.of(),
+            false,
+            List.of(),
+            rollbackPoints,
+            "official-package",
+            warnings,
+            changes);
+
+    Map<String, String> inputs = new LinkedHashMap<>();
+    inputs.put("package", contents.sha256());
+    inputs.put("settings", rt.settings().fingerprintInput());
+    inputs.put("installed", JrsVersion.ofWebapp(rt.settings().webappDir()).orElse("unknown"));
+    inputs.put("war", FileTarget.hashOf(rt.files(), target.war()).orElse("absent"));
+    inputs.put("out", target.out().toString());
+    for (FileTarget t : targets) {
+      inputs.put("target:" + t.packagePath(), t.before().orElse("absent"));
+      if (t.entry().merged()) {
+        inputs.put("merged:" + t.packagePath(), t.after().orElse("absent"));
+      }
+    }
+    if (merge.isPresent()) {
+      inputs.put(MERGE_INPUT, merge.get().id());
+      inputs.put(
+          MERGE_DOC_INPUT,
+          FileTarget.hashOf(rt.files(), rt.merges().docFile(merge.get().id())).orElse("absent"));
+    }
+    return new Plan(
+        "hotfix-apply-war-" + RunIds.next(rt.clock()), steps, summary, PlanFingerprint.of(inputs));
   }
 
   /** The fingerprint input that names the merge an apply was planned with. */
@@ -875,7 +1003,7 @@ public final class HotfixPlans {
    */
   public Plan rebuild(String operation, String argsJson) {
     return switch (operation) {
-      case APPLY -> planApply(applyArgs(argsJson));
+      case APPLY, APPLY_WAR -> planApply(applyArgs(argsJson));
       case ROLLBACK -> planRollback(rollbackArgs(argsJson));
       default -> throw new IllegalArgumentException("unknown operation " + operation);
     };
@@ -886,6 +1014,8 @@ public final class HotfixPlans {
     m.put("packageFile", a.packageFile().toString());
     m.put("checksumConfirmed", a.checksumConfirmed());
     a.mergeId().ifPresent(id -> m.put("mergeId", id));
+    a.war().ifPresent(w -> m.put("war", w.toString()));
+    a.out().ifPresent(o -> m.put("out", o.toString()));
     return Json.write(m);
   }
 
@@ -899,7 +1029,9 @@ public final class HotfixPlans {
     return new ApplyArgs(
         Path.of(n.get("packageFile").asText()),
         n.get("checksumConfirmed").asBoolean(),
-        n.hasNonNull("mergeId") ? Optional.of(n.get("mergeId").asText()) : Optional.empty());
+        n.hasNonNull("mergeId") ? Optional.of(n.get("mergeId").asText()) : Optional.empty(),
+        n.hasNonNull("war") ? Optional.of(Path.of(n.get("war").asText())) : Optional.empty(),
+        n.hasNonNull("out") ? Optional.of(Path.of(n.get("out").asText())) : Optional.empty());
   }
 
   public static String rollbackArgsJson(RollbackArgs a) {

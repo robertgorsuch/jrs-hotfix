@@ -22,11 +22,12 @@ about to run, so using the menu also teaches the scripted form.
 ```
 jrs-hotfix                                   menu at a terminal; usage otherwise
 jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--plan] [--yes]
+jrs-hotfix apply <package.zip> --war <in.war> --out <out.war> [--merge <mergeId>]
 jrs-hotfix rollback <id> [--cascade] [--plan] [--yes]
 jrs-hotfix verify <package.zip>
-jrs-hotfix scan [--package <package.zip>]
+jrs-hotfix scan [--package <package.zip>] [--war <file.war>]
 jrs-hotfix baseline [list | add <war | dir | package.zip> | remove <id>]
-jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] | status [<mergeId>]
+jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war>] | status [<mergeId>]
                   | show <mergeId> <path> | edit <mergeId> <path>
                   | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
                   | discard <mergeId>]
@@ -217,6 +218,29 @@ applied by hand whose package was never added), `apply` is refused with exit 2
 rather than run blind; add that package with `jrs-hotfix baseline add`, or
 remove the baselines.
 
+### A WAR as the target
+
+`jrs-hotfix apply <package.zip> --war <in.war> --out <out.war>` makes a hotfixed
+WAR from a WAR and touches no server: no service, no snapshot, no rollback. The
+input is never modified; the output is written beside its record,
+`<out.war>.jrs-hotfix.json`, which says what was applied, from what, and what
+every file became. The same merge applies: `scan --war <in.war>` and
+`merge prepare <package.zip> --war <in.war>` read the site's files from the WAR,
+and a merge prepared for a WAR is what `apply --war` uses, by itself or with
+`--merge <mergeId>`.
+
+The home is `--home` (or `JRS_HOTFIX_HOME`), else `jrs-hotfix` beside the WAR.
+The baseline of the release goes into that home as for a server; the hotfix's
+baseline is written by every `apply --war`, so the next hotfix on the output
+WAR is compared with it. The WAR is unpacked under `<home>/wars/` while it is
+worked on, one WAR at a time; that copy may be deleted at any time.
+
+Files of `js-install.zip` (`buildomatic`, `samples`) are not part of a WAR:
+the plan says how many were left out, and they are applied on the server the
+WAR is deployed to. A WAR is not a server's inventory: `apply --war` writes no
+ledger entry, and the server that deploys the output knows the hotfix through
+`jrs-hotfix record <package.zip>` there.
+
 ## Rollback
 
 `jrs-hotfix rollback <id>` restores a hotfix's snapshot: replaced files come
@@ -295,6 +319,7 @@ baselines/<id>/payload/...    the content of the mergeable ones (settings, XML, 
 merges/<mergeId>/merge.json   a prepared merge: what an apply does with every file the package ships
 merges/<mergeId>/report.txt   the same, as `merge status` prints it
 merges/<mergeId>/files/<path>/base|mine|theirs|merged   the three sides of a file that needed a merge, and the result
+wars/webapps/<name>/          the unpacked copy of the WAR being worked on (--war); may be deleted at any time
 ```
 
 ## Settings

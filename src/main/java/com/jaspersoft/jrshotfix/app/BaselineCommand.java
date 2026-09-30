@@ -56,7 +56,7 @@ final class BaselineCommand implements Callable<Integer> {
   static final class ListBaselines extends AppCommand {
     @Override
     public Integer call() {
-      List<BaselineManifest> all = open().runtime().baselines().list();
+      List<BaselineManifest> all = open().runtimeOrWarLike().baselines().list();
       PrintWriter out = out();
       if (all.isEmpty()) {
         out.println(
@@ -107,7 +107,8 @@ final class BaselineCommand implements Callable<Integer> {
     }
 
     private int add(Bootstrap boot) {
-      HotfixPlans plans = boot.plans();
+      // a home made for WARs may have no settings yet: the WAR's own settings serve
+      HotfixPlans plans = new HotfixPlans(boot.runtimeOrWarLike());
       BaselineStore store = plans.runtime().baselines();
       if (!Files.exists(source)) {
         throw new HotfixException(
@@ -177,7 +178,7 @@ final class BaselineCommand implements Callable<Integer> {
 
     private int remove(Bootstrap boot) {
       try {
-        if (!boot.runtime().baselines().remove(id)) {
+        if (!boot.runtimeOrWarLike().baselines().remove(id)) {
           return ExitCodes.fail(
               err(),
               ExitCodes.PRECHECK_FAILED,

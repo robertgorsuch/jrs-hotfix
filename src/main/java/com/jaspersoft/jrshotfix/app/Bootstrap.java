@@ -13,12 +13,15 @@ import com.jaspersoft.jrshotfix.platform.NativeTempDir;
 import com.jaspersoft.jrshotfix.platform.OperatorPrompt;
 import com.jaspersoft.jrshotfix.platform.Platform;
 import com.jaspersoft.jrshotfix.platform.Platforms;
+import com.jaspersoft.jrshotfix.platform.ServiceConfig;
 import com.jaspersoft.jrshotfix.redact.Redactor;
 import com.jaspersoft.jrshotfix.service.ServerProbe;
 import com.jaspersoft.jrshotfix.snapshot.SnapshotStore;
 import com.jaspersoft.jrshotfix.state.Ledger;
+import com.jaspersoft.jrshotfix.war.WarFile;
 import java.io.Console;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -195,6 +198,86 @@ final class Bootstrap {
     }
     NativeTempDir.use(home.nativeTemp());
     return home;
+  }
+
+  /**
+   * This bootstrap turned towards a WAR instead of a server (0.2 design, section 7): the home is
+   * the one given, else {@code jrs-hotfix} beside the WAR; the settings name the unpacked copy of
+   * the WAR under the home as the webapp, with no service; the WAR is unpacked there unless the
+   * copy is of this WAR already. A home that has no settings gets these written, so {@code baseline
+   * add} and the other commands work in it without {@code --war}. A server's own settings are never
+   * replaced.
+   */
+  Bootstrap forWar(Path war) {
+    Path file = war.toAbsolutePath().normalize();
+    if (!Files.isRegularFile(file)) {
+      throw new HotfixException(
+          HotfixException.PRECHECK, file + " does not exist", "point --war at the WAR file");
+    }
+    Home warHome = explicitHome ? home : new Home(file.getParent().resolve("jrs-hotfix"));
+    Settings s = warSettings(warHome, file);
+    Bootstrap turned =
+        new Bootstrap(
+            warHome, Optional.of(s), platform, redactor, clock, interactive, true, lastHome);
+    turned.ensureHome();
+    try {
+      WarFile.unpack(file, s.webappDir(), platform.files());
+    } catch (IOException e) {
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          "cannot unpack " + file + ": " + e.getMessage(),
+          "check the file and the free space under " + warHome.root(),
+          e);
+    }
+    if (SettingsStore.load(warHome).isEmpty()) {
+      SettingsStore.save(warHome, s);
+    }
+    return turned;
+  }
+
+  /** The settings a WAR is worked on with: its unpacked copy is the webapp, there is no service. */
+  static Settings warSettings(Home warHome, Path war) {
+    String name = war.getFileName().toString();
+    String stem =
+        name.toLowerCase(java.util.Locale.ROOT).endsWith(".war")
+            ? name.substring(0, name.length() - 4)
+            : name;
+    if (!stem.matches("(?i)jasperserver(-pro)?")) {
+      stem = "jasperserver-pro";
+    }
+    Path wars = warHome.root().resolve("wars");
+    return new Settings(
+        wars,
+        wars,
+        stem,
+        ServiceConfig.Kind.MANUAL,
+        Optional.empty(),
+        Optional.empty(),
+        60,
+        Optional.empty(),
+        URI.create("http://localhost/" + stem));
+  }
+
+  /**
+   * The runtime for a command that needs no server: this home's settings when it has them, else the
+   * settings a WAR is worked on with, so {@code baseline add} works in a home made for WARs before
+   * any {@code --war} command has been run there. Nothing is written by this.
+   */
+  HotfixRuntime runtimeOrWarLike() {
+    if (settings.isPresent()) {
+      return runtime();
+    }
+    Settings s = warSettings(home, home.root().resolve("jasperserver-pro.war"));
+    ensureHome();
+    return new HotfixRuntime(
+        home,
+        s,
+        platform,
+        new Ledger(home),
+        new SnapshotStore(home, platform.files(), clock),
+        clock,
+        Sleeper.system(),
+        ServerProbe.http(s.baseUrl()));
   }
 
   HotfixRuntime runtime() {

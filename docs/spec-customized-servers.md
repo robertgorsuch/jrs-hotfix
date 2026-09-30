@@ -528,6 +528,35 @@ output is a new file. The home is `--home`, else a directory beside `--out`. The
 is what `record` reads on the server the WAR is deployed to, so that server's ledger
 learns the hotfix and its merge.
 
+As built (2026-09-30, `WarFile`, `WarSteps`, `Bootstrap.forWar`):
+
+- The WAR is unpacked under `<home>/wars/webapps/<name>/` (one WAR at a time, keyed by the
+  WAR's hash and reused while it matches), and the scan, the merge and the plan read it as
+  they read a webapp. The design's "read as a stream" holds for the baseline; for the target
+  the code that judges, merges and stages files is the server's, unchanged, which is worth
+  a copy on disk. The output is assembled as designed: the input streamed to a temporary
+  file without the entries the package replaces or deletes, the staged files appended,
+  every written and dropped entry checked, then the rename.
+- The home is `--home` (or the environment), else `jrs-hotfix` beside the input WAR, not
+  beside `--out`: `scan --war` and `merge prepare --war` have no `--out`, and the three
+  commands must share one home. A home that has no settings gets settings written that
+  name the unpacked copy as the webapp, with no service, so `baseline add` works in it.
+- No ledger entry, origin `WAR` or otherwise. The ledger is a server's inventory, one
+  entry per hotfix id; a home used for several WARs would refuse the second. The sidecar
+  is the record. `record` on the deploying server does not read it yet: it records from
+  the files as before, which gives the same hashes.
+- The hotfix baseline is written by `apply --war` as by an apply on a server, so the
+  output WAR, given as the next input, is compared with the hotfix's files.
+- Tested: unit (unpack, assemble, check; the commands over a site's WAR with and without a
+  baseline, with a merge prepared by `apply` and by `merge prepare`, the home beside the
+  WAR, the refusals) and acceptance scenario 19 through the shaded jar. Run against the
+  real pristine 10.0.0 WAR and the package of 2026-07-30, no server involved: a site WAR
+  (the scheduler filled in, one key added to `jasperreports.properties`), the release
+  baseline added, `scan --war --package` naming the one collision, `apply --war --out`
+  in two minutes with both properties files merged automatically, the output holding
+  5844 entries (5819 less 149 deleted plus 174 added, as the check step counts), the
+  site's key and the vendor's new keys in it, and a 116 KB sidecar with 448 files.
+
 ## 8. Commands and menu
 
 ```
@@ -581,7 +610,7 @@ Every message names the file and the one command that moves things forward.
 |---|---|---|
 | 1 | section 1 (installed build), 4.4 (installer-written files), 5a (JSP cache), 6 with baseline-free warning | each fixes something 0.1 does wrong on every server; none needs a baseline. **Landed in v0.1.0**; the preflight `build` table, `context.xml` kept, and the superseded warning landed after it, on 2026-09-30 |
 | 2 | sections 2, 3, 4, 5, full section 6 | the customized path of the diagram. **Landed 2026-09-30**; where it differs from the text above, section 13 says how and why |
-| 3 | section 7 | the WAR target; reuses everything above. Wanted for 0.2 (decided 2026-09-30) |
+| 3 | section 7 | the WAR target; reuses everything above. Wanted for 0.2 (decided 2026-09-30). **Landed 2026-09-30** for 0.3; see the note under section 7 |
 
 ## 12. The diagram, box by box
 
