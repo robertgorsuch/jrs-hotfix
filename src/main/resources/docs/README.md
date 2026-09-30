@@ -21,7 +21,7 @@ about to run, so using the menu also teaches the scripted form.
 
 ```
 jrs-hotfix                                   menu at a terminal; usage otherwise
-jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--plan] [--yes]
+jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--keep-superseded] [--plan] [--yes]
 jrs-hotfix apply <package.zip> --war <in.war> --out <out.war> [--merge <mergeId>]
 jrs-hotfix rollback <id> [--cascade] [--plan] [--yes]
 jrs-hotfix verify <package.zip>
@@ -74,6 +74,12 @@ The ledger lives in the home, beside the installation, not in the webapp. After
 the webapp is redeployed from a WAR, the ledger still lists the hotfixes it had;
 preflight notices (the webapp states an older build than the ledger's newest
 entry) and refuses. `jrs-hotfix forget <id>` takes such an entry out.
+
+A library under `WEB-INF/lib` that is an older version of one the package
+brings, and that no readme list names, is deleted as superseded when the
+ledger or a baseline knows it as the vendor's; a rollback puts it back, and
+`--keep-superseded` leaves it. One nothing knows may be the site's: it is
+reported and left.
 
 The installer's files keep this server's values: `js.quartz.properties`,
 `js.jdbc.properties`, `hibernate.properties` and `keystore.init.properties`

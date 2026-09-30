@@ -59,6 +59,14 @@ final class ApplyCommand extends AppCommand {
   MergeWorkspace.OnConflict onConflict;
 
   @Option(
+      names = "--keep-superseded",
+      description =
+          "Leave a library under WEB-INF/lib that is an older version of one the package brings"
+              + " and that no readme list names. By default such a library is deleted when the"
+              + " ledger or a baseline knows it as the vendor's; one the site added is never.")
+  boolean keepSuperseded;
+
+  @Option(
       names = "--war",
       paramLabel = "<in.war>",
       description =
@@ -113,6 +121,9 @@ final class ApplyCommand extends AppCommand {
             MergeCommand.fallback(boot));
     if (war != null) {
       args = args.intoWar(war, out);
+    }
+    if (keepSuperseded) {
+      args = args.keepingSuperseded();
     }
     Plan p = plans.planApply(args);
     List<String> audit =

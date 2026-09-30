@@ -184,10 +184,14 @@ public final class BaselineStore {
               payload,
               false));
     }
+    // what the readmes delete, and what the package superseded here: seen through this hotfix,
+    // neither is the vendor's any more
     List<String> deleted =
-        contents.deletions().stream()
+        java.util.stream.Stream.concat(
+                contents.deletions().stream(), contents.superseded().stream())
             .filter(d -> d.startsWith(prefix))
             .map(d -> d.substring(prefix.length()))
+            .distinct()
             .toList();
     Path building = building();
     try {

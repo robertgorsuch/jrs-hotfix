@@ -184,8 +184,10 @@ class ApplyWithMergeTest {
     String argsJson = HotfixPlans.applyArgsJson(args(zip, doc));
     assertThat(HotfixPlans.applyArgs(argsJson).mergeId()).contains(doc.id());
     Plan rebuilt = s.f.plans.rebuild(HotfixPlans.APPLY, argsJson);
+    // a deletion done is not planned again (the file is gone), as for the readme's deletions
+    assertThat(plan.summary().filesTouched()).containsAll(rebuilt.summary().filesTouched());
     assertThat(rebuilt.summary().filesTouched())
-        .containsExactlyInAnyOrderElementsOf(plan.summary().filesTouched());
+        .containsAll(plan.summary().filesTouched().stream().filter(Files::isRegularFile).toList());
     assertThat(rebuilt.fingerprint().inputs())
         .containsEntry(HotfixPlans.MERGE_INPUT, doc.id())
         .containsEntry(

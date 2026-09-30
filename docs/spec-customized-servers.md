@@ -509,6 +509,30 @@ the artifact `jasperreports-spring-hotfix-7.0.5-JS` and the version `79557-SNAPS
 7.0.6 of that jar is another artifact to the rule and is not reported. That errs towards
 saying nothing, which is the right side for a rule that goes by names.
 
+The second package showed a leftover the same day. A field test (2026-09-30, `libls.txt`)
+applied the package of 2026-07-30 over the hotfix before it and ran with two of every log4j
+jar: the readme deletes the release's `log4j-*-2.24.3.jar` and its globs name only the
+`jasperreports-*` families, while the 2.25.3 the earlier hotfix brought (JS-78055) stays
+beside the 2.25.4 (JS-79040). So the `delete (superseded)` action is built, with the three
+conditions above: a jar not laid down by the package, the same artifact in a higher version
+brought, and the jar known to a baseline or a ledger entry (`HotfixPlans.vendorFiles`).
+Such a jar is a `DELETE` entry like a readme's, snapshotted and rolled back, listed in
+`PackageContents.superseded` and under its own heading in the plan, and recorded in the
+hotfix's baseline as deleted, so the view through the hotfix does not expect it. A jar
+nothing knows is reported and left, as before. `--keep-superseded` turns the deletion off
+and is stored with the run's arguments, so a rebuilt plan keeps the choice. Without a
+baseline the ledger alone decides: a hotfix applied by jrs-hotfix, or recorded, makes its
+jars known.
+
+One case is a refusal rather than a warning: an older jar nothing knows that is a web
+fragment (`META-INF/web-fragment.xml`). Two fragments of one name make Tomcat refuse the
+whole webapp (Servlet 8.2.2 2c; the tester's `catalina.out`: "More than one fragment with
+the name [log4j] was found … Duplicate fragments found in [log4j-jakarta-web-2.25.3.jar,
+log4j-jakarta-web-2.25.4.jar]"), so applying would take the server down for certain.
+`PackageContents.conflicts` carries the sentence, `applicability` makes it a problem, and
+the message names the two ways out: make the earlier hotfix known (`record`, `baseline
+add`) so the jar is deleted as superseded, or remove it by hand if it is the site's.
+
 ## 7. A WAR as the target
 
 `jrs-hotfix apply <package.zip> --war <in.war> --out <out.war> [--merge <mergeId>]`
