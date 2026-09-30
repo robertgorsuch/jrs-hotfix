@@ -115,10 +115,11 @@ final class ApplySteps {
 
   /**
    * Step 1: the package fits this installation and the host can take it. Release and edition must
-   * match the webapp, the hotfix must not be installed already (by the ledger, or by every file
-   * being in place as the plan found them, which would be an outage that changes nothing), the
-   * directories written to must be writable, the home's volume must hold staging and the snapshot,
-   * the replaced files' owners must be restorable, and the service must be identifiable.
+   * match the webapp, the hotfix must not be installed already (by the ledger, by the build the
+   * webapp states, or by every file being in place as the plan found them, which would be an outage
+   * that changes nothing), the webapp must not be older than the ledger says, the directories
+   * written to must be writable, the home's volume must hold staging and the snapshot, the replaced
+   * files' owners must be restorable, and the service must be identifiable.
    */
   static final class Preflight extends ReadOnly {
     Preflight(HotfixRuntime rt, ApplyInput in) {
@@ -176,7 +177,14 @@ final class ApplySteps {
             "fix the listed problems, then run again; nothing was changed");
       }
       CheckResult controller = ServiceSteps.controllerCheck(rt);
-      return controller instanceof CheckResult.Fail ? controller : baseUrlCheck(rt);
+      if (controller instanceof CheckResult.Fail) {
+        return controller;
+      }
+      CheckResult baseUrl = baseUrlCheck(rt);
+      List<String> warnings = HotfixPlans.buildWarnings(rt, in.contents());
+      return baseUrl instanceof CheckResult.Pass && !warnings.isEmpty()
+          ? CheckResult.warn(String.join("; ", warnings))
+          : baseUrl;
     }
 
     private long snapshotBytes(List<String> problems) {

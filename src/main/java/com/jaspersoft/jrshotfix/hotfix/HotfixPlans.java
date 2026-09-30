@@ -31,6 +31,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Builds every plan and answers every read-only question. Invariants: planning touches nothing
@@ -110,6 +111,7 @@ public final class HotfixPlans {
     for (String problem : applicability(rt, contents, targets)) {
       warnings.add("this plan will be refused before anything is changed: " + problem);
     }
+    warnings.addAll(buildWarnings(rt, contents));
     warnings.add(
         "package "
             + file.getFileName()
@@ -551,7 +553,13 @@ public final class HotfixPlans {
         paths(c.adds()),
         paths(c.replaces()),
         paths(c.deletes()),
-        c.noteLines());
+        notes(c, buildWarnings(rt, c)));
+  }
+
+  private static List<String> notes(PackageContents c, List<String> warnings) {
+    List<String> notes = new ArrayList<>(warnings);
+    notes.addAll(c.noteLines());
+    return notes;
   }
 
   private static VerifyReport unreadable(String problem) {
@@ -565,10 +573,11 @@ public final class HotfixPlans {
 
   /**
    * Why the package does not apply here, empty when it does: the installed release must equal the
-   * package's, the edition must match the webapp name, and the hotfix must not be installed
-   * already, by the ledger or, when the ledger does not know it, by the files themselves. Shared by
-   * {@code verify} and the apply plan's preflight; {@code targets} are the package's files as they
-   * were on disk when the caller resolved them.
+   * package's, the edition must match the webapp name, the hotfix must not be installed already, by
+   * the ledger or, when the ledger does not know it, by the build the webapp states or by the files
+   * themselves, and the webapp must not be older than the ledger says ({@link BuildCheck}). Shared
+   * by {@code verify} and the apply plan's preflight; {@code targets} are the package's files as
+   * they were on disk when the caller resolved them.
    */
   static List<String> applicability(HotfixRuntime rt, PackageContents c, List<FileTarget> targets) {
     List<String> problems = new ArrayList<>();
@@ -590,8 +599,12 @@ public final class HotfixPlans {
               + " edition but the webapp is "
               + rt.settings().webappName());
     }
+    List<String> build = problems.isEmpty() ? buildCheck(rt, c).problems() : List.of();
     if (rt.ledger().find(c.id()).filter(e -> e.state() == HotfixState.INSTALLED).isPresent()) {
       problems.add(c.id() + " is already installed");
+      problems.addAll(build);
+    } else if (!build.isEmpty()) {
+      problems.addAll(build);
     } else if (problems.isEmpty() && inPlace(targets)) {
       problems.add(
           c.id()
@@ -601,6 +614,18 @@ public final class HotfixPlans {
               + " record <package.zip>` and the ledger will know it");
     }
     return problems;
+  }
+
+  private static BuildCheck buildCheck(HotfixRuntime rt, PackageContents c) {
+    return BuildCheck.of(rt, c, Set.of());
+  }
+
+  /**
+   * What the build the webapp states says without refusing the package: that it cannot be read, or
+   * that a hotfix was applied outside this tool.
+   */
+  static List<String> buildWarnings(HotfixRuntime rt, PackageContents c) {
+    return buildCheck(rt, c).warnings();
   }
 
   /**
