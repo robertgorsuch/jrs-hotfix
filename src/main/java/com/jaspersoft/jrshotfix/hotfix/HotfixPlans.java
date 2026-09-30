@@ -1,6 +1,8 @@
 package com.jaspersoft.jrshotfix.hotfix;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.jaspersoft.jrshotfix.baseline.BaseView;
+import com.jaspersoft.jrshotfix.baseline.BaselineManifest;
 import com.jaspersoft.jrshotfix.engine.Plan;
 import com.jaspersoft.jrshotfix.engine.PlanFingerprint;
 import com.jaspersoft.jrshotfix.engine.PlanSummary;
@@ -8,11 +10,15 @@ import com.jaspersoft.jrshotfix.engine.RunIds;
 import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.home.JrsVersion;
 import com.jaspersoft.jrshotfix.json.Json;
+import com.jaspersoft.jrshotfix.merge.MergeDoc;
+import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
 import com.jaspersoft.jrshotfix.pkg.Action;
 import com.jaspersoft.jrshotfix.pkg.FileTarget;
 import com.jaspersoft.jrshotfix.pkg.OfficialPackage;
 import com.jaspersoft.jrshotfix.pkg.PackageContents;
 import com.jaspersoft.jrshotfix.pkg.PackagePaths;
+import com.jaspersoft.jrshotfix.pkg.SiteDecisions;
+import com.jaspersoft.jrshotfix.scan.Scan;
 import com.jaspersoft.jrshotfix.service.ServiceSteps;
 import com.jaspersoft.jrshotfix.state.HotfixState;
 import com.jaspersoft.jrshotfix.state.Ledger;
@@ -25,6 +31,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -70,11 +77,86 @@ public final class HotfixPlans {
     this.rt = Objects.requireNonNull(rt, "rt");
   }
 
-  /** What {@code apply} was asked to do; stored with the run so the plan can be rebuilt. */
-  public record ApplyArgs(Path packageFile, boolean checksumConfirmed) {
+  /**
+   * What {@code apply} was asked to do; stored with the run so the plan can be rebuilt. {@code
+   * mergeId} names the prepared merge that says what happens to the files this site changed; empty
+   * means there was no baseline to compare with, and the package is applied as 0.1 applied it.
+   */
+  public record ApplyArgs(Path packageFile, boolean checksumConfirmed, Optional<String> mergeId) {
     public ApplyArgs {
       Objects.requireNonNull(packageFile, "packageFile");
+      Objects.requireNonNull(mergeId, "mergeId");
     }
+
+    public ApplyArgs(Path packageFile, boolean checksumConfirmed) {
+      this(packageFile, checksumConfirmed, Optional.empty());
+    }
+  }
+
+  /**
+   * The arguments an apply of {@code packageFile} runs with on this server. Without a baseline
+   * there is no merge. With one that fits, the newest merge still valid for this package is used,
+   * or a new one prepared, and the apply is refused (exit 2) while a file in it waits for the
+   * operator. With baselines that do not fit, the apply is refused rather than run blind. A merge
+   * named by the operator is taken as given; {@link #planApply} checks it.
+   */
+  public ApplyArgs resolveApply(
+      Path packageFile,
+      boolean checksumConfirmed,
+      Optional<String> mergeId,
+      Optional<MergeWorkspace.OnConflict> asked,
+      MergeWorkspace.OnConflict fallback) {
+    if (mergeId.isPresent()) {
+      return new ApplyArgs(packageFile, checksumConfirmed, mergeId);
+    }
+    BaseView.Resolution resolution = rt.baseView();
+    if (resolution.view().isEmpty()) {
+      if (resolution.present()) {
+        throw new HotfixException(
+            HotfixException.PRECHECK,
+            resolution.problem()
+                + "; without it jrs-hotfix cannot tell this site's changes from the vendor's",
+            resolution.remediation()
+                + "; or remove the baselines with `jrs-hotfix baseline remove <id>` to apply"
+                + " without comparing, which replaces every file the package ships");
+      }
+      return new ApplyArgs(packageFile, checksumConfirmed);
+    }
+    MergeDoc doc = prepareMerge(packageFile, asked, fallback, true);
+    if (!doc.blocking().isEmpty()) {
+      throw MergePlans.blocked(doc);
+    }
+    return new ApplyArgs(packageFile, checksumConfirmed, Optional.of(doc.id()));
+  }
+
+  /**
+   * A merge of {@code packageFile} into this server: a new one, or with {@code reuse} the newest
+   * that is still valid. Refuses (exit 2) when no baseline fits this installation. Writes under the
+   * home only.
+   */
+  public MergeDoc prepareMerge(
+      Path packageFile,
+      Optional<MergeWorkspace.OnConflict> asked,
+      MergeWorkspace.OnConflict fallback,
+      boolean reuse) {
+    BaseView.Resolution resolution = rt.baseView();
+    BaseView view =
+        resolution
+            .view()
+            .orElseThrow(
+                () ->
+                    new HotfixException(
+                        HotfixException.PRECHECK, resolution.problem(), resolution.remediation()));
+    Path file = packageFile.toAbsolutePath().normalize();
+    PackageContents contents = readPackage(file);
+    MergePlans merges = new MergePlans(rt);
+    if (reuse) {
+      Optional<MergeDoc> existing = merges.reusable(contents, view, asked);
+      if (existing.isPresent()) {
+        return existing.get();
+      }
+    }
+    return merges.prepare(file, contents, view, asked.orElse(fallback));
   }
 
   public Plan planApply(Path packageFile, boolean checksumConfirmed) {
@@ -87,9 +169,13 @@ public final class HotfixPlans {
    */
   public Plan planApply(ApplyArgs args) {
     Path file = args.packageFile().toAbsolutePath().normalize();
-    PackageContents contents = readPackage(file);
+    MergePlans merges = new MergePlans(rt);
+    Optional<MergeDoc> merge = args.mergeId().map(merges::forApply);
+    PackageContents contents =
+        merge.isPresent() ? readPackage(file, merges.decisions(merge.get())) : readPackage(file);
+    merge.ifPresent(m -> merges.check(m, contents));
     List<FileTarget> targets = FileTarget.resolve(contents, rt.paths(), rt.files());
-    ApplyInput in = new ApplyInput(file, contents, rt.paths(), targets);
+    ApplyInput in = new ApplyInput(file, contents, rt.paths(), targets, merge);
     List<String> warnings = new ArrayList<>();
     // the preview runs no step, so what preflight will refuse is said here, first
     for (String problem : applicability(rt, contents, targets)) {
@@ -106,8 +192,11 @@ public final class HotfixPlans {
     for (PackageContents.Note note : contents.notes()) {
       warnings.add((note.quoted() ? QUOTE_PREFIX : NOTE_PREFIX) + note.text());
     }
+    Scan.externalAuthWarning(contents, rt.settings().webappDir()).ifPresent(warnings::add);
     warnings.add(
         "the service is stopped for the swap; this node only, other cluster nodes are not touched");
+    List<String> changes = new ArrayList<>(applyChanges(targets));
+    merge.ifPresent(m -> changes.addAll(MergePlans.changes(m)));
 
     List<Step> steps = new ArrayList<>();
     steps.add(new ApplySteps.Preflight(rt, in));
@@ -139,7 +228,7 @@ public final class HotfixPlans {
             rollbackPoints,
             "official-package",
             warnings,
-            applyChanges(targets));
+            changes);
 
     Map<String, String> inputs = new LinkedHashMap<>();
     inputs.put("package", contents.sha256());
@@ -147,16 +236,36 @@ public final class HotfixPlans {
     inputs.put("installed", JrsVersion.ofWebapp(rt.settings().webappDir()).orElse("unknown"));
     for (FileTarget t : targets) {
       inputs.put("target:" + t.packagePath(), t.before().orElse("absent"));
+      if (t.entry().merged()) {
+        inputs.put("merged:" + t.packagePath(), t.after().orElse("absent"));
+      }
+    }
+    if (merge.isPresent()) {
+      // a merge edited after the run began is another plan: recovery compares these two
+      inputs.put(MERGE_INPUT, merge.get().id());
+      inputs.put(
+          MERGE_DOC_INPUT,
+          FileTarget.hashOf(rt.files(), rt.merges().docFile(merge.get().id())).orElse("absent"));
     }
     return new Plan(
         "hotfix-apply-" + RunIds.next(rt.clock()), steps, summary, PlanFingerprint.of(inputs));
   }
+
+  /** The fingerprint input that names the merge an apply was planned with. */
+  public static final String MERGE_INPUT = "merge";
+
+  /** The fingerprint input that holds the hash of that merge's {@code merge.json}. */
+  public static final String MERGE_DOC_INPUT = "merge.json";
 
   /**
    * Reads an official package against this installation; refuses (exit 2) a file that is absent or
    * unreadable and (exit 6) one that is not an official package. Writes nothing.
    */
   public PackageContents readPackage(Path packageFile) {
+    return readPackage(packageFile, SiteDecisions.NONE);
+  }
+
+  private PackageContents readPackage(Path packageFile, SiteDecisions decisions) {
     Path file = packageFile.toAbsolutePath().normalize();
     if (!Files.isRegularFile(file)) {
       throw new HotfixException(HotfixException.PRECHECK, file + " does not exist", AS_PUBLISHED);
@@ -166,7 +275,8 @@ public final class HotfixPlans {
           HotfixException.UNSUPPORTED, file + OfficialPackage.NEITHER_SHAPE_SHORT, AS_PUBLISHED);
     }
     try {
-      return OfficialPackage.read(file, rt.paths(), rt.settings().webappName(), rt.files());
+      return OfficialPackage.read(
+          file, rt.paths(), rt.settings().webappName(), rt.files(), decisions);
     } catch (IOException | UncheckedIOException e) {
       throw new HotfixException(
           HotfixException.PRECHECK,
@@ -174,6 +284,31 @@ public final class HotfixPlans {
           "check the download; it must be the ZIP as support published it",
           e);
     }
+  }
+
+  /** The merge of {@code id}; refuses (exit 2) an id this home does not have. */
+  public MergeDoc merge(String id) {
+    return rt.merges()
+        .load(id)
+        .orElseThrow(
+            () ->
+                new HotfixException(
+                    HotfixException.PRECHECK,
+                    "unknown merge " + id,
+                    "run `jrs-hotfix merge status` for the merges in this home"));
+  }
+
+  /** The webapp paths of {@code doc} that are no longer as it found them, nor as it leaves them. */
+  public List<String> mergeChangedSince(MergeDoc doc) {
+    return new MergePlans(rt).changedSince(doc);
+  }
+
+  /** The installed hotfix that was applied with merge {@code id}, if any. */
+  public Optional<String> installedWith(String id) {
+    return rt.ledger().installed().stream()
+        .filter(e -> e.mergeId().equals(Optional.of(id)))
+        .map(LedgerEntry::id)
+        .findFirst();
   }
 
   /** The runtime these plans are built over. */
@@ -437,7 +572,8 @@ public final class HotfixPlans {
    * Records a hotfix applied by hand from its package. Touches nothing on the server: the entry's
    * files are the package's adds and replaces, with the hash on disk now as the before-hash and the
    * package's payload hash as the after-hash; there is no snapshot, so a recorded entry cannot be
-   * rolled back by this tool.
+   * rolled back by this tool. The package's files become the hotfix's baseline, so a later scan or
+   * merge knows them as the vendor's.
    */
   public LedgerEntry record(Path packageFile) {
     PackageContents c = readPackage(packageFile);
@@ -482,6 +618,18 @@ public final class HotfixPlans {
             rt.clock().instant(),
             files);
     rt.ledger().recordInstalled(entry);
+    try {
+      rt.baselines()
+          .addHotfix(packageFile.toAbsolutePath().normalize(), c, rt.settings().webappName());
+    } catch (IOException | UncheckedIOException e) {
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          c.id() + " is recorded, but its baseline could not be written: " + e.getMessage(),
+          "check free space under "
+              + rt.home().baselines()
+              + ", then run `jrs-hotfix baseline add <package.zip>`",
+          e);
+    }
     return entry;
   }
 
@@ -610,7 +758,13 @@ public final class HotfixPlans {
   }
 
   private static BuildCheck buildCheck(HotfixRuntime rt, PackageContents c) {
-    return BuildCheck.of(rt, c, Set.of());
+    Set<String> releaseBuilds = new HashSet<>();
+    for (BaselineManifest b : rt.baselines().list()) {
+      if (b.kind() == BaselineManifest.Kind.RELEASE && b.release().equals(c.release())) {
+        releaseBuilds.add(b.build());
+      }
+    }
+    return BuildCheck.of(rt, c, releaseBuilds);
   }
 
   /**
@@ -671,6 +825,7 @@ public final class HotfixPlans {
     Map<String, Object> m = new LinkedHashMap<>();
     m.put("packageFile", a.packageFile().toString());
     m.put("checksumConfirmed", a.checksumConfirmed());
+    a.mergeId().ifPresent(id -> m.put("mergeId", id));
     return Json.write(m);
   }
 
@@ -682,7 +837,9 @@ public final class HotfixPlans {
       throw new UncheckedIOException("cannot read the apply arguments: " + e.getMessage(), e);
     }
     return new ApplyArgs(
-        Path.of(n.get("packageFile").asText()), n.get("checksumConfirmed").asBoolean());
+        Path.of(n.get("packageFile").asText()),
+        n.get("checksumConfirmed").asBoolean(),
+        n.hasNonNull("mergeId") ? Optional.of(n.get("mergeId").asText()) : Optional.empty());
   }
 
   public static String rollbackArgsJson(RollbackArgs a) {

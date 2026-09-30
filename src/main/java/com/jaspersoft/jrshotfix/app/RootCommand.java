@@ -37,6 +37,7 @@ import picocli.CommandLine.Spec;
       RecordCommand.class,
       ScanCommand.class,
       BaselineCommand.class,
+      MergeCommand.class,
       RunsCommand.class,
       SettingsCommand.class
     })

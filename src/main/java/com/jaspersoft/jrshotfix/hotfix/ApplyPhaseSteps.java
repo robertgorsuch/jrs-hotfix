@@ -132,11 +132,12 @@ final class ApplyPhaseSteps {
     }
 
     /**
-     * Puts the merged file in the place of the staged payload of a settings file this server has
-     * values of its own in: the payload must be the one that was planned, and the merge with the
-     * server's file as it is now must give the file that was planned, or the server's file has
-     * changed and the plan no longer holds. The swap then moves the merged file as it moves any
-     * other, and the snapshot holds the server's file for a rollback.
+     * Puts the merged file in the place of the staged payload. The payload must be the one that was
+     * planned. With a prepared merge, the merged file is the workspace's; without one, for a
+     * settings file this server has values of its own in, the merge with the server's file as it is
+     * now must give the file that was planned, or the server's file has changed and the plan no
+     * longer holds. The swap then moves the merged file as it moves any other, and the snapshot
+     * holds the server's file for a rollback.
      */
     private Optional<StepResult> merge(Context ctx, FileTarget t) throws IOException {
       Path staged = in.staged(ctx, t);
@@ -151,6 +152,20 @@ final class ApplyPhaseSteps {
                     + ", expected "
                     + t.entry().packageSha256().orElse("?"),
                 "the package changed since it was planned; plan again"));
+      }
+      if (t.entry().mergedFile().isPresent()) {
+        // a prepared merge holds the file to install; the hash check after this says it is the
+        // one that was planned
+        Path merged = t.entry().mergedFile().get();
+        if (!Files.isRegularFile(merged)) {
+          return Optional.of(
+              Failures.recoverable(
+                  "the merged file for " + t.packagePath() + " is gone: " + merged,
+                  "prepare the merge again, then apply with it"));
+        }
+        Files.copy(merged, staged, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        Durability.sync(staged);
+        return Optional.empty();
       }
       Optional<byte[]> theirs;
       try (InputStream file = Files.newInputStream(staged)) {

@@ -6,6 +6,7 @@ import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.engine.StepResult;
 import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
+import com.jaspersoft.jrshotfix.merge.MergeDoc;
 import com.jaspersoft.jrshotfix.pkg.FileTarget;
 import com.jaspersoft.jrshotfix.pkg.PackageContents;
 import com.jaspersoft.jrshotfix.platform.Trees;
@@ -27,8 +28,9 @@ import java.util.Optional;
  * The record phase of the apply plan: the ledger entry that makes the hotfix visible to {@code
  * list} and to a later rollback. Invariants: the entry is written only after the swap has verified
  * what it landed, so nothing is recorded as installed that is not; its before-hashes come from the
- * run's own snapshot, so they are what a rollback restores; audit lines go to the run's event
- * stream, not to the ledger.
+ * run's own snapshot, so they are what a rollback restores; the package's files are written as the
+ * hotfix's baseline, which a rollback leaves alone (the build the webapp states selects the base,
+ * so an unused one does no harm); audit lines go to the run's event stream, not to the ledger.
  */
 final class RecordSteps {
 
@@ -83,6 +85,15 @@ final class RecordSteps {
             "cannot read the pre-swap snapshot of run " + ctx.runId() + ": " + e.getMessage(),
             "without it the recorded before-hashes would not match what rollback restores");
       }
+      try {
+        // what this package ships is the vendor's level from now on: the base of the next merge.
+        // Before the ledger entry, so a failure here leaves nothing recorded as installed.
+        rt.baselines().addHotfix(in.packageFile(), c, rt.settings().webappName());
+      } catch (IOException | RuntimeException e) {
+        return Failures.recoverable(
+            "cannot write the baseline of " + id + ": " + Failures.describe(e),
+            "check free space and permissions under " + rt.home().baselines());
+      }
       Optional<LedgerEntry> existing = ledger.find(id);
       if (existing.isPresent()) {
         LedgerEntry h = existing.get();
@@ -110,7 +121,10 @@ final class RecordSteps {
               ctx.runId(),
               Optional.of(ctx.runId() + "/" + ApplySteps.SNAPSHOT),
               rt.clock().instant(),
-              rows(before)));
+              rows(before),
+              in.merge().map(MergeDoc::id),
+              in.merge().map(MergeDoc::baselines).orElse(List.of()),
+              kept()));
       audit(
           ctx,
           out,
@@ -187,9 +201,20 @@ final class RecordSteps {
                 t.target(),
                 t.action().name().toLowerCase(Locale.ROOT),
                 before.known() ? before.before(t.target()) : t.before(),
-                t.after()));
+                t.after(),
+                t.entry().packageSha256()));
       }
       return List.copyOf(rows);
+    }
+
+    /** The files the package ships that stayed as the site has them. */
+    private List<LedgerEntry.KeptFile> kept() {
+      List<LedgerEntry.KeptFile> kept = new ArrayList<>();
+      for (PackageContents.Kept k : in.contents().kept()) {
+        kept.add(
+            new LedgerEntry.KeptFile(in.paths().resolve(k.path()), k.vendorSha256(), k.reason()));
+      }
+      return kept;
     }
 
     /** The plan's own view, used for the detail line and when no snapshot was taken. */

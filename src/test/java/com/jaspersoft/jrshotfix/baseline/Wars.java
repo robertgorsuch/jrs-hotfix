@@ -65,7 +65,7 @@ public final class Wars {
     files.put(
         QUARTZ, "# scheduler\nreport.scheduler.web.deployment.uri=http://@@BITROCK_HOST@@/x\n");
     files.put(SECURITY, "# security\nmax.upload=10\nallow.list=a,b\nstrict=true\n");
-    files.put(LOGIN, "<html>\n<body>\n<h1>Login</h1>\n<p>Welcome</p>\n</body>\n</html>\n");
+    files.put(LOGIN, "<html>\n<body>\n<h1>Login</h1>\n<hr/>\n<p>Welcome</p>\n</body>\n</html>\n");
     files.put(SCRIPT, "console.log('vendor');\n");
     files.put(CONTAINER, "<Context><Resource username=\"@@BITROCK_DB_USER@@\"/></Context>\n");
     files.put(LOGO, "PNG");

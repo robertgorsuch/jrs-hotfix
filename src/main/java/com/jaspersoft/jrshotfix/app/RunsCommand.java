@@ -178,9 +178,10 @@ final class RunsCommand implements Callable<Integer> {
       name = "prune",
       mixinStandardHelpOptions = true,
       description =
-          "Remove ended runs and snapshots older than the cut-off; the snapshot of an installed"
-              + " hotfix, anything of a pending run and, without --include-failed, anything of a"
-              + " failed run are kept.",
+          "Remove ended runs, snapshots and unused merges older than the cut-off, and hotfix"
+              + " baselines older than the newest two; the snapshot of an installed hotfix,"
+              + " anything of a pending run and, without --include-failed, anything of a failed"
+              + " run are kept.",
       footer = {"", "Example:", "  jrs-hotfix runs prune --older-than 30"})
   static final class Prune extends AppCommand {
     @Option(
@@ -213,6 +214,8 @@ final class RunsCommand implements Callable<Integer> {
       out.println("runs removed        " + list(r.runsRemoved()));
       out.println("snapshots removed   " + list(r.snapshotsRemoved()));
       out.println("ledger entries removed  " + list(r.ledgerEntriesRemoved()));
+      out.println("baselines removed   " + list(r.baselinesRemoved()));
+      out.println("merges removed      " + list(r.mergesRemoved()));
       out.flush();
       return ExitCodes.SUCCESS;
     }

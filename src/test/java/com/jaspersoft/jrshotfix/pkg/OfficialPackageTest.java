@@ -314,7 +314,7 @@ class OfficialPackageTest {
         c.replaces().stream().filter(r -> r.path().equals(QUARTZ)).findFirst().orElseThrow();
     assertThat(e.sha256()).contains(sha256(theirs));
     assertThat(e.packageSha256()).isEmpty();
-    assertThat(c.noteLines()).noneSatisfy(n -> assertThat(n).contains("merged"));
+    assertThat(c.noteLines()).noneSatisfy(n -> assertThat(n).contains("is merged, not replaced"));
   }
 
   @Test

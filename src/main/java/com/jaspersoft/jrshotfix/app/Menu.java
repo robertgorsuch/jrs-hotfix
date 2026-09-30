@@ -20,12 +20,12 @@ import java.util.function.Supplier;
  * command, with the home the menu resolved (except to the wizard, which places settings itself);
  * without settings the wizard ({@code settings detect}) runs before the menu is shown; while a run
  * is pending, every entry that would change the installation or the settings refuses and points at
- * entry 6; an empty answer where one is required returns to the menu; end of input quits with exit
+ * entry 7; an empty answer where one is required returns to the menu; end of input quits with exit
  * 0; nothing is written by the menu itself.
  */
 final class Menu {
 
-  static final String PENDING_REFUSAL = "finish or undo the interrupted job first (entry 6)";
+  static final String PENDING_REFUSAL = "finish or undo the interrupted job first (entry 7)";
 
   private final PrintWriter out;
   private final Supplier<List<String>> globalArgs;
@@ -105,7 +105,7 @@ final class Menu {
       for (String id : pending) {
         out.println("    jrs-hotfix runs resume " + id + "     (or runs rollback " + id + ")");
       }
-      out.println("  Choose 6 below to do this.");
+      out.println("  Choose 7 below to do this.");
     }
     while (true) {
       out.println();
@@ -113,15 +113,16 @@ final class Menu {
       out.println("  1) Apply a hotfix");
       out.println("  2) Roll back a hotfix");
       out.println("  3) Verify a hotfix package");
-      out.println("  4) List installed hotfixes");
-      out.println("  5) Record a hotfix applied by hand");
-      out.println("  6) Recent runs and recovery");
-      out.println("  7) Settings");
+      out.println("  4) Check the server for customizations");
+      out.println("  5) List installed hotfixes");
+      out.println("  6) Record a hotfix applied by hand");
+      out.println("  7) Recent runs and recovery");
+      out.println("  8) Settings");
       out.println("  q) Quit");
       out.println(
           "Each entry runs an ordinary command and prints it first. jrs-hotfix --help lists every"
               + " command.");
-      Optional<String> choice = Prompter.line(out, "Choose [1-7, q]: ");
+      Optional<String> choice = Prompter.line(out, "Choose [1-8, q]: ");
       if (choice.isEmpty() || choice.get().equalsIgnoreCase("q")) {
         return ExitCodes.SUCCESS;
       }
@@ -141,15 +142,16 @@ final class Menu {
             existingFile("Hotfix package (.zip)").ifPresent(p -> execute("verify", p));
           }
         }
-        case "4" -> execute("list");
-        case "5" -> {
+        case "4" -> scan();
+        case "5" -> execute("list");
+        case "6" -> {
           if (notPending()) {
             existingFile("Hotfix package (.zip)").ifPresent(p -> execute("record", p));
           }
         }
-        case "6" -> runs();
-        case "7" -> settingsEntry();
-        default -> out.println("Please type a number from 1 to 7, or q.");
+        case "7" -> runs();
+        case "8" -> settingsEntry();
+        default -> out.println("Please type a number from 1 to 8, or q.");
       }
     }
   }
@@ -163,6 +165,24 @@ final class Menu {
     }
     out.println("  " + PENDING_REFUSAL);
     return false;
+  }
+
+  /**
+   * The scan; when there is no baseline to compare with (exit 2) and no job is pending, the
+   * vendor's WAR is asked for, added as the baseline, and the scan is run again.
+   */
+  private void scan() {
+    if (execute("scan") != ExitCodes.PRECHECK_FAILED || !pendingRuns.get().isEmpty()) {
+      return;
+    }
+    out.println();
+    out.println(
+        "The scan compares this server with the vendor's own files. Give the jasperserver-pro.war"
+            + " this server was installed from (or the hotfix ZIP the message above asks for).");
+    Optional<String> source = path("WAR or hotfix ZIP (Enter to go back)");
+    if (source.isPresent() && execute("baseline", "add", source.get()) == ExitCodes.SUCCESS) {
+      execute("scan");
+    }
   }
 
   private void rollback() {

@@ -5,6 +5,7 @@ import com.jaspersoft.jrshotfix.baseline.BaselineStore;
 import com.jaspersoft.jrshotfix.engine.Sleeper;
 import com.jaspersoft.jrshotfix.home.Home;
 import com.jaspersoft.jrshotfix.home.Settings;
+import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
 import com.jaspersoft.jrshotfix.pkg.PackagePaths;
 import com.jaspersoft.jrshotfix.platform.FileOps;
 import com.jaspersoft.jrshotfix.platform.Platform;
@@ -53,6 +54,11 @@ public record HotfixRuntime(
   /** The vendor's files this installation is compared with. */
   public BaselineStore baselines() {
     return new BaselineStore(home, clock);
+  }
+
+  /** The prepared merges of this home. */
+  public MergeWorkspace merges() {
+    return new MergeWorkspace(home, clock);
   }
 
   /** The vendor's webapp at the level this installation states, or why it is not known. */

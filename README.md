@@ -179,7 +179,7 @@ section, and a run prints them again when it finishes and saves them to
 
 A run whose journal has no terminal state blocks every mutating command with
 exit 8 until `jrs-hotfix runs resume <id>` finishes it or
-`jrs-hotfix runs rollback <id>` undoes it; the menu's entry 6 offers both first.
+`jrs-hotfix runs rollback <id>` undoes it; the menu's entry 7 offers both first.
 Its snapshot lives under `snapshots/<runId>` in the home (see Files below) and is
 never pruned while the hotfix it belongs to is installed; the snapshot of a run
 that failed with exit 4 is kept too, unless `runs prune --include-failed`.

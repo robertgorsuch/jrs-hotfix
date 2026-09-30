@@ -132,8 +132,10 @@ public record PackageContents(
   /**
    * One file: where it lands, what happens, and where its bytes are in the package. {@code sha256}
    * is the hash of what lands. It is the payload's, except for a settings file merged with this
-   * server's ({@link SiteSettings}): then {@code packageSha256} holds the payload's hash and {@code
-   * sha256} the merged file's.
+   * server's: then {@code packageSha256} holds the payload's hash and {@code sha256} the merged
+   * file's. The merged bytes are made again at staging from the server's file and the payload
+   * ({@link SiteSettings}), unless {@code mergedFile} names a file of a prepared merge that holds
+   * them.
    */
   public record Entry(
       String path,
@@ -141,7 +143,8 @@ public record PackageContents(
       Optional<String> sha256,
       Optional<String> source,
       String entryName,
-      Optional<String> packageSha256) {
+      Optional<String> packageSha256,
+      Optional<java.nio.file.Path> mergedFile) {
     public Entry {
       Objects.requireNonNull(path);
       Objects.requireNonNull(action);
@@ -149,6 +152,18 @@ public record PackageContents(
       Objects.requireNonNull(source);
       Objects.requireNonNull(entryName);
       Objects.requireNonNull(packageSha256);
+      Objects.requireNonNull(mergedFile);
+    }
+
+    /** An entry whose merged bytes are made again at staging. */
+    public Entry(
+        String path,
+        Action action,
+        Optional<String> sha256,
+        Optional<String> source,
+        String entryName,
+        Optional<String> packageSha256) {
+      this(path, action, sha256, source, entryName, packageSha256, Optional.empty());
     }
 
     /** An entry whose payload lands as it is. */

@@ -70,7 +70,7 @@ class MenuTest {
   }
 
   @Test
-  void should_print_seven_entries_and_run_apply_when_1_is_chosen() {
+  void should_print_eight_entries_and_run_apply_when_1_is_chosen() {
     Prompter.override(new StringReader("1\n" + pkg + "\nq\n"));
     Menu m =
         new Menu(
@@ -83,7 +83,8 @@ class MenuTest {
     assertThat(m.run()).isZero();
     assertThat(text())
         .contains("1) Apply a hotfix")
-        .contains("7) Settings")
+        .contains("4) Check the server for customizations")
+        .contains("8) Settings")
         .contains("q) Quit")
         .contains("release 10.0.0 PRO")
         .contains("Running: jrs-hotfix apply " + pkg)
@@ -117,20 +118,21 @@ class MenuTest {
                 "  1) Apply a hotfix",
                 "  2) Roll back a hotfix",
                 "  3) Verify a hotfix package",
-                "  4) List installed hotfixes",
-                "  5) Record a hotfix applied by hand",
-                "  6) Recent runs and recovery",
-                "  7) Settings",
+                "  4) Check the server for customizations",
+                "  5) List installed hotfixes",
+                "  6) Record a hotfix applied by hand",
+                "  7) Recent runs and recovery",
+                "  8) Settings",
                 "  q) Quit",
                 "Each entry runs an ordinary command and prints it first. jrs-hotfix --help lists"
                     + " every command.",
-                "Choose [1-7, q]: "));
+                "Choose [1-8, q]: "));
     assertThat(ran).isEmpty();
   }
 
   @Test
   void should_offer_only_recovery_when_a_run_is_pending() {
-    Prompter.override(new StringReader("1\n6\n1\nq\n"));
+    Prompter.override(new StringReader("1\n7\n1\nq\n"));
     Menu m =
         new Menu(
             out,
@@ -143,8 +145,8 @@ class MenuTest {
     assertThat(text())
         .contains("interrupted")
         .contains("jrs-hotfix runs resume stuck     (or runs rollback stuck)")
-        .contains("finish or undo the interrupted job first (entry 6)");
-    // choosing 1 while pending printed a refusal and did not run apply; 6 lists the runs first
+        .contains("finish or undo the interrupted job first (entry 7)");
+    // choosing 1 while pending printed a refusal and did not run apply; 7 lists the runs first
     assertThat(ran).hasSize(2);
     assertThat(ran.get(0)).containsExactly("runs", "list");
     assertThat(ran.get(1)).containsExactly("runs", "resume", "stuck");
@@ -152,7 +154,7 @@ class MenuTest {
 
   @Test
   void should_refuse_every_changing_entry_when_a_run_is_pending() {
-    Prompter.override(new StringReader("2\n3\n5\n7\n1\n7\n2\n4\nq\n"));
+    Prompter.override(new StringReader("2\n3\n6\n8\n1\n8\n2\n5\nq\n"));
     new Menu(
             out,
             List.of(),
@@ -203,7 +205,7 @@ class MenuTest {
 
   @Test
   void should_pass_the_global_options_on_and_report_a_failure_when_a_command_fails() {
-    Prompter.override(new StringReader("4\n7\n1\nbaseUrl\nhttp://h:1/x\nq\n"));
+    Prompter.override(new StringReader("5\n8\n1\nbaseUrl\nhttp://h:1/x\nq\n"));
     new Menu(
             out,
             List.of("--home", "h"),
@@ -224,6 +226,47 @@ class MenuTest {
     assertThat(text())
         .contains("Running: jrs-hotfix list --home h")
         .contains("Finished with exit code 2 (jrs-hotfix --docs explains the codes).");
+  }
+
+  @Test
+  void should_run_the_scan_and_offer_to_add_a_baseline_when_there_is_none() {
+    Prompter.override(new StringReader("4\n" + pkg + "\n4\n\nq\n"));
+    List<Integer> codes = new ArrayList<>(List.of(2, 0, 0, 2));
+    new Menu(
+            out,
+            List.of(),
+            a -> {
+              ran.add(a);
+              return codes.removeFirst();
+            },
+            List::of,
+            () -> Optional.of(settings),
+            () -> "10.0.0 PRO")
+        .run();
+    // the first scan found no baseline: the file given is added and the scan runs again; the
+    // second time the operator gives nothing and is back at the menu
+    assertThat(ran)
+        .extracting(a -> String.join(" ", a))
+        .containsExactly("scan", "baseline add " + pkg, "scan", "scan");
+    assertThat(text()).contains("the vendor's own files");
+  }
+
+  @Test
+  void should_scan_but_not_offer_a_baseline_when_a_run_is_pending() {
+    Prompter.override(new StringReader("4\nq\n"));
+    new Menu(
+            out,
+            List.of(),
+            a -> {
+              ran.add(a);
+              return 2;
+            },
+            () -> List.of("stuck"),
+            () -> Optional.of(settings),
+            () -> "10.0.0 PRO")
+        .run();
+    assertThat(ran).extracting(a -> String.join(" ", a)).containsExactly("scan");
+    assertThat(text()).doesNotContain("the vendor's own files");
   }
 
   @Test
@@ -269,7 +312,7 @@ class MenuTest {
           opens.incrementAndGet();
           return real.open(options);
         };
-    Prompter.override(new StringReader("4\n6\n4\nq\n"));
+    Prompter.override(new StringReader("5\n7\n5\nq\n"));
     assertThat(root.menu(out, this::recorder).run()).isZero();
     assertThat(opens).hasValue(1);
     assertThat(ran).hasSize(3);

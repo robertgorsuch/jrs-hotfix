@@ -289,7 +289,7 @@ jrs-hotfix - JasperReports Server hotfix tool   (release 10.0.0 PRO at C:\Jasper
 ```
 
 When no settings exist the settings wizard runs before the menu. When a run is pending
-the menu says so on its first line and entry 6 is the only mutating entry offered. Each
+the menu says so on its first line and entry 7 (6 before 0.2) is the only mutating entry offered. Each
 entry prints the command it runs before running it, so an operator learns the scripted
 form by using the menu. Path prompts complete file names (JLine). Confirmations default
 to no.
