@@ -37,8 +37,10 @@ import java.util.zip.ZipInputStream;
  * the package carries the SHA-256 of the whole file; an entry is {@code replace} only when the file
  * exists on this server now and {@code add} otherwise; deletes come from the readme's "Deleted
  * files" list and its "Important" globs, expanded against this installation and never covering a
- * file the package itself lays down; the readme's manual steps are carried verbatim and whole, a
- * section both inner readmes hold only once; nothing on the server is touched here.
+ * file the package itself lays down; a site-written XML file the server has is kept, not replaced;
+ * an older version of a library the package brings is reported, never deleted; the readme's manual
+ * steps are carried verbatim and whole, a section both inner readmes hold only once; nothing on the
+ * server is touched here.
  */
 public final class OfficialPackage {
 
@@ -290,10 +292,11 @@ public final class OfficialPackage {
     Header header = null;
     Readme treeReadme = null;
     List<PackageContents.Entry> entries = new ArrayList<>();
+    List<PackageContents.Kept> kept = new ArrayList<>();
     Set<String> added = new LinkedHashSet<>();
     List<Readme> readmes = new ArrayList<>();
     Notes notes = new Notes();
-    Payload payload = new Payload(paths, entries, added, notes);
+    Payload payload = new Payload(paths, entries, kept, added, notes);
     MessageDigest whole = sha256();
     try (InputStream in = new DigestInputStream(Files.newInputStream(source), whole);
         ZipInputStream outer = new ZipInputStream(in)) {
@@ -328,7 +331,7 @@ public final class OfficialPackage {
           "no readme.txt in " + source,
           "point jrs-hotfix at the hotfix ZIP as it was downloaded, not at an unpacked copy");
     }
-    if (entries.isEmpty()) {
+    if (entries.isEmpty() && kept.isEmpty()) {
       throw new HotfixException(
           HotfixException.PRECHECK,
           "no jasperserver or js-install archive in " + source,
@@ -345,6 +348,7 @@ public final class OfficialPackage {
       notes.manual(r.manual());
     }
     configNotes(entries).forEach(notes::say);
+    superseded(entries, paths, webappPrefix).ifPresent(notes::say);
     return new PackageContents(
         header.id(),
         header.release(),
@@ -353,6 +357,7 @@ public final class OfficialPackage {
         header.title(),
         HexFormat.of().formatHex(whole.digest()),
         entries,
+        kept,
         notes.lines());
   }
 
@@ -372,6 +377,12 @@ public final class OfficialPackage {
       if (said.add(sentence)) {
         lines.add(PackageContents.Note.said(sentence));
       }
+    }
+
+    /** A sentence of jrs-hotfix's own, then lines of a file of the package as the file has them. */
+    void sayAndQuote(String sentence, List<String> fileLines) {
+      say(sentence);
+      quote(fileLines);
     }
 
     private void quote(List<String> readmeLines) {
@@ -434,12 +445,18 @@ public final class OfficialPackage {
 
   /** Where the files of the package are collected while it is read. */
   private record Payload(
-      PackagePaths paths, List<PackageContents.Entry> entries, Set<String> added, Notes notes) {
+      PackagePaths paths,
+      List<PackageContents.Entry> entries,
+      List<PackageContents.Kept> kept,
+      Set<String> added,
+      Notes notes) {
 
     /**
      * Streams one file of the package through a digest, writing nothing, and adds its entry: {@code
      * replace} when the file exists here now, else {@code add}. A settings file this server has
-     * values of its own in ({@link SiteSettings}) is planned as the merged file.
+     * values of its own in ({@link SiteSettings}) is planned as the merged file, and a site-written
+     * XML file the server has gets no entry at all: it stays, and the package's copy goes into the
+     * notes.
      */
     void hash(InputStream in, String path, Optional<String> source, String entryName)
         throws IOException {
@@ -450,18 +467,28 @@ public final class OfficialPackage {
       Action action = Files.isRegularFile(target) ? Action.REPLACE : Action.ADD;
       MessageDigest md = sha256();
       Optional<SiteSettings.Merged> merged = Optional.empty();
-      if (action == Action.REPLACE && SiteSettings.holdsSiteValues(path)) {
+      Optional<byte[]> theirs = Optional.empty();
+      boolean stays = action == Action.REPLACE && SiteSettings.keptAsItIs(path);
+      if (stays || (action == Action.REPLACE && SiteSettings.holdsSiteValues(path))) {
         byte[] head = in.readNBytes(SiteSettings.MAX_BYTES + 1);
         md.update(head);
         if (head.length <= SiteSettings.MAX_BYTES) {
-          merged = SiteSettings.merge(target, head);
+          theirs = Optional.of(head);
+          if (!stays) {
+            merged = SiteSettings.merge(target, head);
+          }
         }
       }
       try (OutputStream digest = new DigestOutputStream(OutputStream.nullOutputStream(), md)) {
         in.transferTo(digest);
       }
       String payload = HexFormat.of().formatHex(md.digest());
+      // a file that stays is "laid down" too: no readme deletion may remove it
       added.add(path);
+      if (stays) {
+        keep(path, target, payload, theirs);
+        return;
+      }
       if (merged.isEmpty()) {
         entries.add(
             new PackageContents.Entry(path, action, Optional.of(payload), source, entryName));
@@ -480,6 +507,43 @@ public final class OfficialPackage {
               + keys(m.carried())
               + ". Compare a kept value with the package's if a fix depends on it; the file as it"
               + " was is in the snapshot");
+    }
+
+    /**
+     * The server's site-written XML file stays. When the package's copy differs from it, the copy
+     * is shown in the notes, since what the vendor changed in it must be carried over by hand.
+     */
+    private void keep(String path, Path target, String payload, Optional<byte[]> theirs)
+        throws IOException {
+      kept.add(
+          new PackageContents.Kept(
+              path, payload, "written by the installer for this server; never replaced"));
+      if (payload.equals(hashOf(target))) {
+        return;
+      }
+      String sentence =
+          path
+              + " holds this server's database connection and is not replaced. The package ships"
+              + " another copy of it; carry over by hand what the hotfix changed in it";
+      if (theirs.isEmpty()) {
+        notes.say(sentence + " (the copy is too large to show here; it is in the package)");
+        return;
+      }
+      String text = new String(theirs.get(), StandardCharsets.ISO_8859_1);
+      List<String> lines = new ArrayList<>(List.of(text.split("\\r?\\n", -1)));
+      if (lines.get(lines.size() - 1).isEmpty()) {
+        lines.remove(lines.size() - 1);
+      }
+      notes.sayAndQuote(sentence + ". The package's copy:", lines);
+    }
+
+    private static String hashOf(Path file) throws IOException {
+      MessageDigest md = sha256();
+      try (InputStream in = Files.newInputStream(file);
+          OutputStream digest = new DigestOutputStream(OutputStream.nullOutputStream(), md)) {
+        in.transferTo(digest);
+      }
+      return HexFormat.of().formatHex(md.digest());
     }
 
     private static String keys(List<String> keys) {
@@ -593,6 +657,62 @@ public final class OfficialPackage {
       throw new UncheckedIOException("cannot list " + directory, e);
     }
     return out;
+  }
+
+  /**
+   * The libraries under {@code WEB-INF/lib} that look like an older version of one the package lays
+   * down and that neither the package nor the readme's lists touch. It is a warning and nothing is
+   * deleted: the rule goes by file names, and no package has yet left such a file behind.
+   */
+  private static Optional<String> superseded(
+      List<PackageContents.Entry> entries, PackagePaths paths, String webappPrefix) {
+    String lib = webappPrefix + "WEB-INF/lib/";
+    List<String> brought = new ArrayList<>();
+    Set<String> touched = new HashSet<>();
+    for (PackageContents.Entry e : entries) {
+      if (e.path().startsWith(lib) && e.path().indexOf('/', lib.length()) < 0) {
+        String name = e.path().substring(lib.length());
+        touched.add(name.toLowerCase(Locale.ROOT));
+        if (e.action() != Action.DELETE) {
+          brought.add(name);
+        }
+      }
+    }
+    if (brought.isEmpty()) {
+      return Optional.empty();
+    }
+    Path directory = paths.resolve(lib + "_").getParent();
+    if (directory == null || !Files.isDirectory(directory)) {
+      return Optional.empty();
+    }
+    List<String> onDisk;
+    try (Stream<Path> list = Files.list(directory)) {
+      onDisk =
+          list.filter(Files::isRegularFile).map(p -> p.getFileName().toString()).sorted().toList();
+    } catch (IOException e) {
+      throw new UncheckedIOException("cannot list " + directory, e);
+    }
+    List<String> found = new ArrayList<>();
+    for (String name : onDisk) {
+      Optional<JarName> here = JarName.of(name);
+      if (here.isEmpty() || touched.contains(name.toLowerCase(Locale.ROOT))) {
+        continue;
+      }
+      brought.stream()
+          .filter(b -> JarName.of(b).filter(newer -> here.get().olderThan(newer)).isPresent())
+          .findFirst()
+          .ifPresent(b -> found.add(name + " (the package brings " + b + ")"));
+    }
+    if (found.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        "WEB-INF/lib holds "
+            + (found.size() == 1 ? "a library" : found.size() + " libraries")
+            + " in an older version than the package brings, outside the readme's lists: "
+            + String.join(", ", found)
+            + "; nothing is deleted, check by hand whether it is a leftover and remove it while"
+            + " the server is stopped");
   }
 
   /**

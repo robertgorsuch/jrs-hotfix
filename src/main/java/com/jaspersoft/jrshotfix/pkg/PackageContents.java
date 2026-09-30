@@ -8,8 +8,9 @@ import java.util.Optional;
  * What one official package would do to this installation, decided at read time. Invariants: paths
  * are package paths ({@code webapps/<name>/...} or installation-relative); an add or replace
  * carries the SHA-256 of the payload; a delete carries none; entries are in package order with
- * deletions last; notes are what the operator must know or do by hand, the readme's own lines among
- * them in the readme's order, never executed.
+ * deletions last; a file the package ships that must not land here is in {@code kept}, never in
+ * {@code entries}, so no step touches it; notes are what the operator must know or do by hand, the
+ * readme's own lines among them in the readme's order, never executed.
  */
 public record PackageContents(
     String id,
@@ -19,10 +20,37 @@ public record PackageContents(
     String title,
     String sha256,
     List<Entry> entries,
+    List<Kept> kept,
     List<Note> notes) {
   public PackageContents {
     entries = List.copyOf(entries);
+    kept = List.copyOf(kept);
     notes = List.copyOf(notes);
+  }
+
+  /** Contents that keep nothing back. */
+  public PackageContents(
+      String id,
+      String release,
+      String edition,
+      String build,
+      String title,
+      String sha256,
+      List<Entry> entries,
+      List<Note> notes) {
+    this(id, release, edition, build, title, sha256, entries, List.of(), notes);
+  }
+
+  /**
+   * One file the package ships and this server keeps as it has it: the package path, the hash of
+   * the package's copy, and why it stays.
+   */
+  public record Kept(String path, String vendorSha256, String reason) {
+    public Kept {
+      Objects.requireNonNull(path);
+      Objects.requireNonNull(vendorSha256);
+      Objects.requireNonNull(reason);
+    }
   }
 
   /**

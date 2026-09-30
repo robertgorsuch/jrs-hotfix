@@ -70,6 +70,20 @@ first line show the build the webapp states about itself
 (`WEB-INF/internal/jasperserver-pro.properties`), which is the hotfix level of
 the files on disk whoever put them there.
 
+`apply` and `verify` compare that build with the ledger:
+
+- the webapp states the package's build and the ledger has no installed entry
+  for it: refused with exit 2, as above, even when a file or two differ;
+- the webapp states an older build than the newest installed entry: refused
+  with exit 2, because the webapp was replaced under the ledger;
+- the webapp states a newer build than every entry: a warning that a hotfix was
+  applied outside jrs-hotfix, and the run goes on;
+- the webapp states no build: a warning, and the run goes on.
+
+A library under `WEB-INF/lib` that looks like an older version of one the
+package brings, and that the readme's lists do not name, is reported in the
+plan. Nothing is deleted on that ground: the rule goes by file names.
+
 ## Settings files
 
 The installer writes values for one server into four properties files of the
@@ -83,6 +97,13 @@ carried over under a comment at the end. The plan names the keys, never the
 values. Where a fix depends on the package's value of a kept key, set it by
 hand. The server's comments are not carried; the file as it was is in the
 snapshot, and a rollback puts it back byte for byte.
+
+`META-INF/context.xml` and the `META-INF/*-jdbc.xml` files hold the database
+connection the installer wrote. When a package ships one and the server has
+it, the server's file stays: it is not snapshotted, staged or swapped, and the
+ledger does not list it. If the package's copy differs from the server's, the
+plan and `notes.txt` show the package's copy, so that what the hotfix changed
+in it can be carried over by hand.
 
 Every other `.xml` and `.properties` file the package ships is replaced, and
 the plan names the ones in the webapp: settings you changed in them must be

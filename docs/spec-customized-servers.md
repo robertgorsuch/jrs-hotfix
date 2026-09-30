@@ -9,10 +9,10 @@ zipped WAR) compared with jrs-hotfix at 56c242f.
 **Phase 1 (section 11) landed in v0.1.0**, on 2026-09-29, after the tool met the real package
 and two real servers: the installed build is read and shown (section 1), the four
 installer-written properties files are merged (4.4), the JSP cache is cleared (5a), and a
-hotfix already in place is refused. Three parts of phase 1 are still open and marked below:
-the preflight `build` table of section 1, `META-INF/context.xml` never replaced (4.4), and the
-superseded-library warning (6). The measurements of that day are folded in where they change
-the design; each is marked "measured 2026-09-29".
+hotfix already in place is refused. The three parts of phase 1 that v0.1.0 left open landed
+on 2026-09-30: the preflight `build` table of section 1, `META-INF/context.xml` never
+replaced (4.4), and the superseded-library warning (6). The measurements of 2026-09-29 are
+folded in where they change the design; each is marked "measured 2026-09-29".
 
 ## Problem
 
@@ -107,9 +107,9 @@ vendor's build leaves before the two stamp keys. It returns release, date and ti
 empty when the file or a key is absent. It never throws. (In v0.1.0: read, and shown by
 `list` and the menu header.)
 
-Preflight (spec 4.1 step 1) gains one check, `build` (still open; v0.1.0 covers the second
-row another way, by refusing a package whose files are all in place at their target hashes
-with no `INSTALLED` entry):
+Preflight (spec 4.1 step 1) gains one check, `build` (`BuildCheck`, landed 2026-09-30;
+v0.1.0 covered the second row another way, by refusing a package whose files are all in place
+at their target hashes with no `INSTALLED` entry, and that test stays):
 
 | Installed build | Ledger | Result |
 |---|---|---|
@@ -118,6 +118,16 @@ with no `INSTALLED` entry):
 | newer than every entry, not the package's | any | warn: "a hotfix with build X was applied outside jrs-hotfix"; refuse with exit 2 when a merge is requested, because the base cannot be established without that package (section 2) |
 | older than the newest `INSTALLED` entry | any | refuse, exit 2: the webapp was replaced under the ledger; say which entry |
 | unreadable | any | warn once, continue as 0.1 |
+
+As built, two limits keep the check from refusing a healthy server:
+
+- Only an `INSTALLED` entry whose hotfix shipped the build file is compared. A package
+  without `jasperserver-pro.properties` leaves the stamps as they were, and its entry says
+  nothing about them.
+- "Newer than every entry" is a warning only when there is such an entry, or a release
+  baseline (section 2) that says which build the release itself has. With an empty ledger
+  and no baseline, a release's own build cannot be told from a hotfix applied by hand, and
+  nothing is said.
 
 `list` and the menu header print the installed build beside the release. Detection (spec
 2) is unchanged: the release still comes from the jar names, and the two must agree or
@@ -320,8 +330,11 @@ When a package replaces one:
   baseline the three-way rule of 4.2 applies instead, so a vendor change to a key the site
   did not touch is taken;
 - an XML file among them (`context.xml`, the `*DS-jdbc.xml`) is never replaced; the plan
-  says so and shows the vendor's copy in `notes.txt`. Still open: v0.1.0 replaces them like
-  any other file, and the package of 2026-07-30 ships none of them.
+  says so and shows the vendor's copy in `notes.txt`. Landed 2026-09-30 by a fixed rule,
+  `META-INF/context.xml` and `META-INF/*-jdbc.xml`, on every server: such a file gets no
+  plan entry (`PackageContents.kept`), so nothing snapshots, stages, swaps or records it,
+  and a readme deletion never removes it. When the package's copy equals the server's,
+  nothing is said. The package of 2026-07-30 ships none of them.
 
 This is a behaviour change from 0.1, which replaces them with a warning.
 
@@ -444,6 +457,12 @@ name-based heuristic can be wrong. Until a second package shows a leftover, this
 is **report-only**: the candidates are a warning in the plan, with or without a baseline,
 and nothing is deleted. The `delete (superseded)` action stays designed, not built.
 
+The warning landed 2026-09-30 (`JarName`, `OfficialPackage.superseded`). The name rule is
+taken literally, so `jasperreports-spring-hotfix-7.0.5-JS-79557-SNAPSHOT.jar` splits into
+the artifact `jasperreports-spring-hotfix-7.0.5-JS` and the version `79557-SNAPSHOT`: a
+7.0.6 of that jar is another artifact to the rule and is not reported. That errs towards
+saying nothing, which is the right side for a rule that goes by names.
+
 ## 7. A WAR as the target
 
 `jrs-hotfix apply <package.zip> --war <in.war> --out <out.war> [--merge <mergeId>]`
@@ -514,7 +533,7 @@ Every message names the file and the one command that moves things forward.
 
 | Phase | Contents | Why first |
 |---|---|---|
-| 1 | section 1 (installed build), 4.4 (installer-written files), 5a (JSP cache), 6 with baseline-free warning | each fixes something 0.1 does wrong on every server; none needs a baseline. **Landed in v0.1.0**, except the preflight `build` table, `context.xml` kept, and the superseded warning |
+| 1 | section 1 (installed build), 4.4 (installer-written files), 5a (JSP cache), 6 with baseline-free warning | each fixes something 0.1 does wrong on every server; none needs a baseline. **Landed in v0.1.0**; the preflight `build` table, `context.xml` kept, and the superseded warning landed after it, on 2026-09-30 |
 | 2 | sections 2, 3, 4, 5, full section 6 | the customized path of the diagram |
 | 3 | section 7 | the WAR target; reuses everything above. Wanted for 0.2 (decided 2026-09-30) |
 
