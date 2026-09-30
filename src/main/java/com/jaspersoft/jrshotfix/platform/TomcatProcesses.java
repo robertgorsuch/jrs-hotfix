@@ -55,13 +55,23 @@ final class TomcatProcesses implements TomcatProcessFinder {
                     workingDir(handle.pid())));
   }
 
+  /** The executables that run a Tomcat: a JVM, or commons-daemon's {@code jsvc}. */
+  private static final Pattern JVM_EXECUTABLE =
+      Pattern.compile("(?i)(^|[/\\\\])(java|javaw|jsvc)(\\.exe)?$");
+
   /**
-   * The Tomcat recognised in one process, or empty when it is not a Tomcat: {@code catalina} in the
-   * command line, or a {@code tomcatN.exe} service wrapper, whose home is two levels above it.
+   * The Tomcat recognised in one process, or empty when it is not a Tomcat: a JVM (or {@code jsvc})
+   * with {@code catalina} in its command line, or a {@code tomcatN.exe} service wrapper, whose home
+   * is two levels above it. The executable matters: a shell or an editor whose command line names
+   * {@code catalina} is not a Tomcat, and a force stop must never end one (2026-09-29, an
+   * operator's ssh shell). When the executable is not known, the command line's first word stands
+   * in for it.
    */
   static Optional<TomcatProcess> describe(long pid, String commandLine, String command) {
+    String executable = command.isBlank() ? firstWord(commandLine) : command;
     boolean isTomcat =
-        commandLine.toLowerCase(Locale.ROOT).contains("catalina")
+        (JVM_EXECUTABLE.matcher(executable).find()
+                && commandLine.toLowerCase(Locale.ROOT).contains("catalina"))
             || SERVICE_WRAPPER.matcher(command).find();
     if (!isTomcat) {
       return Optional.empty();
@@ -83,6 +93,16 @@ final class TomcatProcesses implements TomcatProcessFinder {
       home = parsePath(command).map(Path::getParent).map(Path::getParent);
     }
     return Optional.of(new TomcatProcess(pid, commandLine, home, base, Optional.empty()));
+  }
+
+  private static String firstWord(String commandLine) {
+    String line = commandLine.strip();
+    if (line.startsWith("\"")) {
+      int end = line.indexOf('"', 1);
+      return end > 0 ? line.substring(1, end) : line;
+    }
+    int space = line.indexOf(' ');
+    return space < 0 ? line : line.substring(0, space);
   }
 
   private static String commandLine(ProcessHandle.Info info) {
