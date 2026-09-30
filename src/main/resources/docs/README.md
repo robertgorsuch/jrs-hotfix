@@ -32,6 +32,7 @@ jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] | status [<mergeI
                   | discard <mergeId>]
 jrs-hotfix list
 jrs-hotfix record <package.zip>
+jrs-hotfix forget <id>
 jrs-hotfix runs [list | show <id> | resume <id> | rollback <id> | prune --older-than <days> [--include-failed]]
 jrs-hotfix settings [show | set <key> <value> | detect]
 jrs-hotfix --docs | --version | --help
@@ -67,6 +68,11 @@ would otherwise be needed.
    package's files as the hotfix's baseline; remove the staging directory.
 
 The service is always stopped for the swap.
+
+The ledger lives in the home, beside the installation, not in the webapp. After
+the webapp is redeployed from a WAR, the ledger still lists the hotfixes it had;
+preflight notices (the webapp states an older build than the ledger's newest
+entry) and refuses. `jrs-hotfix forget <id>` takes such an entry out.
 
 The installer's files keep this server's values: `js.quartz.properties`,
 `js.jdbc.properties`, `hibernate.properties` and `keystore.init.properties`

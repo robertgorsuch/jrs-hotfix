@@ -116,7 +116,7 @@ at their target hashes with no `INSTALLED` entry, and that test stays):
 | equals newest `INSTALLED` or `RECORDED` entry | any | ok |
 | equals the package being applied | no entry for it | refuse, exit 2: "this hotfix is already on the server but not in the ledger; run `jrs-hotfix record <package.zip>`" |
 | newer than every entry, not the package's | any | warn: "a hotfix with build X was applied outside jrs-hotfix"; refuse with exit 2 when a merge is requested, because the base cannot be established without that package (section 2) |
-| older than the newest `INSTALLED` entry | any | refuse, exit 2: the webapp was replaced under the ledger; say which entry |
+| older than the newest `INSTALLED` entry | any | refuse, exit 2: the webapp was replaced under the ledger; say which entry, and name `jrs-hotfix forget <id>`, the command that takes a stale entry out (added 2026-09-30 after a redeploy from a WAR met this row with no way out but editing `ledger.json`) |
 | unreadable | any | warn once, continue as 0.1 |
 
 As built, two limits keep the check from refusing a healthy server:

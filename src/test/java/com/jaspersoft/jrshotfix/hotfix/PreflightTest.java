@@ -1,6 +1,7 @@
 package com.jaspersoft.jrshotfix.hotfix;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jaspersoft.jrshotfix.engine.CheckResult;
 import com.jaspersoft.jrshotfix.engine.Context;
@@ -136,7 +137,18 @@ class PreflightTest {
       assertThat(failure(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r"))))
           .contains("build 20260121_2317")
           .contains("older than JRSHF-10.0.0-20260601-1200")
-          .contains("replaced under the ledger");
+          .contains("replaced under the ledger")
+          .contains("jrs-hotfix forget JRSHF-10.0.0-20260601-1200")
+          // the ledger's word against the webapp's: the webapp is not told it has the hotfix
+          .doesNotContain("is already installed");
+      // the way out: forget the entry, and the plan is accepted
+      f.plans.forget("JRSHF-10.0.0-20260601-1200");
+      assertThat(f.ledger.find("JRSHF-10.0.0-20260601-1200")).isEmpty();
+      assertThat(HotfixFixture.step(f.plan(), "preflight").precheck(f.ctx("r")))
+          .isNotInstanceOf(CheckResult.Fail.class);
+      assertThatThrownBy(() -> f.plans.forget("JRSHF-10.0.0-20260601-1200"))
+          .isInstanceOf(HotfixException.class)
+          .hasMessageContaining("unknown hotfix");
     }
   }
 
