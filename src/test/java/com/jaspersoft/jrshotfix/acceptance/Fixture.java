@@ -29,7 +29,7 @@ import java.util.stream.Stream;
  * name it (service kind {@code catalina}, base URL at this fixture's own {@link StubServer}), the
  * standard package and a later one. The fake {@code bin/catalina} script starts and stops a process
  * the tool's own Tomcat scan recognises as this installation's Tomcat (a renamed {@code PING.EXE}
- * at {@code bin/tomcat9.exe} on Windows, a {@code sleep} marked {@code -Dcatalina.base=<tomcat>}
+ * at {@code bin/tomcat9.exe} on Windows, a shell loop marked {@code -Dcatalina.base=<tomcat>}
  * elsewhere), as jrsctl's Phase 8 fixture did. Invariants: everything lives under the directory
  * given to {@link #create}; the stand-in is running when {@link #create} returns and is stopped by
  * {@link #close}; the unit test helpers only build inputs (packages, the install tree,
@@ -252,7 +252,11 @@ final class Fixture implements AutoCloseable {
               + "TC=\"$(cd \"$(dirname \"$0\")/..\" && pwd)\"\n"
               + "MARKER=\"-Dcatalina.base=$TC\"\n"
               + "case \"$1\" in\n"
-              + "  start) nohup sh -c \"sleep 900 # $MARKER\" >/dev/null 2>&1 </dev/null & ;;\n"
+              // a loop, not one command: bash execs a lone command, and the shell's command line
+              // with the marker would be gone (seen on a machine whose /bin/sh is bash, where
+              // every acceptance test failed at startTomcat; dash keeps the shell)
+              + "  start) nohup sh -c \"while :; do sleep 900; done # $MARKER\" >/dev/null 2>&1"
+              + " </dev/null & ;;\n"
               // the marked shell's sleep child would outlive it as an orphan: end both
               + "  stop) for p in $(pgrep -f -- \"$MARKER\"); do pkill -P \"$p\"; kill \"$p\";"
               + " done 2>/dev/null; true ;;\n"
