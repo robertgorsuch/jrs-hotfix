@@ -45,15 +45,15 @@ class OfficialPackageTest {
     assertThat(c.replaces().get(0).sha256()).isPresent();
     assertThat(c.sha256()).hasSize(64);
     assertThat(c.sha256()).isEqualTo(files.sha256(tmp.resolve("dl/hotfix.zip")));
-    assertThat(c.notes()).anySatisfy(n -> assertThat(n).contains("Additional Notes"));
-    assertThat(c.notes()).anySatisfy(n -> assertThat(n).contains("left by an earlier hotfix"));
+    assertThat(c.noteLines()).anySatisfy(n -> assertThat(n).contains("Additional Notes"));
+    assertThat(c.noteLines()).anySatisfy(n -> assertThat(n).contains("left by an earlier hotfix"));
     // the readme's own lines, verbatim, after the summary sentence of their section
-    assertThat(c.notes())
+    assertThat(c.noteLines())
         .contains(
             "For PostgreSQL run the SQL in js-install/sql/postgresql.sql",
             "If an earlier hotfix is installed delete");
-    assertThat(c.notes().indexOf("For PostgreSQL run the SQL in js-install/sql/postgresql.sql"))
-        .isGreaterThan(indexContaining(c.notes(), "Additional Notes"));
+    assertThat(c.noteLines().indexOf("For PostgreSQL run the SQL in js-install/sql/postgresql.sql"))
+        .isGreaterThan(indexContaining(c.noteLines(), "Additional Notes"));
   }
 
   private static int indexContaining(java.util.List<String> notes, String text) {
@@ -121,7 +121,7 @@ class OfficialPackageTest {
   }
 
   @Test
-  void should_keep_at_most_60_readme_note_lines_when_the_section_is_longer() throws Exception {
+  void should_keep_every_line_of_a_note_section_when_it_is_long() throws Exception {
     PackagePaths paths = Packages.install(tmp.resolve("jrs"));
     StringBuilder readme = new StringBuilder("Additional Notes:\n");
     for (int i = 1; i <= 70; i++) {
@@ -133,8 +133,78 @@ class OfficialPackageTest {
             paths,
             "jasperserver-pro",
             files);
-    assertThat(c.notes()).contains("step 1", "step 60").doesNotContain("step 61");
-    assertThat(c.notes()).contains("… (see readme.txt for the rest)");
+    assertThat(c.noteLines()).contains("step 1", "step 60", "step 61", "step 70");
+    assertThat(c.noteLines())
+        .noneSatisfy(n -> assertThat(n).contains("see readme.txt for the rest"));
+  }
+
+  @Test
+  void should_keep_repeated_lines_when_the_sql_of_a_note_section_repeats_them() throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    String readme =
+        """
+        Additional Notes:
+        Details for fix JS-72244:
+        ALTER TABLE JIReportJob
+        ADD last_error_new nvarchar(2000);
+        ALTER TABLE JIReportJob
+        DROP COLUMN last_error;
+        """;
+    PackageContents c =
+        OfficialPackage.read(
+            packageWith("sql.zip", Map.of(Packages.LIB + "foo-1.2.3.jar", "x"), readme),
+            paths,
+            "jasperserver-pro",
+            files);
+    assertThat(c.noteLines())
+        .containsSubsequence(
+            "Details for fix JS-72244:",
+            "ALTER TABLE JIReportJob",
+            "ADD last_error_new nvarchar(2000);",
+            "ALTER TABLE JIReportJob",
+            "DROP COLUMN last_error;");
+  }
+
+  @Test
+  void should_keep_indentation_and_inner_blank_lines_when_a_note_section_has_them()
+      throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    String readme =
+        "Additional Notes:\n\nDetails for fix A:\n   UPDATE T\n      SET a = 1;\n\nDetails for"
+            + " fix B:\n\n==========\n";
+    PackageContents c =
+        OfficialPackage.read(
+            packageWith("indent.zip", Map.of(Packages.LIB + "foo-1.2.3.jar", "x"), readme),
+            paths,
+            "jasperserver-pro",
+            files);
+    assertThat(c.noteLines())
+        .containsSubsequence(
+            "Details for fix A:", "   UPDATE T", "      SET a = 1;", "", "Details for fix B:");
+    assertThat(c.noteLines().get(c.noteLines().size() - 1)).isEqualTo("Details for fix B:");
+  }
+
+  @Test
+  void should_carry_a_note_section_once_when_both_inner_readmes_hold_it() throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    String notes = "Additional Notes:\nDetails for fix A:\nUPDATE T\nSET a = 1;\nUPDATE T\n";
+    Map<String, byte[]> outer = new LinkedHashMap<>();
+    outer.put("readme.txt", Packages.OUTER_README.getBytes(StandardCharsets.UTF_8));
+    outer.put(
+        "jasperserver-pro.zip",
+        Packages.zipBytes(Map.of(Packages.LIB + "foo-1.2.3.jar", "x"), notes));
+    // the same section, with a blank line the other readme does not have
+    outer.put(
+        "js-install.zip",
+        Packages.zipBytes(
+            Map.of("buildomatic/lib/tool-2.0.jar", "y"),
+            notes.replace("Details for fix A:\n", "Details for fix A:\n\n")));
+    PackageContents c =
+        OfficialPackage.read(
+            Packages.zip(tmp.resolve("dl/twice.zip"), outer), paths, "jasperserver-pro", files);
+    assertThat(c.noteLines()).filteredOn("Details for fix A:"::equals).hasSize(1);
+    assertThat(c.noteLines()).filteredOn("UPDATE T"::equals).hasSize(2);
+    assertThat(c.noteLines()).filteredOn(n -> n.contains("Additional Notes")).hasSize(1);
   }
 
   @Test
@@ -150,8 +220,9 @@ class OfficialPackageTest {
             "jasperserver-pro",
             files);
     assertThat(c.deletes()).isEmpty();
-    assertThat(c.notes()).anySatisfy(n -> assertThat(n).contains("../x").contains("skipped"));
-    assertThat(c.notes()).anySatisfy(n -> assertThat(n).contains("../*.jar").contains("skipped"));
+    assertThat(c.noteLines()).anySatisfy(n -> assertThat(n).contains("../x").contains("skipped"));
+    assertThat(c.noteLines())
+        .anySatisfy(n -> assertThat(n).contains("../*.jar").contains("skipped"));
   }
 
   @Test

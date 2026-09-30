@@ -51,6 +51,13 @@ public final class HotfixPlans {
    */
   public static final String NOTE_PREFIX = "readme: ";
 
+  /**
+   * Marks a plan summary warning as a line of the package readme itself, carried as the readme has
+   * it. The plan preview shows the first lines of such a block; {@link #notesOf(Plan)} returns them
+   * all.
+   */
+  public static final String QUOTE_PREFIX = "readme> ";
+
   private static final String AS_PUBLISHED =
       "point jrs-hotfix at the hotfix ZIP as support published it";
 
@@ -104,8 +111,8 @@ public final class HotfixPlans {
             + contents.sha256()
             + "); compare it with the checksum on the support portal"
             + (args.checksumConfirmed() ? " (confirmed)" : ""));
-    for (String note : contents.notes()) {
-      warnings.add(NOTE_PREFIX + note);
+    for (PackageContents.Note note : contents.notes()) {
+      warnings.add((note.quoted() ? QUOTE_PREFIX : NOTE_PREFIX) + note.text());
     }
     warnings.add(
         "the service is stopped for the swap; this node only, other cluster nodes are not touched");
@@ -442,7 +449,7 @@ public final class HotfixPlans {
         paths(c.adds()),
         paths(c.replaces()),
         paths(c.deletes()),
-        c.notes());
+        c.noteLines());
   }
 
   private static VerifyReport unreadable(String problem) {
@@ -491,15 +498,17 @@ public final class HotfixPlans {
   }
 
   /**
-   * The package readme's manual steps carried in {@code plan}'s summary warnings, in order, with
-   * {@link #NOTE_PREFIX} stripped; empty for a rollback plan, which never adds any. Never executed
-   * by this tool.
+   * The package readme's manual steps carried in {@code plan}'s summary warnings, in order and
+   * whole, with {@link #NOTE_PREFIX} and {@link #QUOTE_PREFIX} stripped; empty for a rollback plan,
+   * which never adds any. Never executed by this tool.
    */
   public static List<String> notesOf(Plan plan) {
     List<String> notes = new ArrayList<>();
     for (String warning : plan.summary().warnings()) {
       if (warning.startsWith(NOTE_PREFIX)) {
         notes.add(warning.substring(NOTE_PREFIX.length()));
+      } else if (warning.startsWith(QUOTE_PREFIX)) {
+        notes.add(warning.substring(QUOTE_PREFIX.length()));
       }
     }
     return notes;
