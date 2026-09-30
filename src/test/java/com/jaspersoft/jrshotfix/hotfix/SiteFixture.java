@@ -80,12 +80,18 @@ public final class SiteFixture {
   /** A package of {@code build} that ships {@code payload} under the webapp. */
   public Path packageOf(String name, String build, Map<String, String> payload, String readme)
       throws IOException {
+    // built once per name: a zip built again a second later has other entry times and another
+    // hash, and a merge prepared for the first is "for another package"
+    Path file = root.resolve("dl/" + name);
+    if (Files.isRegularFile(file)) {
+      return file;
+    }
     Map<String, byte[]> outer = new LinkedHashMap<>();
     outer.put(
         "readme.txt",
         Packages.OUTER_README.replace("[20260730_0457]", build).getBytes(StandardCharsets.UTF_8));
     outer.put("jasperserver-pro.zip", Packages.zipBytes(payload, readme));
-    return Packages.zip(root.resolve("dl/" + name), outer);
+    return Packages.zip(file, outer);
   }
 
   /** Writes one file of the webapp as the site has it. */
