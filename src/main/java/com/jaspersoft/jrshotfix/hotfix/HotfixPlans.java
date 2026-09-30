@@ -81,8 +81,8 @@ public final class HotfixPlans {
   }
 
   /**
-   * The eight-step apply plan: preflight, snapshot, stage (before the outage), stop, swap, start,
-   * wait, record.
+   * The nine-step apply plan: preflight, snapshot, stage (before the outage), stop, swap, clear the
+   * JSP cache, start, wait, record.
    */
   public Plan planApply(ApplyArgs args) {
     Path file = args.packageFile().toAbsolutePath().normalize();
@@ -129,6 +129,7 @@ public final class HotfixPlans {
     steps.add(new ApplyPhaseSteps.StageFiles(rt, in));
     steps.add(ServiceSteps.stop(rt, ApplySteps.APPLY, ServiceSteps.STOP));
     steps.add(new ApplyPhaseSteps.AtomicSwap(rt, in));
+    steps.add(new JspCacheStep(rt, ApplySteps.APPLY, JspCacheStep.ID));
     steps.add(ServiceSteps.start(rt, ApplySteps.APPLY, ServiceSteps.START));
     steps.add(ServiceSteps.waitForServer(rt, ApplySteps.APPLY, ServiceSteps.WAIT));
     steps.add(new RecordSteps.RecordInstalled(rt, in));
@@ -277,10 +278,10 @@ public final class HotfixPlans {
   }
 
   /**
-   * Per hotfix, newest first and the target last: stop, restore the snapshot, start, wait, mark
-   * rolled back. Refuses a recorded entry, as target or anywhere in the chain (nothing to restore),
-   * and, unless cascading, a hotfix whose files a later installed hotfix also owns. The first stop
-   * refuses before the outage when any snapshot of the chain is missing.
+   * Per hotfix, newest first and the target last: stop, restore the snapshot, clear the JSP cache,
+   * start, wait, mark rolled back. Refuses a recorded entry, as target or anywhere in the chain
+   * (nothing to restore), and, unless cascading, a hotfix whose files a later installed hotfix also
+   * owns. The first stop refuses before the outage when any snapshot of the chain is missing.
    */
   public Plan planRollback(RollbackArgs args) {
     return resolveRollback(args).plan();
@@ -364,6 +365,7 @@ public final class HotfixPlans {
       // the first stop is the start of the outage: every snapshot the chain needs is checked first
       steps.add(i == 0 ? new RollbackSteps.CheckedStop(rt, stop, restores) : stop);
       steps.add(restores.get(i));
+      steps.add(new JspCacheStep(rt, in.phase(), JspCacheStep.ID + in.suffix()));
       steps.add(ServiceSteps.start(rt, in.phase(), ServiceSteps.START + in.suffix()));
       steps.add(ServiceSteps.waitForServer(rt, in.phase(), ServiceSteps.WAIT + in.suffix()));
       steps.add(new RollbackSteps.RecordRolledBack(rt, in));

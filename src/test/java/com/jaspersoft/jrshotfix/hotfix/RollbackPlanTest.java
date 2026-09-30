@@ -30,12 +30,14 @@ class RollbackPlanTest {
       throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
+      Path cache = ApplyPlanTest.jspCache(f);
       Plan rb =
           f.plans.planRollback(new HotfixPlans.RollbackArgs("JRSHF-10.0.0-20260730-0457", false));
       assertThat(HotfixFixture.ids(rb))
           .containsExactly(
               "stop-service",
               "restore-snapshot",
+              "clear-jsp-cache",
               "start-service",
               "wait-for-server",
               "record-rolled-back");
@@ -45,6 +47,8 @@ class RollbackPlanTest {
           .containsKeys("settings", "hotfix:JRSHF-10.0.0-20260730-0457")
           .containsKey("file:" + f.target(HotfixFixture.FOO));
       assertThat(f.run(rb, "r2")).isInstanceOf(RunOutcome.Succeeded.class);
+      // restored pages are older than what Tomcat compiled from the hotfix's, so it would keep them
+      assertThat(cache).doesNotExist();
       assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
           .isEqualTo("old foo");
       assertThat(f.target("webapps/jasperserver-pro/WEB-INF/lib/new-1.0.jar")).doesNotExist();

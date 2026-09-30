@@ -18,7 +18,7 @@ class ApplyPlanTest {
   @TempDir Path tmp;
 
   @Test
-  void should_build_eight_steps_in_order_when_planning_a_standard_package() throws Exception {
+  void should_build_nine_steps_in_order_when_planning_a_standard_package() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       Plan plan = f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), false));
       assertThat(HotfixFixture.ids(plan))
@@ -28,6 +28,7 @@ class ApplyPlanTest {
               "stage-files",
               "stop-service",
               "atomic-swap",
+              "clear-jsp-cache",
               "start-service",
               "wait-for-server",
               "record-installed");
@@ -60,6 +61,35 @@ class ApplyPlanTest {
       assertThat(f.home.stagingDir("r1")).doesNotExist();
       assertThat(f.snapshots.find("r1", "snapshot")).isPresent();
       assertThat(f.platform.controller.calls()).containsExactly("stop", "start");
+    }
+  }
+
+  /** Tomcat's compiled JSPs for the fixture's webapp, with one class in them. */
+  static Path jspCache(HotfixFixture f) throws Exception {
+    Path cache = f.settings.tomcatDir().resolve("work/Catalina/localhost/jasperserver-pro");
+    Files.createDirectories(cache.resolve("org/apache/jsp"));
+    Files.writeString(cache.resolve("org/apache/jsp/login_jsp.class"), "compiled");
+    return cache;
+  }
+
+  @Test
+  void should_remove_the_jsp_cache_while_the_service_is_down_when_the_plan_runs() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      Path cache = jspCache(f);
+      Path other = f.settings.tomcatDir().resolve("work/Catalina/localhost/other-app/x.class");
+      Files.createDirectories(other.getParent());
+      Files.writeString(other, "another webapp's");
+      assertThat(f.run(f.plan(), "r1")).isInstanceOf(RunOutcome.Succeeded.class);
+      assertThat(cache).doesNotExist();
+      assertThat(other).exists();
+    }
+  }
+
+  @Test
+  void should_succeed_when_there_is_no_jsp_cache_to_remove() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      assertThat(f.settings.tomcatDir().resolve("work")).doesNotExist();
+      assertThat(f.run(f.plan(), "r1")).isInstanceOf(RunOutcome.Succeeded.class);
     }
   }
 
