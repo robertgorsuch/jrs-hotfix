@@ -39,25 +39,54 @@ would otherwise be needed.
 
 ## What apply does
 
-1. preflight - the installed release and edition match the readme; there is free
-   space for staging and the snapshot; the webapp and install tree are writable;
-   no run is pending; an add whose target already exists on disk becomes a
-   replace.
+1. preflight - the installed release and edition match the readme; the hotfix
+   is not installed already; there is free space for staging and the snapshot;
+   the webapp and install tree are writable; no run is pending; an add whose
+   target already exists on disk becomes a replace.
 2. snapshot - copy every file the package will replace or delete into
    `snapshots/<runId>`, with hashes.
-3. stage - extract the payload into `runs/<runId>/staging` and hash every file.
+3. stage - extract the payload into `runs/<runId>/staging`, merge the settings
+   files below, and hash every file.
 4. stop - stop the service and wait for its JVM to end within the timeout;
    force-stop only when configured.
 5. swap - move each staged file into place (replace, add) or into the snapshot
    (delete); skip a file already at the target hash; refuse if any target is
    still locked.
-6. start - start the service, the companion database first when the host has
+6. clear the JSP cache - remove `<tomcatDir>/work/Catalina/localhost/<webappName>`,
+   as the vendor's readme requires; Tomcat compiles the pages again on first use.
+7. start - start the service, the companion database first when the host has
    one.
-7. wait - poll for the server to answer, capped.
-8. record - write the ledger entry `INSTALLED` with the file list; remove the
+8. wait - poll for the server to answer, capped.
+9. record - write the ledger entry `INSTALLED` with the file list; remove the
    staging directory.
 
 The service is always stopped for the swap.
+
+A hotfix whose files are all in place already, with nothing left to delete, was
+applied by hand or by another tool. `apply` and `verify` refuse it with exit 2,
+because the outage would change nothing, and name the command that tells the
+ledger: `jrs-hotfix record <package.zip>`. `jrs-hotfix list` and the menu's
+first line show the build the webapp states about itself
+(`WEB-INF/internal/jasperserver-pro.properties`), which is the hotfix level of
+the files on disk whoever put them there.
+
+## Settings files
+
+The installer writes values for one server into four properties files of the
+webapp: `WEB-INF/js.quartz.properties`, `WEB-INF/js.jdbc.properties`,
+`WEB-INF/classes/hibernate.properties` and
+`WEB-INF/classes/keystore.init.properties`. When a package ships one of them and
+the server's file holds other values, jrs-hotfix installs the package's file
+with the server's values: a key both have keeps the server's value, a key only
+the package has is taken from the package, and a key only the server has is
+carried over under a comment at the end. The plan names the keys, never the
+values. Where a fix depends on the package's value of a kept key, set it by
+hand. The server's comments are not carried; the file as it was is in the
+snapshot, and a rollback puts it back byte for byte.
+
+Every other `.xml` and `.properties` file the package ships is replaced, and
+the plan names the ones in the webapp: settings you changed in them must be
+applied again.
 
 ## Rollback
 
@@ -66,16 +95,19 @@ back, files the hotfix added are removed, and files it deleted are restored.
 Rollback is last-in-first-out: if a newer installed hotfix owns any of the same
 files, rollback is refused with the blocking ids unless `--cascade` is given,
 which rolls the blocking hotfixes back newest first, then the one asked for.
-Restore is per file and idempotent, so a crash mid-restore resumes cleanly. An
-entry with state `RECORDED` (a hotfix applied by hand) has no snapshot and cannot
-be rolled back by this tool.
+Restore is per file and idempotent, so a crash mid-restore resumes cleanly. The
+JSP cache is removed after the restore, as it is after a swap. An entry with
+state `RECORDED` (a hotfix applied by hand) has no snapshot and cannot be rolled
+back by this tool.
 
 ## Manual steps
 
 Some hotfixes list manual steps in their readme: SQL for a given database,
 properties to add, or settings to re-apply in a configuration file the hotfix
-overwrites. jrs-hotfix never runs any of this. The readme's manual steps are
-printed in the plan preview, printed again after the run finishes, and saved to
+overwrites. jrs-hotfix never runs any of this. It carries those sections of
+the readme as they are, every line of them: `jrs-hotfix verify <package.zip>`
+prints them before the outage, the plan preview shows the first lines of each
+section, and a run prints them again when it finishes and saves them to
 `runs/<runId>/notes.txt` for you to act on by hand.
 
 ## If something goes wrong
