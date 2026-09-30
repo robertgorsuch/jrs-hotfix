@@ -1,6 +1,7 @@
 package com.jaspersoft.jrshotfix.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jaspersoft.jrshotfix.engine.CancellationToken;
 import com.jaspersoft.jrshotfix.engine.Context;
@@ -14,10 +15,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 class ServiceStepsTest {
@@ -73,6 +78,118 @@ class ServiceStepsTest {
     assertThat(Files.isRegularFile(tmp.resolve("runs/r1/stop-service.stopped"))).isTrue();
     assertThat(stop.compensate(ctx(), EventSink.discard())).isInstanceOf(StepResult.Ok.class);
     assertThat(c.state()).isEqualTo(ServiceController.State.RUNNING);
+  }
+
+  /**
+   * A probe that records the patience it is given and answers from {@code answers}, in order, the
+   * last one for ever.
+   */
+  private static ServerProbe recording(List<Duration> patience, List<Optional<String>> answers) {
+    return new ServerProbe() {
+      @Override
+      public Optional<String> problem() {
+        throw new AssertionError("the wait must say how long its request may take");
+      }
+
+      @Override
+      public Optional<String> problem(Duration p) {
+        patience.add(p);
+        return answers.get(Math.min(patience.size(), answers.size()) - 1);
+      }
+    };
+  }
+
+  @Test
+  void should_let_its_request_wait_for_the_whole_startup_when_waiting_for_the_server() {
+    // a request given up on is still answered when the webapp comes up: five of them at once
+    // broke a real server (2026-09-29), so the wait never gives up on one before its own end
+    List<Duration> patience = new ArrayList<>();
+    Step wait =
+        ServiceSteps.waitForServer(
+            runtime(
+                new FakeServiceController(ServiceController.State.STOPPED),
+                recording(patience, List.of(Optional.empty()))),
+            "apply",
+            ServiceSteps.WAIT);
+    assertThat(wait.execute(ctx(), EventSink.discard())).isInstanceOf(StepResult.Ok.class);
+    assertThat(patience).hasSize(1);
+    assertThat(patience.get(0)).isGreaterThan(ServiceSteps.WAIT_CAP.minusSeconds(5));
+  }
+
+  @Test
+  void should_ask_again_with_the_time_that_is_left_when_the_server_answers_an_error() {
+    List<Duration> patience = new ArrayList<>();
+    Step wait =
+        ServiceSteps.waitForServer(
+            runtime(
+                new FakeServiceController(ServiceController.State.STOPPED),
+                recording(patience, List.of(Optional.of("HTTP 503"), Optional.empty()))),
+            "apply",
+            ServiceSteps.WAIT);
+    assertThat(wait.execute(ctx(), EventSink.discard())).isInstanceOf(StepResult.Ok.class);
+    assertThat(patience).hasSize(2);
+    assertThat(patience.get(1)).isLessThan(patience.get(0));
+  }
+
+  @Test
+  void should_fail_when_the_server_answers_errors_until_the_time_is_up() {
+    List<Duration> patience = new ArrayList<>();
+    Step wait =
+        ServiceSteps.waitForServer(
+            runtime(
+                new FakeServiceController(ServiceController.State.STOPPED),
+                recording(patience, List.of(Optional.of("HTTP 500")))),
+            "apply",
+            ServiceSteps.WAIT);
+    StepResult result = wait.execute(ctx(), EventSink.discard());
+    assertThat(result).isInstanceOf(StepResult.Failed.class);
+    assertThat(((StepResult.Failed) result).failure().cause()).contains("HTTP 500");
+    assertThat(patience).allSatisfy(p -> assertThat(p).isPositive());
+  }
+
+  @Test
+  @Timeout(20)
+  void should_stop_waiting_when_the_run_is_cancelled_while_its_request_is_held() {
+    CountDownLatch asked = new CountDownLatch(1);
+    ServerProbe held =
+        new ServerProbe() {
+          @Override
+          public Optional<String> problem() {
+            throw new AssertionError("the wait must say how long its request may take");
+          }
+
+          @Override
+          public Optional<String> problem(Duration patience) {
+            asked.countDown();
+            try {
+              Thread.sleep(patience.toMillis());
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              return Optional.of("interrupted");
+            }
+            return Optional.of("request timed out");
+          }
+        };
+    Context ctx = ctx();
+    Step wait =
+        ServiceSteps.waitForServer(
+            runtime(new FakeServiceController(ServiceController.State.STOPPED), held),
+            "apply",
+            ServiceSteps.WAIT);
+    Thread operator =
+        new Thread(
+            () -> {
+              try {
+                asked.await();
+              } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+              }
+              ctx.cancel().cancel("Ctrl-C");
+            });
+    operator.start();
+    assertThatThrownBy(() -> wait.execute(ctx, EventSink.discard()))
+        .isInstanceOf(CancellationToken.CancelledException.class)
+        .hasMessageContaining("Ctrl-C");
   }
 
   @Test
