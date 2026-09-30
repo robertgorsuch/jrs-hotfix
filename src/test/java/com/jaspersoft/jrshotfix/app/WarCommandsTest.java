@@ -195,6 +195,12 @@ class WarCommandsTest {
                 "--merge",
                 id,
                 "--yes"))
+        // failed once on a CI runner with exit 2 and no output kept; the output is kept now
+        .as("apply --war --merge
+stdout:
+%s
+stderr:
+%s", f.out(), f.err())
         .isEqualTo(0);
     assertThat(f.out()).contains("Merged (2)").contains("Kept as the site has it (2)");
     Map<String, String> result = WarFileTest.entries(out);
