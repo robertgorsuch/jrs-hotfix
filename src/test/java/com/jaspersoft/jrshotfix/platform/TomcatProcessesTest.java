@@ -53,6 +53,18 @@ class TomcatProcessesTest {
   }
 
   @Test
+  void should_recognise_a_launcher_that_carries_tomcats_own_property() {
+    // the acceptance fixture's fake Tomcat, and a wrapper shell that starts the JVM
+    assertThat(
+            TomcatProcesses.describe(
+                49, "sh -c sleep 900 # -Dcatalina.base=" + INSTALL + "/apache-tomcat", "/bin/sh"))
+        .hasValueSatisfying(
+            t ->
+                assertThat(t.catalinaBase().map(Path::getFileName).map(Path::toString))
+                    .contains("apache-tomcat"));
+  }
+
+  @Test
   void should_fall_back_on_the_command_line_when_the_executable_is_not_known() {
     // ProcessHandle gives no command for some processes; the first word of the line says java
     assertThat(TomcatProcesses.describe(47, JVM, "")).isPresent();

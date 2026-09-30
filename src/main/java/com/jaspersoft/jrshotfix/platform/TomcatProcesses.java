@@ -61,17 +61,19 @@ final class TomcatProcesses implements TomcatProcessFinder {
 
   /**
    * The Tomcat recognised in one process, or empty when it is not a Tomcat: a JVM (or {@code jsvc})
-   * with {@code catalina} in its command line, or a {@code tomcatN.exe} service wrapper, whose home
-   * is two levels above it. The executable matters: a shell or an editor whose command line names
-   * {@code catalina} is not a Tomcat, and a force stop must never end one (2026-09-29, an
-   * operator's ssh shell). When the executable is not known, the command line's first word stands
-   * in for it.
+   * with {@code catalina} in its command line, a process that carries Tomcat's own {@code
+   * -Dcatalina.home} or {@code -Dcatalina.base} property (the JVM, or the shell that launched it),
+   * or a {@code tomcatN.exe} service wrapper, whose home is two levels above it. A shell or an
+   * editor whose command line merely names {@code catalina} is not a Tomcat, and a force stop must
+   * never end one (2026-09-29, an operator's ssh shell). When the executable is not known, the
+   * command line's first word stands in for it.
    */
   static Optional<TomcatProcess> describe(long pid, String commandLine, String command) {
     String executable = command.isBlank() ? firstWord(commandLine) : command;
     boolean isTomcat =
         (JVM_EXECUTABLE.matcher(executable).find()
                 && commandLine.toLowerCase(Locale.ROOT).contains("catalina"))
+            || CATALINA_PROPERTY.matcher(commandLine).find()
             || SERVICE_WRAPPER.matcher(command).find();
     if (!isTomcat) {
       return Optional.empty();
