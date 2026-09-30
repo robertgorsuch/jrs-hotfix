@@ -32,7 +32,7 @@ It comes as one download with everything it needs inside. There is nothing else 
 - **Use the account that owns the installation:** on Linux, the user that installed JasperReports Server and runs its Tomcat (`root` when a systemd unit controls it); on Windows, open **Command Prompt** with **Run as administrator**.
 - **Have the hotfix package as Jaspersoft Support published it:** a `.zip` holding `readme.txt` plus one or both of `jasperserver-pro.zip` (paths under the webapp) and `js-install.zip` (paths under the installation). Do not unpack or repack it. Have the package's checksum from the support portal at hand: `apply` prints the SHA-256 of the file and asks whether it matches.
 - **No Java to install.** The download includes its own Java, used only by jrs-hotfix. The server's Java is neither used nor changed, and no `JAVA_HOME` is needed.
-- **Supported:** JasperReports Server 10.x, Commercial edition (`jasperserver-pro`), on Apache Tomcat, on Windows or Linux (64-bit), controlled as a Windows service, a systemd unit, `ctlscript`, `catalina` or by hand. The Community edition, other releases and other application servers are refused with exit 6 before anything changes.
+- **Supported:** JasperReports Server 10.x, Commercial edition (`jasperserver-pro`), on Apache Tomcat, on Windows or Linux (x86-64), controlled as a Windows service, a systemd unit, `ctlscript`, `catalina` or by hand. Nothing changes on an unsupported input: a package for another release than the server is refused with exit 2, a file that is not an official package or a WAR that is not a 10.x webapp with exit 6, and another OS or architecture at start. The Community edition is out of scope.
 
 ---
 
