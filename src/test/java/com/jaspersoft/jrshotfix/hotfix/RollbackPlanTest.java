@@ -61,6 +61,26 @@ class RollbackPlanTest {
   }
 
   @Test
+  void should_install_again_when_a_rolled_back_hotfix_is_applied_again() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      assertThat(f.run(f.plan(), "r1")).isInstanceOf(RunOutcome.Succeeded.class);
+      assertThat(
+              f.run(
+                  f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false)),
+                  "r2"))
+          .isInstanceOf(RunOutcome.Succeeded.class);
+      assertThat(f.run(f.plan(), "r3")).isInstanceOf(RunOutcome.Succeeded.class);
+      assertThat(Files.readString(f.target(HotfixFixture.FOO))).isEqualTo("patched foo");
+      // one entry per id: the new installation replaces the rolled-back one
+      assertThat(f.ledger.all()).filteredOn(e -> e.id().equals(HotfixFixture.ID)).hasSize(1);
+      LedgerEntry e = f.ledger.find(HotfixFixture.ID).orElseThrow();
+      assertThat(e.state()).isEqualTo(HotfixState.INSTALLED);
+      assertThat(e.runId()).isEqualTo("r3");
+      assertThat(e.snapshotRef()).contains("r3/snapshot");
+    }
+  }
+
+  @Test
   void should_refuse_when_the_snapshot_directory_was_deleted_by_hand() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
