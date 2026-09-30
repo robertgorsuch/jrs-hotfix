@@ -47,8 +47,8 @@ public final class PackageStager {
     Map<String, Map<String, String>> inner = new HashMap<>();
     // raw outer entry name -> package path, for files shipped unpacked
     Map<String, String> direct = new HashMap<>();
-    for (PackageContents.Entry e : contents.entries()) {
-      if (e.action() == Action.DELETE || !paths.contains(e.path())) {
+    for (PackageContents.VendorFile e : contents.vendorFiles()) {
+      if (!paths.contains(e.path())) {
         continue;
       }
       if (e.source().isPresent()) {

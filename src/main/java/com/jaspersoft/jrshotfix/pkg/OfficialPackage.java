@@ -2,6 +2,7 @@ package com.jaspersoft.jrshotfix.pkg;
 
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.platform.FileOps;
+import com.jaspersoft.jrshotfix.platform.Sums;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,7 +13,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.DigestInputStream;
-import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -293,10 +293,12 @@ public final class OfficialPackage {
     Readme treeReadme = null;
     List<PackageContents.Entry> entries = new ArrayList<>();
     List<PackageContents.Kept> kept = new ArrayList<>();
+    List<PackageContents.VendorFile> vendorFiles = new ArrayList<>();
+    List<String> listed = new ArrayList<>();
     Set<String> added = new LinkedHashSet<>();
     List<Readme> readmes = new ArrayList<>();
     Notes notes = new Notes();
-    Payload payload = new Payload(paths, entries, kept, added, notes);
+    Payload payload = new Payload(paths, entries, kept, vendorFiles, added, notes);
     MessageDigest whole = sha256();
     try (InputStream in = new DigestInputStream(Files.newInputStream(source), whole);
         ZipInputStream outer = new ZipInputStream(in)) {
@@ -344,6 +346,8 @@ public final class OfficialPackage {
       List<String> said = new ArrayList<>();
       entries.addAll(deletions(r, added, paths, said));
       said.forEach(notes::say);
+      listed.addAll(r.deleted());
+      listed.addAll(r.globs());
       notes.conditions(r.conditions());
       notes.manual(r.manual());
     }
@@ -358,6 +362,10 @@ public final class OfficialPackage {
         HexFormat.of().formatHex(whole.digest()),
         entries,
         kept,
+        vendorFiles,
+        listed.stream()
+            .filter(p -> PackagePaths.pathProblems(p.replace('*', '_')).isEmpty())
+            .toList(),
         notes.lines());
   }
 
@@ -448,6 +456,7 @@ public final class OfficialPackage {
       PackagePaths paths,
       List<PackageContents.Entry> entries,
       List<PackageContents.Kept> kept,
+      List<PackageContents.VendorFile> vendorFiles,
       Set<String> added,
       Notes notes) {
 
@@ -465,13 +474,13 @@ public final class OfficialPackage {
       }
       Path target = paths.resolve(path);
       Action action = Files.isRegularFile(target) ? Action.REPLACE : Action.ADD;
-      MessageDigest md = sha256();
+      Sums.Sink sink = new Sums.Sink(OutputStream.nullOutputStream());
       Optional<SiteSettings.Merged> merged = Optional.empty();
       Optional<byte[]> theirs = Optional.empty();
       boolean stays = action == Action.REPLACE && SiteSettings.keptAsItIs(path);
       if (stays || (action == Action.REPLACE && SiteSettings.holdsSiteValues(path))) {
         byte[] head = in.readNBytes(SiteSettings.MAX_BYTES + 1);
-        md.update(head);
+        sink.write(head, 0, head.length);
         if (head.length <= SiteSettings.MAX_BYTES) {
           theirs = Optional.of(head);
           if (!stays) {
@@ -479,10 +488,12 @@ public final class OfficialPackage {
           }
         }
       }
-      try (OutputStream digest = new DigestOutputStream(OutputStream.nullOutputStream(), md)) {
-        in.transferTo(digest);
-      }
-      String payload = HexFormat.of().formatHex(md.digest());
+      in.transferTo(sink);
+      Sums sums = sink.sums();
+      String payload = sums.sha256();
+      vendorFiles.add(
+          new PackageContents.VendorFile(
+              path, payload, sums.textSha256(), sums.size(), source, entryName));
       // a file that stays is "laid down" too: no readme deletion may remove it
       added.add(path);
       if (stays) {
@@ -518,7 +529,7 @@ public final class OfficialPackage {
       kept.add(
           new PackageContents.Kept(
               path, payload, "written by the installer for this server; never replaced"));
-      if (payload.equals(hashOf(target))) {
+      if (payload.equals(Sums.of(target).sha256())) {
         return;
       }
       String sentence =
@@ -535,15 +546,6 @@ public final class OfficialPackage {
         lines.remove(lines.size() - 1);
       }
       notes.sayAndQuote(sentence + ". The package's copy:", lines);
-    }
-
-    private static String hashOf(Path file) throws IOException {
-      MessageDigest md = sha256();
-      try (InputStream in = Files.newInputStream(file);
-          OutputStream digest = new DigestOutputStream(OutputStream.nullOutputStream(), md)) {
-        in.transferTo(digest);
-      }
-      return HexFormat.of().formatHex(md.digest());
     }
 
     private static String keys(List<String> keys) {
