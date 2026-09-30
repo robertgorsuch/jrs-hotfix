@@ -40,9 +40,18 @@ final class PlanPrinter {
     lines.add("Plan  " + s.operation() + "  " + s.target());
     lines.add("Summary");
     TextTable summary = new TextTable();
-    summary.row("  files", count(s.filesTouched().size(), "file"));
-    for (String f : listed(s.filesTouched())) {
-      summary.row("", f);
+    String files = count(s.filesTouched().size(), "file");
+    if (s.changes().isEmpty()) {
+      summary.row("  files", files);
+      for (String f : listed(s.filesTouched())) {
+        summary.row("", f);
+      }
+    } else {
+      // counted by area and action: twenty of five hundred paths tell the operator nothing
+      summary.row("  files", files + ": " + s.changes().get(0));
+      for (String change : s.changes().subList(1, s.changes().size())) {
+        summary.row("", change);
+      }
     }
     if (!s.resourcesTouched().isEmpty()) {
       summary.row("  resources", count(s.resourcesTouched().size(), "resource"));

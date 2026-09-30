@@ -42,6 +42,19 @@ class PlanPrinterTest {
   }
 
   @Test
+  void should_count_the_files_by_area_and_action_when_printing_an_apply_plan() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      String text = printed(f, f.plan());
+      assertThat(text).contains("5 files: 1 added, 2 replaced, 2 deleted");
+      assertThat(text).containsPattern("webapp libraries +4: 1 added, 1 replaced, 2 deleted");
+      assertThat(text).containsPattern("installation tree +1: 1 replaced");
+      assertThat(text).contains("jrs-hotfix verify");
+      // counted, not listed
+      assertThat(text).doesNotContain(f.target(HotfixFixture.FOO).toString());
+    }
+  }
+
+  @Test
   void should_show_the_start_of_the_readme_text_and_say_where_the_rest_is_when_it_is_long()
       throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
@@ -65,6 +78,16 @@ class PlanPrinterTest {
               new HotfixPlans.ApplyArgs(packageWithNotes(tmp.resolve("dl/short.zip"), 3), true));
       String text = printed(f, plan);
       assertThat(text).contains("step 1;", "step 2;", "step 3;").doesNotContain("more line");
+    }
+  }
+
+  @Test
+  void should_count_what_a_rollback_puts_back_when_printing_a_rollback_plan() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      f.run(f.plan(), "r1");
+      Plan plan = f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false));
+      String text = printed(f, plan);
+      assertThat(text).contains("5 files: 2 restored, 1 removed, 2 put back");
     }
   }
 }

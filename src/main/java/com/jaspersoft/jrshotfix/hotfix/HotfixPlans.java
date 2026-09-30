@@ -12,6 +12,7 @@ import com.jaspersoft.jrshotfix.pkg.Action;
 import com.jaspersoft.jrshotfix.pkg.FileTarget;
 import com.jaspersoft.jrshotfix.pkg.OfficialPackage;
 import com.jaspersoft.jrshotfix.pkg.PackageContents;
+import com.jaspersoft.jrshotfix.pkg.PackagePaths;
 import com.jaspersoft.jrshotfix.service.ServiceSteps;
 import com.jaspersoft.jrshotfix.state.HotfixState;
 import com.jaspersoft.jrshotfix.state.Ledger;
@@ -23,6 +24,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -145,7 +147,8 @@ public final class HotfixPlans {
             List.of(snapshotDir),
             rollbackPoints,
             "official-package",
-            warnings);
+            warnings,
+            applyChanges(targets));
 
     Map<String, String> inputs = new LinkedHashMap<>();
     inputs.put("package", contents.sha256());
@@ -156,6 +159,93 @@ public final class HotfixPlans {
     }
     return new Plan(
         "hotfix-apply-" + RunIds.next(rt.clock()), steps, summary, PlanFingerprint.of(inputs));
+  }
+
+  /** Where a file of a package lands, as the plan preview groups them. */
+  private enum Area {
+    WEBAPP_LIBRARIES("webapp libraries"),
+    WEBAPP_SETTINGS("webapp settings"),
+    WEBAPP_OTHER("webapp scripts and pages"),
+    INSTALLATION("installation tree");
+
+    private final String label;
+
+    Area(String label) {
+      this.label = label;
+    }
+
+    static Area of(String packagePath) {
+      String p = packagePath.toLowerCase(Locale.ROOT);
+      if (!p.startsWith(PackagePaths.WEBAPPS_PREFIX)) {
+        return INSTALLATION;
+      }
+      if (p.contains("/web-inf/lib/")) {
+        return WEBAPP_LIBRARIES;
+      }
+      return p.endsWith(".xml") || p.endsWith(".properties") ? WEBAPP_SETTINGS : WEBAPP_OTHER;
+    }
+  }
+
+  /**
+   * What the apply plan does to its files, for the preview: the totals, then one line per area that
+   * has files, then where every path can be read.
+   */
+  private static List<String> applyChanges(List<FileTarget> targets) {
+    Map<Area, int[]> byArea = new EnumMap<>(Area.class);
+    int[] total = new int[3];
+    for (FileTarget t : targets) {
+      int[] counts = byArea.computeIfAbsent(Area.of(t.packagePath()), a -> new int[3]);
+      int action =
+          switch (t.action()) {
+            case ADD -> 0;
+            case REPLACE -> 1;
+            case DELETE -> 2;
+          };
+      counts[action]++;
+      total[action]++;
+    }
+    List<String> out = new ArrayList<>();
+    out.add(total[0] + " added, " + total[1] + " replaced, " + total[2] + " deleted");
+    int width = byArea.keySet().stream().mapToInt(a -> a.label.length()).max().orElse(0);
+    for (Map.Entry<Area, int[]> e : byArea.entrySet()) {
+      int[] c = e.getValue();
+      List<String> parts = new ArrayList<>();
+      if (c[0] > 0) {
+        parts.add(c[0] + " added");
+      }
+      if (c[1] > 0) {
+        parts.add(c[1] + " replaced");
+      }
+      if (c[2] > 0) {
+        parts.add(c[2] + " deleted");
+      }
+      out.add(
+          String.format(
+              Locale.ROOT,
+              "%-" + width + "s  %d: %s",
+              e.getKey().label,
+              c[0] + c[1] + c[2],
+              String.join(", ", parts)));
+    }
+    out.add("every path: jrs-hotfix verify <package.zip>");
+    return out;
+  }
+
+  /** What the rollback plan does to the files of its hotfixes, for the preview: the totals. */
+  private static List<String> rollbackChanges(List<RollbackSteps.Input> inputs) {
+    int restored = 0;
+    int removed = 0;
+    int putBack = 0;
+    for (RollbackSteps.Input in : inputs) {
+      for (OwnedFile f : in.hotfix().files()) {
+        switch (f.action()) {
+          case "add" -> removed++;
+          case "delete" -> putBack++;
+          default -> restored++;
+        }
+      }
+    }
+    return List.of(restored + " restored, " + removed + " removed, " + putBack + " put back");
   }
 
   /**
@@ -301,7 +391,8 @@ public final class HotfixPlans {
             backups,
             rollbackPoints,
             "snapshot",
-            warnings);
+            warnings,
+            rollbackChanges(inputs));
     Plan plan =
         new Plan(
             "hotfix-rollback-" + RunIds.next(rt.clock()),
