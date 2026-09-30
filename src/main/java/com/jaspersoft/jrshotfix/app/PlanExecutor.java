@@ -244,7 +244,7 @@ final class PlanExecutor {
     List<String> changed = new ArrayList<>();
     for (String key : keys) {
       boolean stable =
-          operation.equals(HotfixPlans.APPLY)
+          (operation.equals(HotfixPlans.APPLY) || operation.equals(HotfixPlans.APPLY_WAR))
               ? key.equals("package")
                   || key.equals("settings")
                   || key.equals("installed")

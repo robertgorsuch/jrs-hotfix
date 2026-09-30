@@ -28,7 +28,8 @@ import picocli.CommandLine.Parameters;
     footer = {
       "",
       "Example:",
-      "  jrs-hotfix apply C:\\Downloads\\hotfix_JRSPro10.0.0_20260730.zip --plan"
+      "  jrs-hotfix apply C:\\Downloads\\hotfix_JRSPro10.0.0_20260730.zip --plan",
+      "  jrs-hotfix apply <zip> --war jasperserver-pro.war --out jasperserver-pro-hotfixed.war"
     })
 final class ApplyCommand extends AppCommand {
 
@@ -57,9 +58,27 @@ final class ApplyCommand extends AppCommand {
               + " otherwise.")
   MergeWorkspace.OnConflict onConflict;
 
+  @Option(
+      names = "--war",
+      paramLabel = "<in.war>",
+      description =
+          "Hotfix this WAR instead of a server: no service, no snapshot; the input is never"
+              + " modified. Needs --out. The home is --home, else jrs-hotfix beside the WAR.")
+  Path war;
+
+  @Option(
+      names = "--out",
+      paramLabel = "<out.war>",
+      description = "Where the hotfixed WAR is written, with its record <out.war>.jrs-hotfix.json.")
+  Path out;
+
   @Override
   public Integer call() {
-    Bootstrap boot = open();
+    if ((war == null) != (out == null)) {
+      return ExitCodes.fail(
+          err(), ExitCodes.USAGE, "--war and --out go together", Optional.empty());
+    }
+    Bootstrap boot = war == null ? open() : open().forWar(war);
     boolean confirmed = false;
     if (!global.yes() && !plan && boot.interactive() && Files.isRegularFile(file)) {
       String sha;
@@ -92,12 +111,20 @@ final class ApplyCommand extends AppCommand {
             Optional.ofNullable(merge),
             Optional.ofNullable(onConflict),
             MergeCommand.fallback(boot));
+    if (war != null) {
+      args = args.intoWar(war, out);
+    }
     Plan p = plans.planApply(args);
     List<String> audit =
         global.yes()
             ? List.of(HotfixPlans.AUDIT_CHECKSUM_CONFIRMED + " skipped with --yes")
             : List.of(HotfixPlans.AUDIT_CHECKSUM_CONFIRMED + " confirmed by the operator");
     return executor(boot)
-        .execute(p, HotfixPlans.APPLY, HotfixPlans.applyArgsJson(args), plan, audit);
+        .execute(
+            p,
+            war == null ? HotfixPlans.APPLY : HotfixPlans.APPLY_WAR,
+            HotfixPlans.applyArgsJson(args),
+            plan,
+            audit);
   }
 }

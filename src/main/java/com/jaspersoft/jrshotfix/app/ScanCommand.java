@@ -36,9 +36,17 @@ final class ScanCommand extends AppCommand {
       description = "A hotfix ZIP: also judge every file it ships against the site's changes.")
   Path packageFile;
 
+  @Option(
+      names = "--war",
+      paramLabel = "<file.war>",
+      description =
+          "Scan this WAR instead of the server. The home is --home, else jrs-hotfix beside the"
+              + " WAR; the baseline must be in it.")
+  Path war;
+
   @Override
   public Integer call() {
-    Bootstrap boot = open();
+    Bootstrap boot = war == null ? open() : open().forWar(war);
     HotfixPlans plans = boot.plans();
     HotfixRuntime rt = plans.runtime();
     BaseView.Resolution resolution = rt.baseView();

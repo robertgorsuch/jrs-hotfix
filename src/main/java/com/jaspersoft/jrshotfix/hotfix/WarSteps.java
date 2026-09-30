@@ -1,0 +1,473 @@
+package com.jaspersoft.jrshotfix.hotfix;
+
+import com.jaspersoft.jrshotfix.engine.CheckResult;
+import com.jaspersoft.jrshotfix.engine.Context;
+import com.jaspersoft.jrshotfix.engine.Step;
+import com.jaspersoft.jrshotfix.engine.StepResult;
+import com.jaspersoft.jrshotfix.event.Event;
+import com.jaspersoft.jrshotfix.event.EventSink;
+import com.jaspersoft.jrshotfix.json.Json;
+import com.jaspersoft.jrshotfix.merge.MergeDoc;
+import com.jaspersoft.jrshotfix.pkg.Action;
+import com.jaspersoft.jrshotfix.pkg.FileTarget;
+import com.jaspersoft.jrshotfix.pkg.PackageContents;
+import com.jaspersoft.jrshotfix.pkg.PackagePaths;
+import com.jaspersoft.jrshotfix.platform.DiskSpace;
+import com.jaspersoft.jrshotfix.platform.Durability;
+import com.jaspersoft.jrshotfix.platform.Trees;
+import com.jaspersoft.jrshotfix.war.WarFile;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * The steps of an apply whose target is a WAR (0.2 design, section 7): the input WAR is never
+ * modified, the hotfixed WAR is written beside the output path and renamed only once checked, and
+ * the record is a sidecar file next to it, not a ledger entry (a WAR has no server to be the
+ * inventory of). Invariants: every step re-checks the state on disk before it acts, so a resumed
+ * run converges; the only files written outside the home are the output, its temporary name and the
+ * sidecar; there is no service, no snapshot and no rollback.
+ */
+final class WarSteps {
+
+  static final String PHASE_ASSEMBLE = "assemble";
+  static final String PREFLIGHT = "preflight-war";
+  static final String ASSEMBLE = "assemble-war";
+  static final String CHECK = "check-war";
+  static final String RECORD = "record-war";
+
+  private WarSteps() {}
+
+  /** What a WAR apply was asked to do, beside the package. */
+  record Target(Path war, Path out, String webappName) {
+    Target {
+      war = war.toAbsolutePath().normalize();
+      out = out.toAbsolutePath().normalize();
+    }
+
+    Path temporary() {
+      return WarFile.temporary(out);
+    }
+
+    Path sidecar() {
+      return WarFile.sidecar(out);
+    }
+
+    String prefix() {
+      return PackagePaths.WEBAPPS_PREFIX + webappName + "/";
+    }
+
+    /** The webapp path of a target under the WAR; empty for a file of the installation tree. */
+    Optional<String> pathOf(FileTarget t) {
+      return t.packagePath().startsWith(prefix())
+          ? Optional.of(t.packagePath().substring(prefix().length()))
+          : Optional.empty();
+    }
+  }
+
+  /** Step 1: the WAR fits the package, the output is free, there is room. Mutates nothing. */
+  static final class Preflight extends ApplySteps.ReadOnly {
+    private final Target target;
+
+    Preflight(HotfixRuntime rt, ApplyInput in, Target target) {
+      super(rt, in);
+      this.target = target;
+    }
+
+    @Override
+    public String id() {
+      return PREFLIGHT;
+    }
+
+    @Override
+    public String title() {
+      return "check the WAR and the output";
+    }
+
+    @Override
+    public String phase() {
+      return ApplySteps.VERIFY;
+    }
+
+    @Override
+    public String detail() {
+      return "release and edition of the WAR, not hotfixed already, output absent, free space";
+    }
+
+    @Override
+    public CheckResult precheck(Context ctx) {
+      List<String> problems =
+          new ArrayList<>(HotfixPlans.applicability(rt, in.contents(), in.targets()));
+      if (Files.exists(target.out())) {
+        problems.add(target.out() + " exists already; the output is never overwritten");
+      }
+      if (!Files.isRegularFile(target.war())) {
+        problems.add(target.war() + " is gone");
+      }
+      long size = 0;
+      try {
+        size = Files.size(target.war()) + Files.size(in.packageFile());
+      } catch (IOException e) {
+        problems.add("cannot size the inputs: " + e.getMessage());
+      }
+      Path outDir = target.out().getParent();
+      if (outDir == null || !Files.isDirectory(outDir)) {
+        problems.add("the directory of " + target.out() + " does not exist");
+      } else {
+        problems.addAll(
+            DiskSpace.problems(
+                rt.files(),
+                List.of(
+                    new DiskSpace.Need("staging", rt.home().root(), size),
+                    new DiskSpace.Need("the output WAR", outDir, size))));
+      }
+      if (!problems.isEmpty()) {
+        return CheckResult.fail(
+            String.join("; ", problems),
+            "fix the listed problems, then run again; nothing was written");
+      }
+      List<String> warnings = HotfixPlans.buildWarnings(rt, in.contents());
+      return warnings.isEmpty()
+          ? CheckResult.pass()
+          : CheckResult.warn(String.join("; ", warnings));
+    }
+  }
+
+  /**
+   * Step 3: stream the input WAR to the temporary output, without the entries the package replaces
+   * or deletes, then append the staged files. Compensation removes the temporary file.
+   */
+  static final class Assemble implements Step {
+    private final HotfixRuntime rt;
+    private final ApplyInput in;
+    private final Target target;
+
+    Assemble(HotfixRuntime rt, ApplyInput in, Target target) {
+      this.rt = rt;
+      this.in = in;
+      this.target = target;
+    }
+
+    @Override
+    public String id() {
+      return ASSEMBLE;
+    }
+
+    @Override
+    public String title() {
+      return "assemble the hotfixed WAR";
+    }
+
+    @Override
+    public String phase() {
+      return PHASE_ASSEMBLE;
+    }
+
+    @Override
+    public String detail() {
+      return target.temporary()
+          + ": the input's entries without the "
+          + in.targets().size()
+          + " the package touches, plus the staged files";
+    }
+
+    @Override
+    public CheckResult precheck(Context ctx) {
+      List<String> unstaged = new ArrayList<>();
+      for (FileTarget t : in.targets()) {
+        if (t.action() != Action.DELETE
+            && target.pathOf(t).isPresent()
+            && !Files.isRegularFile(in.staged(ctx, t))) {
+          unstaged.add(t.packagePath());
+        }
+      }
+      return unstaged.isEmpty()
+          ? CheckResult.pass()
+          : CheckResult.fail(
+              "not staged: " + String.join(", ", unstaged),
+              "stage-files did not run for this run or its staging tree was removed; run again");
+    }
+
+    @Override
+    public StepResult execute(Context ctx, EventSink out) {
+      Set<String> dropped = new HashSet<>();
+      Map<String, Path> staged = new LinkedHashMap<>();
+      int skipped = 0;
+      for (FileTarget t : in.targets()) {
+        Optional<String> path = target.pathOf(t);
+        if (path.isEmpty()) {
+          skipped++;
+          continue;
+        }
+        if (t.action() == Action.DELETE) {
+          dropped.add(path.get());
+        } else {
+          staged.put(path.get(), in.staged(ctx, t));
+        }
+      }
+      if (skipped > 0) {
+        out.emit(
+            new Event.Log(
+                rt.clock().instant(),
+                ctx.runId(),
+                Optional.of(id()),
+                phase(),
+                Event.Log.Level.INFO,
+                skipped
+                    + " file(s) of the installation tree (js-install.zip) are not part of a WAR"
+                    + " and were left out"));
+      }
+      try {
+        int count = WarFile.assemble(target.war(), target.temporary(), dropped, staged);
+        out.emit(
+            new Event.Log(
+                rt.clock().instant(),
+                ctx.runId(),
+                Optional.of(id()),
+                phase(),
+                Event.Log.Level.INFO,
+                count + " entries written to " + target.temporary()));
+        return StepResult.ok();
+      } catch (IOException | UncheckedIOException e) {
+        return Failures.recoverable(
+            "cannot assemble " + target.temporary() + ": " + e.getMessage(),
+            "check free space beside " + target.out());
+      }
+    }
+
+    @Override
+    public StepResult compensate(Context ctx, EventSink out) {
+      try {
+        Files.deleteIfExists(target.temporary());
+        return StepResult.ok();
+      } catch (IOException e) {
+        return Failures.recoverable(
+            "cannot remove " + target.temporary() + ": " + e.getMessage(), "delete it by hand");
+      }
+    }
+  }
+
+  /** Step 4: reopen the temporary output and check every entry the plan wrote or dropped. */
+  static final class Check extends ApplySteps.ReadOnly {
+    private final Target target;
+
+    Check(HotfixRuntime rt, ApplyInput in, Target target) {
+      super(rt, in);
+      this.target = target;
+    }
+
+    @Override
+    public String id() {
+      return CHECK;
+    }
+
+    @Override
+    public String title() {
+      return "check the hotfixed WAR";
+    }
+
+    @Override
+    public String phase() {
+      return PHASE_ASSEMBLE;
+    }
+
+    @Override
+    public String detail() {
+      return "every written entry hashed, every dropped entry absent, the entry count";
+    }
+
+    @Override
+    public CheckResult precheck(Context ctx) {
+      if (!Files.isRegularFile(target.temporary())) {
+        return CheckResult.fail(
+            target.temporary() + " is missing", "run again; assemble-war writes it again");
+      }
+      try {
+        List<String> problems = WarFile.check(target.temporary(), expected());
+        return problems.isEmpty()
+            ? CheckResult.pass()
+            : CheckResult.fail(
+                String.join("; ", problems),
+                "the run is undone; nothing was written to " + target.out());
+      } catch (IOException e) {
+        return CheckResult.fail(
+            "cannot read " + target.temporary() + ": " + e.getMessage(), "run again");
+      }
+    }
+
+    WarFile.Expected expected() throws IOException {
+      Map<String, String> hashes = new LinkedHashMap<>();
+      Set<String> absent = new HashSet<>();
+      Set<String> inputPaths = WarFile.paths(target.war());
+      int count = inputPaths.size();
+      for (FileTarget t : in.targets()) {
+        Optional<String> path = target.pathOf(t);
+        if (path.isEmpty()) {
+          continue;
+        }
+        if (t.action() == Action.DELETE) {
+          absent.add(path.get());
+          if (inputPaths.contains(path.get())) {
+            count--;
+          }
+        } else {
+          hashes.put(path.get(), t.after().orElse(""));
+          if (!inputPaths.contains(path.get())) {
+            count++;
+          }
+        }
+      }
+      return new WarFile.Expected(hashes, absent, count);
+    }
+  }
+
+  /**
+   * Step 5: give the output its name, write the sidecar beside it, and keep the package's files as
+   * the hotfix's baseline. Compensation removes the output and the sidecar.
+   */
+  static final class WriteOut implements Step {
+    private final HotfixRuntime rt;
+    private final ApplyInput in;
+    private final Target target;
+
+    WriteOut(HotfixRuntime rt, ApplyInput in, Target target) {
+      this.rt = rt;
+      this.in = in;
+      this.target = target;
+    }
+
+    @Override
+    public String id() {
+      return RECORD;
+    }
+
+    @Override
+    public String title() {
+      return "write " + target.out().getFileName() + " and its record";
+    }
+
+    @Override
+    public String phase() {
+      return ApplySteps.RECORD;
+    }
+
+    @Override
+    public String detail() {
+      return target.sidecar().getFileName()
+          + ": the package, the merge, and every file written or kept";
+    }
+
+    @Override
+    public CheckResult precheck(Context ctx) {
+      if (!Files.isRegularFile(target.temporary()) && !Files.isRegularFile(target.out())) {
+        return CheckResult.fail(
+            target.temporary() + " is missing", "run again; assemble-war writes it again");
+      }
+      return CheckResult.pass();
+    }
+
+    @Override
+    public StepResult execute(Context ctx, EventSink out) {
+      try {
+        if (Files.isRegularFile(target.temporary())) {
+          Durability.move(target.temporary(), target.out(), StandardCopyOption.ATOMIC_MOVE);
+        }
+        Path tmp = target.sidecar().resolveSibling(target.sidecar().getFileName() + ".tmp");
+        Files.writeString(tmp, Json.writePretty(sidecar(ctx)), StandardCharsets.UTF_8);
+        Durability.sync(tmp);
+        Durability.move(
+            tmp,
+            target.sidecar(),
+            StandardCopyOption.REPLACE_EXISTING,
+            StandardCopyOption.ATOMIC_MOVE);
+        rt.baselines().addHotfix(in.packageFile(), in.contents(), target.webappName());
+        Trees.deleteRecursively(in.stagingDir(ctx));
+        out.emit(
+            new Event.Log(
+                rt.clock().instant(),
+                ctx.runId(),
+                Optional.of(id()),
+                phase(),
+                Event.Log.Level.INFO,
+                "audit hotfix.war-written: " + in.contents().id() + " into " + target.out()));
+        return StepResult.ok();
+      } catch (IOException | UncheckedIOException e) {
+        return Failures.recoverable(
+            "cannot write the output or its record: " + e.getMessage(),
+            "check permissions beside " + target.out());
+      }
+    }
+
+    /** The record beside the output: what was applied, from what, and what every file became. */
+    private Map<String, Object> sidecar(Context ctx) throws IOException {
+      PackageContents c = in.contents();
+      Map<String, Object> doc = new LinkedHashMap<>();
+      doc.put("hotfixId", c.id());
+      doc.put("title", c.title());
+      doc.put("build", c.build());
+      doc.put("packageSha256", c.sha256());
+      doc.put("input", target.war().toString());
+      doc.put("inputSha256", rt.files().sha256(target.war()));
+      doc.put("output", target.out().toString());
+      doc.put("outputSha256", rt.files().sha256(target.out()));
+      doc.put("runId", ctx.runId());
+      doc.put("writtenAt", rt.clock().instant().toString());
+      doc.put("mergeId", in.merge().map(MergeDoc::id).orElse(null));
+      doc.put("baselines", in.merge().map(MergeDoc::baselines).orElse(List.of()));
+      List<Map<String, Object>> files = new ArrayList<>();
+      for (FileTarget t : in.targets()) {
+        Optional<String> path = target.pathOf(t);
+        if (path.isEmpty()) {
+          continue;
+        }
+        Map<String, Object> f = new LinkedHashMap<>();
+        f.put("path", path.get());
+        f.put("action", t.action().name().toLowerCase(java.util.Locale.ROOT));
+        f.put("beforeSha256", t.before().orElse(null));
+        f.put("afterSha256", t.after().orElse(null));
+        f.put("vendorSha256", t.entry().packageSha256().orElse(null));
+        files.add(f);
+      }
+      doc.put("files", files);
+      List<Map<String, Object>> kept = new ArrayList<>();
+      for (PackageContents.Kept k : c.kept()) {
+        if (k.path().startsWith(target.prefix())) {
+          Map<String, Object> f = new LinkedHashMap<>();
+          f.put("path", k.path().substring(target.prefix().length()));
+          f.put("vendorSha256", k.vendorSha256());
+          f.put("reason", k.reason());
+          kept.add(f);
+        }
+      }
+      doc.put("kept", kept);
+      return doc;
+    }
+
+    @Override
+    public boolean rollbackAllOnFailure() {
+      return true;
+    }
+
+    @Override
+    public StepResult compensate(Context ctx, EventSink out) {
+      try {
+        Files.deleteIfExists(target.sidecar());
+        Files.deleteIfExists(target.out());
+        return StepResult.ok();
+      } catch (IOException e) {
+        return Failures.recoverable(
+            "cannot remove " + target.out() + ": " + e.getMessage(), "delete it by hand");
+      }
+    }
+  }
+}
