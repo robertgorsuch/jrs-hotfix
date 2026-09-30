@@ -57,7 +57,8 @@ final class RootCommand implements Callable<Integer> {
   @Override
   public Integer call() {
     if (docs) {
-      Pager.print(EmbeddedDoc.text(), spec.commandLine().getOut(), !global.noPager());
+      spec.commandLine().getOut().print(EmbeddedDoc.text());
+      spec.commandLine().getOut().flush();
       return ExitCodes.SUCCESS;
     }
     if (!global.nonInteractive() && Terminal.present()) {
@@ -95,12 +96,6 @@ final class RootCommand implements Callable<Integer> {
     global.home().ifPresent(h -> args.addAll(List.of("--home", h.toString())));
     if (global.noColor()) {
       args.add("--no-color");
-    }
-    if (global.noPager()) {
-      args.add("--no-pager");
-    }
-    if (global.ascii()) {
-      args.add("--ascii");
     }
     return args;
   }

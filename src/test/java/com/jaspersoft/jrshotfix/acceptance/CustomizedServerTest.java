@@ -185,7 +185,7 @@ class CustomizedServerTest {
       String id = mergeId(refused.stderr());
       assertThat(refused.stderr()).contains(Wars.WEB_XML + " (CONFLICT)");
       assertThat(read(webapp, Wars.WEB_XML)).isEqualTo(siteWeb);
-      assertThat(f.cli.run("merge", "show", id, Wars.WEB_XML, "--no-pager").assertExit(0).stdout())
+      assertThat(f.cli.run("merge", "show", id, Wars.WEB_XML).assertExit(0).stdout())
           .contains("-    <servlet-name>main</servlet-name>")
           .contains("+    <servlet-name>site-main</servlet-name>")
           .contains("+    <servlet-name>main2</servlet-name>");

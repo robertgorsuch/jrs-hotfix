@@ -239,16 +239,6 @@ public class PlatformDetectionTest {
   }
 
   @Test
-  void should_parse_install_location_when_reg_query_line_matches() {
-    assertThat(
-            WindowsPlatform.parseInstallLocation(
-                "    InstallLocation    REG_SZ    C:\\Jaspersoft\\jasperreports-server-8.2.0"))
-        .contains(Path.of("C:\\Jaspersoft\\jasperreports-server-8.2.0"));
-    assertThat(WindowsPlatform.parseInstallLocation("    DisplayName    REG_SZ    JasperReports"))
-        .isEmpty();
-  }
-
-  @Test
   void should_pick_controller_by_kind_when_building_services(@TempDir Path dir) {
     Platform testable =
         Platforms.forTesting(

@@ -7,8 +7,9 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * Review finding 3.5: colour and glyph choice are separate decisions, {@code --no-color} and {@code
- * --ascii} each turn one off, and {@code NO_COLOR} still wins over the automatic choice.
+ * Review finding 3.5: colour and glyph choice are separate decisions, {@code --no-color} turns
+ * colour off, the output encoding decides the glyphs, and {@code NO_COLOR} still wins over the
+ * automatic choice.
  */
 class AnsiTest {
 
@@ -32,16 +33,6 @@ class AnsiTest {
     GlobalOptions g = new GlobalOptions();
 
     assertThat(Ansi.forStdout(g, Map.of("NO_COLOR", "1")).enabled()).isFalse();
-  }
-
-  @Test
-  void should_refuse_glyphs_when_ascii_is_given() {
-    GlobalOptions g = new GlobalOptions();
-    g.ascii = true;
-
-    Ansi ansi = Ansi.forStdout(g, Map.of());
-
-    assertThat(ansi.unicode()).isFalse();
   }
 
   @Test

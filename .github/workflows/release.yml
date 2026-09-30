@@ -63,7 +63,7 @@ jobs:
           unset JAVA_HOME
           export PATH=/usr/bin:/bin
           "$SMOKE_HOME/bin/jrs-hotfix" --version
-          "$SMOKE_HOME/bin/jrs-hotfix" --docs --no-pager > "$RUNNER_TEMP/docs.txt"
+          "$SMOKE_HOME/bin/jrs-hotfix" --docs > "$RUNNER_TEMP/docs.txt"
           head -3 "$RUNNER_TEMP/docs.txt"
           grep -q '^# jrs-hotfix' "$RUNNER_TEMP/docs.txt"
       - name: Smoke test the Windows launcher from cmd.exe
@@ -73,7 +73,7 @@ jobs:
           set JAVA_HOME=
           set PATH=%SystemRoot%\System32;%SystemRoot%
           call "%SMOKE_HOME%\bin\jrs-hotfix.cmd" --version || exit /b 1
-          call "%SMOKE_HOME%\bin\jrs-hotfix.cmd" --docs --no-pager > "%RUNNER_TEMP%\docs.txt" || exit /b 1
+          call "%SMOKE_HOME%\bin\jrs-hotfix.cmd" --docs > "%RUNNER_TEMP%\docs.txt" || exit /b 1
           findstr /b /c:"# jrs-hotfix" "%RUNNER_TEMP%\docs.txt" || exit /b 1
       - name: Add the platform-independent jar (Linux leg only)
         if: matrix.platform == 'linux-x64'

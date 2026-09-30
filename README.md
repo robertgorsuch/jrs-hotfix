@@ -198,11 +198,10 @@ jrs-hotfix merge status <mergeId>                              # every file and 
 jrs-hotfix merge show <mergeId> <path>                         # what the site changed, what the hotfix changed
 jrs-hotfix merge resolve <mergeId> <path> --merged [<file>]    # install the merged text
 jrs-hotfix merge resolve <mergeId> <path> --mine | --theirs    # keep the server's file, or take the hotfix's
-jrs-hotfix merge edit <mergeId> <path>                         # run the tool of the setting merge.tool, then resolve
 jrs-hotfix apply <package.zip> --merge <mergeId>
 ```
 
-`--merged` takes the workspace's `files/<path>/merged`, which you edit with your own editor, or the file you name. It is refused while it holds a conflict marker, and an XML file must be well-formed, define no bean, filter, servlet or listener twice, and neither bring back a bean the site removed nor lose one the site added. `merge.tool` is a command line with `{base}`, `{mine}`, `{theirs}` and `{merged}`, for example `code --wait --merge {mine} {theirs} {base} {merged}`.
+`--merged` takes the workspace's `files/<path>/merged`, which you edit with your own editor, or the file you name. It is refused while it holds a conflict marker, and an XML file must be well-formed, define no bean, filter, servlet or listener twice, and neither bring back a bean the site removed nor lose one the site added. The three sides are plain files under `files/<path>/` (`base`, `mine`, `theirs`), so any merge tool can be pointed at them.
 
 The merged files are staged, swapped, snapshotted and rolled back like every other file, so a rollback brings the site's files back byte for byte. The plan is built from the package and the merge alone: a file edited on the server after the merge was prepared stops the apply (exit 2, "changed since the merge was prepared"), and a run that was interrupted resumes with the same merged files.
 
@@ -277,7 +276,7 @@ jrs-hotfix verify <package.zip>
 jrs-hotfix scan [--package <package.zip>] [--war <file.war>]
 jrs-hotfix baseline [list | add <war | dir | package.zip> | remove <id>]
 jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war>] | status [<mergeId>]
-                  | show <mergeId> <path> | edit <mergeId> <path>
+                  | show <mergeId> <path>
                   | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
                   | discard <mergeId>]
 jrs-hotfix list
@@ -345,7 +344,6 @@ wars/webapps/<name>/          the unpacked copy of the WAR being worked on (--wa
 | `service.forceStopAfterSeconds` | end the JVM if the script outlives this (scripts only, off when absent) | absent |
 | `baseUrl` | used only by the wait-for-server probe | `http://localhost:<port from server.xml>/<webappName>` |
 | `merge.onConflict` | a properties key both the site and a hotfix changed: `ask`, `mine`, `theirs`, `fail` | absent: `ask` at a terminal, `fail` otherwise |
-| `merge.tool` | the command `merge edit` runs, with `{base}`, `{mine}`, `{theirs}`, `{merged}` | absent |
 
 ### Checking your download
 

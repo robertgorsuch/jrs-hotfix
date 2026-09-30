@@ -28,7 +28,7 @@ jrs-hotfix verify <package.zip>
 jrs-hotfix scan [--package <package.zip>] [--war <file.war>]
 jrs-hotfix baseline [list | add <war | dir | package.zip> | remove <id>]
 jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war>] | status [<mergeId>]
-                  | show <mergeId> <path> | edit <mergeId> <path>
+                  | show <mergeId> <path>
                   | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
                   | discard <mergeId>]
 jrs-hotfix list
@@ -231,4 +231,3 @@ wars/webapps/<name>/          the unpacked copy of the WAR being worked on (--wa
 | `service.forceStopAfterSeconds` | end the JVM if the script outlives this (scripts only, off when absent) | absent |
 | `baseUrl` | used only by the wait-for-server probe | `http://localhost:<port from server.xml>/<webappName>` |
 | `merge.onConflict` | a properties key both the site and a hotfix changed: `ask`, `mine`, `theirs`, `fail` | absent: `ask` at a terminal, `fail` otherwise |
-| `merge.tool` | the command `merge edit` runs, with `{base}`, `{mine}`, `{theirs}`, `{merged}` | absent |

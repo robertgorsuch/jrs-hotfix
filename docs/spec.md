@@ -105,8 +105,8 @@ webapp. `--home <dir>` or `JRS_HOTFIX_HOME` overrides it; the override is for te
 for an installation on a read-only volume.
 
 Detection (first run, or `settings detect`): candidate install directories come from the
-command lines of running Tomcat processes, then the vendor's default paths, then the
-Windows uninstall registry keys; the operator confirms one. The release is read from the
+command lines of running Tomcat processes, then the vendor's default paths (the Windows
+uninstall registry keys were a third source until 0.4.0); the operator confirms one. The release is read from the
 `jasperserver-*-X.Y.Z.jar` names under `WEB-INF/lib`, the edition from the webapp name and
 the presence of the pro jars. When the process scan is blind (a JVM whose command line
 this account cannot read), the tool says so in one sentence rather than reporting no
@@ -271,7 +271,9 @@ jrs-hotfix settings [show | set <key> <value> | detect]
 jrs-hotfix --docs | --version | --help
 ```
 
-Global options: `--home <dir>`, `--no-color`, `--no-pager`. `--plan` prints the plan and
+Global options: `--home <dir>`, `--no-color` (`--no-pager` and `--ascii` existed until 0.4.0:
+the pager went with them, and the ASCII fallback is automatic when the output encoding
+cannot carry the glyphs). `--plan` prints the plan and
 exits 0 without touching anything. `--yes` answers every confirmation.
 
 Menu:
@@ -342,7 +344,7 @@ Copied and trimmed: `core.engine` (Plan, Step, Runner, Recovery, RunLock, retry,
 finding and lock detection, code page handling, install scan), `core.snapshot`,
 `ops.hotfix` (OfficialPackage and its readme parser, FileTarget, the apply, rollback and
 record steps, RollbackChain, PriorState, OwnerRestore), `jrs.service` (stop, start, wait,
-companion database), the guided menu, prompter, path completer, pager, plan printer and
+companion database), the guided menu, prompter, path completer, pager (dropped in 0.4.0), plan printer and
 progress renderer from `app`.
 
 Cut: `jrs.rest`, `jrs.api` except the unauthenticated probe, `jrs.strategy`,

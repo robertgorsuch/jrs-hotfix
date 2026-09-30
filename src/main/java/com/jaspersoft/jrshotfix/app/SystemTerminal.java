@@ -5,11 +5,11 @@ import java.util.Optional;
 import org.jline.terminal.TerminalBuilder;
 
 /**
- * The one JLine terminal of this process, shared by the guided menu's line editing ({@link
- * Prompter}) and the pager ({@link Pager}). Invariants: built at most once, from the JNI provider
- * only (no JNA, FFM, Jansi or exec provider, and never a dumb terminal; ADR-0037); never rebuilt
- * once building it has failed; empty when there is no console at all, since a piped or redirected
- * session gets nothing from either feature; closed by a shutdown hook.
+ * The one JLine terminal of this process, for the guided menu's line editing ({@link Prompter}).
+ * Invariants: built at most once, from the JNI provider only (no JNA, FFM, Jansi or exec provider,
+ * and never a dumb terminal; ADR-0037); never rebuilt once building it has failed; empty when there
+ * is no console at all, since a piped or redirected session gets nothing from either feature;
+ * closed by a shutdown hook.
  */
 final class SystemTerminal {
 

@@ -9,7 +9,7 @@ import picocli.CommandLine;
  * and {@code NO_COLOR} are absent and the terminal says so, which on Windows means a host that
  * actually interprets escape sequences ({@code WT_SESSION}, ConEmu, a {@code TERM}), not merely a
  * console, so cmd.exe never shows raw escapes (review 3.5); non-ASCII glyphs are used only when the
- * standard-output encoding can carry them and {@code --ascii} was not given.
+ * standard-output encoding can carry them, and the ASCII words otherwise.
  */
 final class Ansi {
 
@@ -33,7 +33,7 @@ final class Ansi {
 
   static Ansi forStdout(GlobalOptions global, Map<String, String> env) {
     boolean colour = !global.noColor() && !env.containsKey("NO_COLOR") && ansiCapable();
-    return new Ansi(colour, !global.ascii() && stdoutCanEncodeGlyphs());
+    return new Ansi(colour, stdoutCanEncodeGlyphs());
   }
 
   /**

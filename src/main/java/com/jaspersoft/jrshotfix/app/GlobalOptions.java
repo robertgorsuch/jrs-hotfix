@@ -35,18 +35,6 @@ public final class GlobalOptions {
   @Option(names = "--no-color", description = "Disable ANSI colour in text output.")
   boolean noColor;
 
-  @Option(
-      names = "--no-pager",
-      description = "Print long text at once instead of a screen at a time.")
-  boolean noPager;
-
-  @Option(
-      names = "--ascii",
-      description =
-          "Use ASCII only in text output; the default uses tick and arrow glyphs when the output"
-              + " encoding can carry them.")
-  boolean ascii;
-
   public Optional<Path> home() {
     return Optional.ofNullable(home);
   }
@@ -65,15 +53,6 @@ public final class GlobalOptions {
     return noColor;
   }
 
-  public boolean noPager() {
-    return noPager;
-  }
-
-  /** True when the operator asked for ASCII-only output. */
-  public boolean ascii() {
-    return ascii;
-  }
-
   /**
    * Takes what {@code outer} (the same options given before this command's name) set and this
    * command did not: {@code jrs-hotfix --home <dir> apply ...} must mean the same as {@code
@@ -87,7 +66,5 @@ public final class GlobalOptions {
     yes |= outer.yes;
     nonInteractive |= outer.nonInteractive;
     noColor |= outer.noColor;
-    noPager |= outer.noPager;
-    ascii |= outer.ascii;
   }
 }
