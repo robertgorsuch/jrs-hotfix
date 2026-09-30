@@ -27,8 +27,7 @@ public record Settings(
     int stopTimeoutSeconds,
     Optional<Integer> forceStopAfterSeconds,
     URI baseUrl,
-    Optional<String> mergeOnConflict,
-    Optional<String> mergeTool) {
+    Optional<String> mergeOnConflict) {
 
   public static final List<String> KEYS =
       List.of(
@@ -41,8 +40,7 @@ public record Settings(
           "service.stopTimeoutSeconds",
           "service.forceStopAfterSeconds",
           "baseUrl",
-          "merge.onConflict",
-          "merge.tool");
+          "merge.onConflict");
 
   /** What {@code merge.onConflict} may be. */
   public static final List<String> ON_CONFLICT = List.of("ask", "mine", "theirs", "fail");
@@ -57,10 +55,9 @@ public record Settings(
     Objects.requireNonNull(forceStopAfterSeconds, "forceStopAfterSeconds");
     Objects.requireNonNull(baseUrl, "baseUrl");
     mergeOnConflict = mergeOnConflict == null ? Optional.empty() : mergeOnConflict;
-    mergeTool = mergeTool == null ? Optional.empty() : mergeTool;
   }
 
-  /** Settings without the merge settings. */
+  /** Settings without the merge setting. */
   public Settings(
       Path installDir,
       Path tomcatDir,
@@ -81,7 +78,6 @@ public record Settings(
         stopTimeoutSeconds,
         forceStopAfterSeconds,
         baseUrl,
-        Optional.empty(),
         Optional.empty());
   }
 
@@ -114,7 +110,6 @@ public record Settings(
     m.put("service.forceStopAfterSeconds", forceStopAfterSeconds.map(String::valueOf).orElse(""));
     m.put("baseUrl", baseUrl.toString());
     m.put("merge.onConflict", mergeOnConflict.orElse(""));
-    m.put("merge.tool", mergeTool.orElse(""));
     return m;
   }
 
@@ -130,7 +125,6 @@ public record Settings(
     Optional<Integer> forceStop = forceStopAfterSeconds;
     URI base = baseUrl;
     Optional<String> onConflict = mergeOnConflict;
-    Optional<String> tool = mergeTool;
     switch (key) {
       case "installDir" -> install = Path.of(value);
       case "tomcatDir" -> tomcat = Path.of(value);
@@ -149,22 +143,11 @@ public record Settings(
               "merge.onConflict must be one of " + String.join(", ", ON_CONFLICT));
         }
       }
-      case "merge.tool" -> tool = text;
       default ->
           throw new IllegalArgumentException(
               "unknown setting " + key + "; the keys are " + String.join(", ", KEYS));
     }
     return new Settings(
-        install,
-        tomcat,
-        webapp,
-        kind,
-        name,
-        script,
-        stopTimeout,
-        forceStop,
-        base,
-        onConflict,
-        tool);
+        install, tomcat, webapp, kind, name, script, stopTimeout, forceStop, base, onConflict);
   }
 }

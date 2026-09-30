@@ -6,17 +6,14 @@ import com.jaspersoft.jrshotfix.merge.Diff;
 import com.jaspersoft.jrshotfix.merge.MergeDoc;
 import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
 import com.jaspersoft.jrshotfix.merge.Text;
-import com.jaspersoft.jrshotfix.platform.ProcessRunner;
 import com.jaspersoft.jrshotfix.platform.UserPaths;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
@@ -43,14 +40,10 @@ import picocli.CommandLine.Spec;
       MergeCommand.Prepare.class,
       MergeCommand.Status.class,
       MergeCommand.Show.class,
-      MergeCommand.Edit.class,
       MergeCommand.Resolve.class,
       MergeCommand.Discard.class
     })
 final class MergeCommand implements Callable<Integer> {
-
-  /** How long a merge tool started by {@code merge edit} may run. */
-  private static final Duration TOOL_TIMEOUT = Duration.ofHours(8);
 
   @Spec CommandSpec spec;
 
@@ -251,7 +244,8 @@ final class MergeCommand implements Callable<Integer> {
       for (String line : lines) {
         text.append(boot.redactor().redact(line)).append(System.lineSeparator());
       }
-      Pager.print(text.toString(), out(), !global.noPager() && boot.interactive());
+      out().print(text);
+      out().flush();
       return ExitCodes.SUCCESS;
     }
 
@@ -289,104 +283,6 @@ final class MergeCommand implements Callable<Integer> {
                     HotfixException.PRECHECK,
                     "merge " + doc.id() + " has no file " + path,
                     "run `jrs-hotfix merge status " + doc.id() + "` for the paths"));
-  }
-
-  /** {@code merge edit <mergeId> <path>}. */
-  @Command(
-      name = "edit",
-      mixinStandardHelpOptions = true,
-      description =
-          "Open one file of a merge in the merge tool of the setting merge.tool, then check the"
-              + " result and record it as resolved.",
-      footer = {"", "Example:", "  jrs-hotfix merge edit <id> WEB-INF/web.xml"})
-  static final class Edit extends AppCommand {
-    @Parameters(index = "0", paramLabel = "<mergeId>", description = "The merge.")
-    String id;
-
-    @Parameters(index = "1", paramLabel = "<path>", description = "The file, as status lists it.")
-    String path;
-
-    @Override
-    public Integer call() {
-      Bootstrap boot = open();
-      return executor(boot).mutate("merge edit", () -> edit(boot));
-    }
-
-    private int edit(Bootstrap boot) {
-      HotfixPlans plans = boot.plans();
-      Optional<String> tool = plans.runtime().settings().mergeTool();
-      if (tool.isEmpty()) {
-        return ExitCodes.fail(
-            err(),
-            ExitCodes.PRECHECK_FAILED,
-            "no merge tool is set",
-            Optional.of(
-                "set one with `jrs-hotfix settings set merge.tool \"<command> {base} {mine}"
-                    + " {theirs} {merged}\"`, or edit the merged file yourself and run"
-                    + " `jrs-hotfix merge resolve "
-                    + id
-                    + " <path> --merged`"));
-      }
-      MergeDoc doc = plans.merge(id);
-      MergeDoc.Item item = item(doc, path);
-      MergeWorkspace merges = plans.runtime().merges();
-      List<String> command = new ArrayList<>();
-      for (String word : words(tool.get())) {
-        for (String side :
-            List.of(
-                MergeWorkspace.BASE,
-                MergeWorkspace.MINE,
-                MergeWorkspace.THEIRS,
-                MergeWorkspace.MERGED)) {
-          word = word.replace("{" + side + "}", merges.side(id, item.path(), side).toString());
-        }
-        command.add(word);
-      }
-      out().println("running: " + String.join(" ", command));
-      out().flush();
-      ProcessRunner.Result result =
-          boot.platform()
-              .processes()
-              .run(
-                  new ProcessRunner.Request(command, Optional.empty(), Map.of(), TOOL_TIMEOUT),
-                  line -> out().println(boot.redactor().redact(line.text())));
-      if (!result.ok()) {
-        return ExitCodes.fail(
-            err(),
-            ExitCodes.PRECHECK_FAILED,
-            "the merge tool ended with exit code " + result.exitCode() + "; nothing was recorded",
-            Optional.of("run it again, or resolve with `jrs-hotfix merge resolve`"));
-      }
-      return resolved(this, boot, id, item.path(), MergeWorkspace.Choice.MERGED, Optional.empty());
-    }
-  }
-
-  /** A command line split at blanks, a part in double quotes taken whole. */
-  static List<String> words(String commandLine) {
-    List<String> out = new ArrayList<>();
-    StringBuilder word = new StringBuilder();
-    boolean quoted = false;
-    boolean any = false;
-    for (int i = 0; i < commandLine.length(); i++) {
-      char c = commandLine.charAt(i);
-      if (c == '"') {
-        quoted = !quoted;
-        any = true;
-      } else if (c == ' ' && !quoted) {
-        if (any) {
-          out.add(word.toString());
-          word.setLength(0);
-          any = false;
-        }
-      } else {
-        word.append(c);
-        any = true;
-      }
-    }
-    if (any) {
-      out.add(word.toString());
-    }
-    return out;
   }
 
   private static int resolved(

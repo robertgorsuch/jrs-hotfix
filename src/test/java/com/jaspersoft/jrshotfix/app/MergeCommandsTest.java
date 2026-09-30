@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jaspersoft.jrshotfix.baseline.Wars;
 import com.jaspersoft.jrshotfix.home.SettingsStore;
-import com.jaspersoft.jrshotfix.hotfix.FakePlatform;
 import com.jaspersoft.jrshotfix.hotfix.SiteFixture;
 import com.jaspersoft.jrshotfix.merge.MergeDoc;
 import com.jaspersoft.jrshotfix.pkg.Packages;
@@ -14,7 +13,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -74,7 +72,7 @@ class MergeCommandsTest {
         .containsPattern("OVERWRITTEN +G  " + Wars.SCRIPT)
         .contains("1 waiting for you");
 
-    assertThat(f.run("merge", "show", id, Wars.WEB_XML, "--no-pager")).isEqualTo(0);
+    assertThat(f.run("merge", "show", id, Wars.WEB_XML)).isEqualTo(0);
     assertThat(f.out())
         .contains("What this site changed")
         .contains("-    <session-timeout>20</session-timeout>")
@@ -222,77 +220,13 @@ class MergeCommandsTest {
     assertThat(f.out()).contains("merge.onConflict = mine");
     assertThat(f.run("settings", "set", "merge.onConflict", "sometimes")).isEqualTo(1);
     assertThat(f.err()).contains("merge.onConflict must be one of ask, mine, theirs, fail");
-    assertThat(f.run("settings", "set", "merge.tool", "code --wait --merge {mine} {theirs}"))
-        .isEqualTo(0);
     assertThat(f.run("settings", "show")).isEqualTo(0);
-    assertThat(f.out()).contains("merge.onConflict").contains("merge.tool");
-    assertThat(f.run("settings", "set", "merge.tool", "")).isEqualTo(0);
-    assertThat(SettingsStore.load(f.home).orElseThrow().mergeTool()).isEmpty();
-  }
-
-  @Test
-  void should_name_the_setting_when_edit_is_asked_without_a_merge_tool() throws Exception {
-    CommandsTest.Fixture f = fixture();
-    SiteFixture s = SiteFixture.create(f.hf, tmp);
-    s.customizeWithCollisions();
-    assertThat(f.run("merge", "prepare", s.hotfix().toString(), "--on-conflict", "ask"))
-        .isEqualTo(0);
-    assertThat(f.run("merge", "edit", mergeId(f), Wars.WEB_XML)).isEqualTo(2);
-    assertThat(f.err()).contains("no merge tool is set").contains("settings set merge.tool");
-  }
-
-  @Test
-  void should_run_the_merge_tool_on_the_four_files_and_record_what_it_left() throws Exception {
-    CommandsTest.Fixture f = fixture();
-    SiteFixture s = SiteFixture.create(f.hf, tmp);
-    s.customizeWithCollisions();
-    assertThat(f.run("merge", "prepare", s.hotfix().toString(), "--on-conflict", "ask"))
-        .isEqualTo(0);
-    String id = mergeId(f);
-    assertThat(
-            f.run(
-                "settings", "set", "merge.tool", "meld --auto {base} {mine} {theirs} -o {merged}"))
-        .isEqualTo(0);
-    // a tool that leaves the file as it found it: the markers are still there
-    f.hf.platform.dynamic = command -> Optional.of(FakePlatform.Response.ok());
-    assertThat(f.run("merge", "edit", id, Wars.SECURITY)).isEqualTo(2);
-    assertThat(f.err()).contains("a conflict marker is left in it");
-    List<String> ran = f.hf.platform.invocations.get(f.hf.platform.invocations.size() - 1);
-    Path dir = f.hf.runtime.merges().side(id, Wars.SECURITY, "base").getParent();
-    assertThat(ran)
-        .containsExactly(
-            "meld",
-            "--auto",
-            dir.resolve("base").toString(),
-            dir.resolve("mine").toString(),
-            dir.resolve("theirs").toString(),
-            "-o",
-            dir.resolve("merged").toString());
-    // a tool that writes a clean result: recorded as resolved
-    f.hf.platform.dynamic =
-        command -> {
-          try {
-            Files.writeString(
-                Path.of(command.get(command.size() - 1)),
-                "# security\nmax.upload=50\nallow.list=a,b\nstrict=true\nfresh=1\n");
-          } catch (java.io.IOException e) {
-            throw new java.io.UncheckedIOException(e);
-          }
-          return Optional.of(FakePlatform.Response.ok());
-        };
-    assertThat(f.run("merge", "edit", id, Wars.SECURITY)).isEqualTo(0);
-    assertThat(f.out()).contains(Wars.SECURITY + ": resolved");
-    // a tool that fails: nothing is recorded
-    f.hf.platform.dynamic = command -> Optional.of(new FakePlatform.Response(3, List.of()));
-    assertThat(f.run("merge", "edit", id, Wars.WEB_XML)).isEqualTo(2);
-    assertThat(f.err()).contains("the merge tool ended with exit code 3");
-  }
-
-  @Test
-  void should_split_a_command_line_at_blanks_and_keep_a_quoted_part_whole() {
-    assertThat(MergeCommand.words("code --wait  --merge {mine} \"C:\\Program Files\\x\" {merged}"))
-        .containsExactly("code", "--wait", "--merge", "{mine}", "C:\\Program Files\\x", "{merged}");
-    assertThat(MergeCommand.words("  ")).isEmpty();
-    assertThat(MergeCommand.words("tool \"\"")).containsExactly("tool", "");
+    assertThat(f.out()).contains("merge.onConflict").contains("mine").doesNotContain("merge.tool");
+    // merge.tool (0.2 to 0.3) is gone; a settings.json that still holds it loads, the key is
+    // ignored
+    assertThat(f.run("settings", "set", "merge.tool", "meld")).isEqualTo(1);
+    assertThat(f.err()).contains("unknown setting merge.tool");
+    assertThat(f.run("settings", "set", "merge.onConflict", "")).isEqualTo(0);
+    assertThat(SettingsStore.load(f.home).orElseThrow().mergeOnConflict()).isEmpty();
   }
 }

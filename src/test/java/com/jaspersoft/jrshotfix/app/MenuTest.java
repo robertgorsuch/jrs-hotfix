@@ -290,10 +290,8 @@ class MenuTest {
     GlobalOptions g = new GlobalOptions();
     g.home = tmp;
     g.noColor = true;
-    g.ascii = true;
     g.nonInteractive = true;
-    assertThat(RootCommand.passOn(g))
-        .containsExactly("--home", tmp.toString(), "--no-color", "--ascii");
+    assertThat(RootCommand.passOn(g)).containsExactly("--home", tmp.toString(), "--no-color");
   }
 
   @Test

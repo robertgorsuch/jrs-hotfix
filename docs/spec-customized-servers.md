@@ -411,15 +411,16 @@ merges/<mergeId>/report.txt                 the plan-style summary, also printed
 States: `AUTO` (merged, nothing to do), `REVIEW` (clean merge of a class X file, waiting
 for confirmation), `CONFLICT`, `RESOLVED`, `KEPT_MINE`, `TOOK_THEIRS`.
 
-The operator resolves with their own editor or merge tool. The tool opens nothing by
-itself unless `merge.tool` is set, a command line with `{base}`, `{mine}`, `{theirs}` and
-`{merged}` placeholders, for example `code --wait --merge {mine} {theirs} {base} {merged}`.
+The operator resolves with their own editor or merge tool, pointed at the three sides in
+the workspace. The tool opens nothing by itself. (`merge edit` and the setting `merge.tool`,
+a command line with `{base}`, `{mine}`, `{theirs}` and `{merged}` placeholders, existed from
+0.2 to 0.3 and were dropped in 0.4.0 as a convenience nobody had asked for: `resolve --merged`
+does the same once the tool has run.)
 
 ```
 jrs-hotfix merge status [<mergeId>]              every file and its state; exit 0 when none is
                                                  CONFLICT or REVIEW, 2 otherwise
-jrs-hotfix merge show <mergeId> <path>           the three-way diff, paged
-jrs-hotfix merge edit <mergeId> <path>           run merge.tool, then the checks
+jrs-hotfix merge show <mergeId> <path>           the three-way diff
 jrs-hotfix merge resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
 jrs-hotfix merge discard <mergeId>
 ```
@@ -604,7 +605,7 @@ Menu: entry 1 becomes "Apply a hotfix" with the scan run first and the merge off
 it finds a collision; a new entry "Check the server for customizations" sits after
 "Verify a hotfix package". The header line gains the installed build.
 
-New settings: `merge.onConflict` (`ask`), `merge.tool` (absent).
+New settings: `merge.onConflict` (`ask`); `merge.tool` (absent) until 0.4.0.
 
 ## 9. Errors and exit codes
 

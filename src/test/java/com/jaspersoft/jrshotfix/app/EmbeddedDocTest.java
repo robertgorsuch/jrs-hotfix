@@ -40,8 +40,7 @@ class EmbeddedDocTest {
     StringWriter out = new StringWriter();
     StringWriter err = new StringWriter();
     int code =
-        Main.commandLine(new PrintWriter(out, true), new PrintWriter(err, true))
-            .execute("--docs", "--no-pager");
+        Main.commandLine(new PrintWriter(out, true), new PrintWriter(err, true)).execute("--docs");
     assertThat(code).isZero();
     assertThat(out.toString()).contains("# jrs-hotfix").contains("## Settings");
     assertThat(err.toString()).isEmpty();
@@ -53,7 +52,7 @@ class EmbeddedDocTest {
     StringWriter out = new StringWriter();
     int code =
         Main.commandLine(new PrintWriter(out, true), new PrintWriter(new StringWriter(), true))
-            .execute("--docs", "--home", home.toString(), "--no-pager");
+            .execute("--docs", "--home", home.toString());
     assertThat(code).isZero();
     assertThat(Files.exists(home)).isFalse();
   }
