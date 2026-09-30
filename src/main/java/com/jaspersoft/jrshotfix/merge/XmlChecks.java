@@ -6,10 +6,10 @@ import java.io.StringReader;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.parsers.SAXParser;
@@ -21,36 +21,48 @@ import org.xml.sax.helpers.DefaultHandler;
 
 /**
  * What a merged XML file of the webapp must pass before it may be installed (0.2 design, 4.3): it
- * is well-formed; in a Spring context no bean id or name stands twice, a bean the site removed is
- * still absent and a bean the site added is still there; in {@code web.xml} no filter, servlet or
- * listener is defined twice. Invariants: nothing is read from outside the bytes given, no DTD or
- * entity is fetched; a base or a site file that does not parse only switches off the checks that
- * need it; the findings name elements, never values.
+ * is well-formed; no bean id or name of a Spring context, and no filter, servlet or listener of
+ * {@code web.xml}, stands more often than it does in the site's file or in the hotfix's, so a merge
+ * that doubled one is caught while the vendor's own repeats pass (the 10.0.0 {@code web.xml}
+ * declares the same listener ten times, and several contexts define a bean twice); a bean the site
+ * removed is still absent and a bean the site added is still there. Invariants: nothing is read
+ * from outside the bytes given, no DTD or entity is fetched; a base, site or hotfix file that does
+ * not parse only switches off the checks that need it; the findings name elements, never values.
  */
 public final class XmlChecks {
 
   private XmlChecks() {}
 
   /** Why {@code merged} must not be installed; empty when it may. */
-  public static List<String> problems(Optional<byte[]> base, Optional<byte[]> mine, byte[] merged) {
+  public static List<String> problems(
+      Optional<byte[]> base, Optional<byte[]> mine, Optional<byte[]> theirs, byte[] merged) {
     Optional<Shape> result = parse(merged);
     if (result.isEmpty()) {
       return List.of("it is not well-formed XML");
     }
     List<String> problems = new ArrayList<>();
     Shape r = result.get();
-    r.duplicateBeans.forEach(b -> problems.add("the bean " + b + " is defined twice"));
-    r.duplicateWeb.forEach(w -> problems.add(w + " is defined twice"));
     Optional<Shape> was = base.flatMap(XmlChecks::parse);
     Optional<Shape> site = mine.flatMap(XmlChecks::parse);
+    Optional<Shape> hotfix = theirs.flatMap(XmlChecks::parse);
+    for (Map.Entry<String, Integer> e : r.beans.entrySet()) {
+      if (e.getValue() > allowed(e.getKey(), site.map(s -> s.beans), hotfix.map(h -> h.beans))) {
+        problems.add("the bean " + e.getKey() + " is defined twice");
+      }
+    }
+    for (Map.Entry<String, Integer> e : r.web.entrySet()) {
+      if (e.getValue() > allowed(e.getKey(), site.map(s -> s.web), hotfix.map(h -> h.web))) {
+        problems.add("the " + e.getKey() + " is defined twice");
+      }
+    }
     if (was.isPresent() && site.isPresent() && r.root.equals("beans")) {
-      for (String bean : was.get().beans) {
-        if (!site.get().beans.contains(bean) && r.beans.contains(bean)) {
+      for (String bean : was.get().beans.keySet()) {
+        if (!site.get().beans.containsKey(bean) && r.beans.containsKey(bean)) {
           problems.add("the bean " + bean + ", which this site removed, is back");
         }
       }
-      for (String bean : site.get().beans) {
-        if (!was.get().beans.contains(bean) && !r.beans.contains(bean)) {
+      for (String bean : site.get().beans.keySet()) {
+        if (!was.get().beans.containsKey(bean) && !r.beans.containsKey(bean)) {
           problems.add("the bean " + bean + ", which this site added, is gone");
         }
       }
@@ -58,13 +70,23 @@ public final class XmlChecks {
     return problems;
   }
 
-  /** What the checks need of one document. */
+  /**
+   * How often {@code name} may stand: as often as on the fuller of the two sides, at least once.
+   */
+  private static int allowed(
+      String name, Optional<Map<String, Integer>> site, Optional<Map<String, Integer>> hotfix) {
+    return Math.max(
+        1,
+        Math.max(
+            site.map(s -> s.getOrDefault(name, 0)).orElse(0),
+            hotfix.map(h -> h.getOrDefault(name, 0)).orElse(0)));
+  }
+
+  /** What the checks need of one document: each name and how often it is defined. */
   private static final class Shape {
     String root = "";
-    final Set<String> beans = new LinkedHashSet<>();
-    final List<String> duplicateBeans = new ArrayList<>();
-    final Set<String> web = new LinkedHashSet<>();
-    final List<String> duplicateWeb = new ArrayList<>();
+    final Map<String, Integer> beans = new LinkedHashMap<>();
+    final Map<String, Integer> web = new LinkedHashMap<>();
   }
 
   private static Optional<Shape> parse(byte[] xml) {
@@ -121,8 +143,8 @@ public final class XmlChecks {
     }
 
     private void bean(String name) {
-      if (name != null && !name.isBlank() && !shape.beans.add(name.strip())) {
-        shape.duplicateBeans.add(name.strip());
+      if (name != null && !name.isBlank()) {
+        shape.beans.merge(name.strip(), 1, Integer::sum);
       }
     }
 
@@ -142,10 +164,7 @@ public final class XmlChecks {
                   || (name.equals("servlet-name") && parent.equals("servlet"))
                   || (name.equals("listener-class") && parent.equals("listener")));
       if (definition) {
-        String what = parent + " " + text.toString().strip();
-        if (!shape.web.add(what)) {
-          shape.duplicateWeb.add("the " + what);
-        }
+        shape.web.merge(parent + " " + text.toString().strip(), 1, Integer::sum);
       }
       text = new StringBuilder();
     }

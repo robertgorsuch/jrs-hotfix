@@ -337,6 +337,13 @@ file unresolved:
   still present (a resolution that drops the site's bean by accident is caught);
 - in `web.xml`, no `filter-name`, `servlet-name` or `listener-class` appears twice.
 
+As built (2026-09-30): "twice" is relative to the two sides. The vendor's own 10.0.0
+`web.xml` declares the same two listeners ten times each, and fourteen of its contexts
+define a bean twice, so a merged file is refused only when a name stands more often in it
+than in the site's file and in the hotfix's: a repeat the vendor ships passes, one the merge
+doubled does not. Found by the dry run against the real WAR and package, where the first
+rule refused every merged `web.xml`.
+
 A class X file always needs the operator's confirmation, even when the merge was clean: a
 clean line merge of a Spring context can still wire two beans where one was meant.
 
@@ -682,10 +689,18 @@ Acceptance, through the shaded jar (`CustomizedServerTest`): scenarios 10 to 18,
 killed after staging and resumed with the merged files, and a file edited between `merge
 prepare` and `apply`. Scenario 19 is phase 3.
 
-**Live.** Read-only so far: `baseline add` from the real WAR and the real package, and
-`scan`, against the JRS 10.0.0 PRO on this machine with a scratch home (section 3). The
-live sequence of section 10 (re-create the `web.xml` edits, merge, apply, roll back) has
-not been run.
+**Live.** The sequence of section 10 ran on the JRS 10.0.0 PRO on this machine on
+2026-09-30 (`jrs-hotfix-live/live-0.2.ps1`, 120 checks, all green, four outages): baselines
+from the real WAR and the real package, `scan`, the installed hotfix rolled back, two site
+edits (a listener in `web.xml` right where the hotfix adds its three, the session timeout; in
+`jasperreports.properties` a key the hotfix adds too with the other value, and a key of the
+site's own), `apply` refused with both files as CONFLICT, the two resolved with `--merged`,
+`apply` with the merge, `verify` naming `web.xml` as merged, `rollback` giving the site's
+files back byte for byte, the edits taken out and the hotfix applied again. Two things the
+run taught: the site's listener must be a class the webapp has, because Tomcat redeploys the
+webapp the moment `web.xml` changes (a class that does not exist took the server to 404
+until the file was put back); and a `web.xml` edit while the server runs is itself an
+outage of a minute or two, which the script now waits for.
 
 ## Decided 2026-09-30
 
