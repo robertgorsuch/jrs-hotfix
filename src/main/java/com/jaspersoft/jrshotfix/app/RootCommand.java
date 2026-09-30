@@ -2,7 +2,7 @@ package com.jaspersoft.jrshotfix.app;
 
 import com.jaspersoft.jrshotfix.Version;
 import com.jaspersoft.jrshotfix.engine.RunRecord;
-import com.jaspersoft.jrshotfix.home.JrsVersion;
+import com.jaspersoft.jrshotfix.home.InstalledBuild;
 import com.jaspersoft.jrshotfix.home.Settings;
 import java.io.PrintWriter;
 import java.util.ArrayList;
@@ -165,18 +165,15 @@ final class RootCommand implements Callable<Integer> {
       return boot().flatMap(Bootstrap::settings);
     }
 
-    /** The configured webapp's release and edition, e.g. {@code 10.0.0 PRO}, for the header. */
+    /**
+     * The configured webapp's release, edition and build, e.g. {@code 10.0.0 PRO, build
+     * 20260730_0457}, for the header.
+     */
     String installedRelease() {
       if (release.isEmpty()) {
         release =
             Optional.of(
-                settings()
-                    .map(
-                        s ->
-                            JrsVersion.ofWebapp(s.webappDir()).orElse("unknown")
-                                + " "
-                                + (s.webappName().endsWith("-pro") ? "PRO" : "CE"))
-                    .orElse("unknown"));
+                settings().map(s -> InstalledBuild.describe(s.webappDir())).orElse("unknown"));
       }
       return release.get();
     }

@@ -364,6 +364,24 @@ class CommandsTest {
   }
 
   @Test
+  void should_say_the_installed_build_when_listing() throws Exception {
+    Fixture f = fixture();
+    Path stamps = f.hf.settings.webappDir().resolve("WEB-INF/internal/jasperserver-pro.properties");
+    Files.createDirectories(stamps.getParent());
+    Files.writeString(
+        stamps, "PRO_VERSION=10.0.0\n  BUILD_DATE_STAMP=20260121\n  BUILD_TIME_STAMP=2317\n");
+    assertThat(f.run("list")).isEqualTo(0);
+    assertThat(f.out())
+        .contains("on this server: 10.0.0 PRO, build 20260121_2317")
+        .contains("no hotfixes recorded");
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
+    assertThat(f.run("list")).isEqualTo(0);
+    assertThat(f.out())
+        .contains("on this server: 10.0.0 PRO, build 20260121_2317")
+        .contains("JRSHF-10.0.0-20260730-0457");
+  }
+
+  @Test
   void should_exit_1_on_a_usage_error_or_without_a_subcommand() throws Exception {
     Fixture f = fixture();
     assertThat(f.run("apply")).isEqualTo(1);

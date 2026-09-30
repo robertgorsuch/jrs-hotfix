@@ -39,7 +39,27 @@ class VerifyTest {
       assertThat(r.readable()).isTrue();
       assertThat(r.applicable()).isFalse();
       assertThat(r.ok()).isFalse();
-      assertThat(r.problems()).anySatisfy(p -> assertThat(p).contains("already installed"));
+      // said once: the ledger knows it, so the files being in place is no second finding
+      assertThat(r.problems())
+          .singleElement()
+          .satisfies(p -> assertThat(p).contains("already installed"));
+    }
+  }
+
+  @Test
+  void should_name_record_when_the_hotfix_was_applied_by_hand() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      PreflightTest.applyByHand(f);
+      HotfixPlans.VerifyReport r = f.plans.verify(f.packageFile());
+      assertThat(r.readable()).isTrue();
+      assertThat(r.applicable()).isFalse();
+      assertThat(r.problems())
+          .singleElement()
+          .satisfies(
+              p ->
+                  assertThat(p)
+                      .contains("is already on this server")
+                      .contains("jrs-hotfix record"));
     }
   }
 

@@ -12,6 +12,7 @@ import com.jaspersoft.jrshotfix.service.ServiceSteps;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -44,6 +45,13 @@ final class ApplySteps {
   private ApplySteps() {}
 
   /**
+   * How long the one request of {@link #baseUrlCheck} may wait for its answer. A wrong address
+   * fails at once (refused, 404); a running JasperReports Server can take over ten seconds for one
+   * request (seen 2026-09-29), and giving up on it would refuse a healthy server.
+   */
+  static final Duration BASE_URL_PATIENCE = Duration.ofSeconds(60);
+
+  /**
    * Refuses before the outage when the service is running but {@code baseUrl} does not answer:
    * otherwise the wait after the start fails only after its full timeout and the whole run is
    * compensated with the service down all along. A stopped service, or one whose state cannot be
@@ -59,7 +67,7 @@ final class ApplySteps {
     if (state != ServiceController.State.RUNNING) {
       return CheckResult.pass();
     }
-    Optional<String> problem = rt.probe().problem();
+    Optional<String> problem = rt.probe().problem(BASE_URL_PATIENCE);
     if (problem.isEmpty()) {
       return CheckResult.pass();
     }
@@ -107,9 +115,10 @@ final class ApplySteps {
 
   /**
    * Step 1: the package fits this installation and the host can take it. Release and edition must
-   * match the webapp, the hotfix must not be installed already, the directories written to must be
-   * writable, the home's volume must hold staging and the snapshot, the replaced files' owners must
-   * be restorable, and the service must be identifiable.
+   * match the webapp, the hotfix must not be installed already (by the ledger, or by every file
+   * being in place as the plan found them, which would be an outage that changes nothing), the
+   * directories written to must be writable, the home's volume must hold staging and the snapshot,
+   * the replaced files' owners must be restorable, and the service must be identifiable.
    */
   static final class Preflight extends ReadOnly {
     Preflight(HotfixRuntime rt, ApplyInput in) {
@@ -140,7 +149,7 @@ final class ApplySteps {
     @Override
     public CheckResult precheck(Context ctx) {
       List<String> problems = new ArrayList<>();
-      problems.addAll(HotfixPlans.applicability(rt, in.contents()));
+      problems.addAll(HotfixPlans.applicability(rt, in.contents(), in.targets()));
       for (Path dir :
           List.of(rt.settings().webappDir(), rt.settings().installDir(), rt.home().root())) {
         if (!rt.files().isWritable(dir)) {

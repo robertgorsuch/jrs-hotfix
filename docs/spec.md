@@ -200,6 +200,35 @@ replace-on-restart path.
 The readme's manual steps are printed in the plan preview, printed again after the run,
 and written to `notes.txt`. Nothing in them is executed.
 
+Corrected before 0.1.0, after the tool met the real package and the real server
+(2026-09-29). The table above stays as designed; the implementation differs in these:
+
+- Nine steps. `clear-jsp-cache` runs between swap and start, and between restore and start
+  in a rollback: it removes `<tomcatDir>/work/Catalina/localhost/<webappName>`, which the
+  vendor's readme requires. It is `irreversible()`: the cache is derived from the pages
+  and Tomcat builds it again.
+- Preflight and `verify` refuse (exit 2) a package whose files are all in place at the
+  package's hashes with nothing left to delete and no `INSTALLED` ledger entry, and name
+  `jrs-hotfix record`. Such a run would stop the service to change nothing.
+- The build the webapp states in `WEB-INF/internal/jasperserver-pro.properties` is read
+  (`InstalledBuild`) and shown by `list` and in the menu's first line.
+- The four properties files the installer fills in for one server (`js.quartz.properties`,
+  `js.jdbc.properties`, `hibernate.properties`, `keystore.init.properties`) are merged by
+  key when the server's values differ: the package's file, the server's value for every
+  key the server has, the server's own keys at the end. The merged file is planned (its
+  hash is the entry's), written over the staged payload in `stage`, and moved by `swap`
+  like any other file; the snapshot holds the server's file. The merge of its own result
+  with the same package file gives the same bytes, so a plan rebuilt after the swap
+  matches. `docs/spec-customized-servers.md` section 4.4 is the design this is the first
+  part of.
+- The readme's Important and Additional Notes sections are carried verbatim and whole. A
+  line is never dropped because an equal line came before it (SQL repeats its lines); a
+  section both inner readmes hold is carried once. The preview shows the first eight lines
+  of each section and says where the rest is.
+- The warning about replaced settings files names the webapp's files and counts the
+  installation's templates. The preview counts the files by area and action instead of
+  listing the first twenty paths.
+
 ### 4.2 Rollback
 
 `rollback <id> [--cascade]`: the entry must be `INSTALLED` with origin `TOOL`

@@ -1,5 +1,6 @@
 package com.jaspersoft.jrshotfix.service;
 
+import com.jaspersoft.jrshotfix.engine.CancellationToken;
 import com.jaspersoft.jrshotfix.engine.CheckResult;
 import com.jaspersoft.jrshotfix.engine.Context;
 import com.jaspersoft.jrshotfix.engine.RetryPolicy;
@@ -15,8 +16,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -376,7 +382,14 @@ public final class ServiceSteps {
     }
   }
 
-  /** Polls {@code serverInfo}, uncached, until the server answers; read-only. */
+  /**
+   * Asks {@code serverInfo}, uncached, until the server answers; read-only. One request is out at a
+   * time and it may wait for the rest of the ten minutes: a request given up on is still answered
+   * when the webapp comes up, together with every other one given up on, and on 2026-09-29 five
+   * such requests at once left a JasperReports Server 10.0.0 answering HTTP 500 to everything (its
+   * cookie filter shares a date format between threads). A request the server answers with an error
+   * is asked again after the backoff. Cancellation is noticed while a request waits.
+   */
   private static final class WaitForServer implements Step {
     private final ServiceRuntime.Source source;
     private final String phase;
@@ -426,15 +439,16 @@ public final class ServiceSteps {
       int attempt = 1;
       while (true) {
         ctx.cancel().checkpoint();
-        Optional<String> problem = rt.probe().problem();
+        Instant asked = rt.clock().instant();
+        Optional<String> problem = ask(rt.probe(), WAIT_CAP.minus(waited), ctx);
         if (problem.isEmpty()) {
           log(rt, ctx, out, this, Event.Log.Level.INFO, "server answered");
           return StepResult.ok();
         }
         attempt++;
         Duration delay = policy.delayBefore(attempt);
-        waited = waited.plus(delay);
-        if (waited.compareTo(WAIT_CAP) > 0) {
+        waited = waited.plus(Duration.between(asked, rt.clock().instant())).plus(delay);
+        if (waited.compareTo(WAIT_CAP) >= 0) {
           return recoverable(
               "server did not answer within " + WAIT_CAP.toMinutes() + " minutes: " + problem.get(),
               "check the Tomcat and jasperserver logs; the service may still be starting");
@@ -447,6 +461,33 @@ public final class ServiceSteps {
             Event.Log.Level.DEBUG,
             "not yet: " + problem.get() + "; retry in " + delay.toSeconds() + "s");
         rt.sleeper().sleep(delay, ctx.cancel());
+      }
+    }
+
+    /**
+     * One request that may wait {@code patience}, on a thread of its own so that a cancellation is
+     * seen within a quarter of a second; the request is then interrupted and the cancellation
+     * raised.
+     */
+    private static Optional<String> ask(ServerProbe probe, Duration patience, Context ctx) {
+      FutureTask<Optional<String>> request = new FutureTask<>(() -> probe.problem(patience));
+      Thread.ofPlatform().daemon().name("jrs-hotfix-wait-for-server").start(request);
+      while (true) {
+        try {
+          return request.get(250, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+          if (ctx.cancel().isCancelled()) {
+            request.cancel(true);
+            ctx.cancel().checkpoint();
+          }
+        } catch (ExecutionException e) {
+          return Optional.of(String.valueOf(e.getCause()));
+        } catch (InterruptedException e) {
+          request.cancel(true);
+          Thread.currentThread().interrupt();
+          throw new CancellationToken.CancelledException(
+              "interrupted while waiting for the server");
+        }
       }
     }
 

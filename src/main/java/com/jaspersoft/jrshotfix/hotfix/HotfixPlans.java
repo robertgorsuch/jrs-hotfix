@@ -12,6 +12,7 @@ import com.jaspersoft.jrshotfix.pkg.Action;
 import com.jaspersoft.jrshotfix.pkg.FileTarget;
 import com.jaspersoft.jrshotfix.pkg.OfficialPackage;
 import com.jaspersoft.jrshotfix.pkg.PackageContents;
+import com.jaspersoft.jrshotfix.pkg.PackagePaths;
 import com.jaspersoft.jrshotfix.service.ServiceSteps;
 import com.jaspersoft.jrshotfix.state.HotfixState;
 import com.jaspersoft.jrshotfix.state.Ledger;
@@ -23,6 +24,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -51,6 +53,13 @@ public final class HotfixPlans {
    */
   public static final String NOTE_PREFIX = "readme: ";
 
+  /**
+   * Marks a plan summary warning as a line of the package readme itself, carried as the readme has
+   * it. The plan preview shows the first lines of such a block; {@link #notesOf(Plan)} returns them
+   * all.
+   */
+  public static final String QUOTE_PREFIX = "readme> ";
+
   private static final String AS_PUBLISHED =
       "point jrs-hotfix at the hotfix ZIP as support published it";
 
@@ -72,8 +81,8 @@ public final class HotfixPlans {
   }
 
   /**
-   * The eight-step apply plan: preflight, snapshot, stage (before the outage), stop, swap, start,
-   * wait, record.
+   * The nine-step apply plan: preflight, snapshot, stage (before the outage), stop, swap, clear the
+   * JSP cache, start, wait, record.
    */
   public Plan planApply(ApplyArgs args) {
     Path file = args.packageFile().toAbsolutePath().normalize();
@@ -97,6 +106,10 @@ public final class HotfixPlans {
     List<FileTarget> targets = FileTarget.resolve(contents, rt.paths(), rt.files());
     ApplyInput in = new ApplyInput(file, contents, rt.paths(), targets);
     List<String> warnings = new ArrayList<>();
+    // the preview runs no step, so what preflight will refuse is said here, first
+    for (String problem : applicability(rt, contents, targets)) {
+      warnings.add("this plan will be refused before anything is changed: " + problem);
+    }
     warnings.add(
         "package "
             + file.getFileName()
@@ -104,8 +117,8 @@ public final class HotfixPlans {
             + contents.sha256()
             + "); compare it with the checksum on the support portal"
             + (args.checksumConfirmed() ? " (confirmed)" : ""));
-    for (String note : contents.notes()) {
-      warnings.add(NOTE_PREFIX + note);
+    for (PackageContents.Note note : contents.notes()) {
+      warnings.add((note.quoted() ? QUOTE_PREFIX : NOTE_PREFIX) + note.text());
     }
     warnings.add(
         "the service is stopped for the swap; this node only, other cluster nodes are not touched");
@@ -116,6 +129,7 @@ public final class HotfixPlans {
     steps.add(new ApplyPhaseSteps.StageFiles(rt, in));
     steps.add(ServiceSteps.stop(rt, ApplySteps.APPLY, ServiceSteps.STOP));
     steps.add(new ApplyPhaseSteps.AtomicSwap(rt, in));
+    steps.add(new JspCacheStep(rt, ApplySteps.APPLY, JspCacheStep.ID));
     steps.add(ServiceSteps.start(rt, ApplySteps.APPLY, ServiceSteps.START));
     steps.add(ServiceSteps.waitForServer(rt, ApplySteps.APPLY, ServiceSteps.WAIT));
     steps.add(new RecordSteps.RecordInstalled(rt, in));
@@ -138,7 +152,8 @@ public final class HotfixPlans {
             List.of(snapshotDir),
             rollbackPoints,
             "official-package",
-            warnings);
+            warnings,
+            applyChanges(targets));
 
     Map<String, String> inputs = new LinkedHashMap<>();
     inputs.put("package", contents.sha256());
@@ -149,6 +164,93 @@ public final class HotfixPlans {
     }
     return new Plan(
         "hotfix-apply-" + RunIds.next(rt.clock()), steps, summary, PlanFingerprint.of(inputs));
+  }
+
+  /** Where a file of a package lands, as the plan preview groups them. */
+  private enum Area {
+    WEBAPP_LIBRARIES("webapp libraries"),
+    WEBAPP_SETTINGS("webapp settings"),
+    WEBAPP_OTHER("webapp scripts and pages"),
+    INSTALLATION("installation tree");
+
+    private final String label;
+
+    Area(String label) {
+      this.label = label;
+    }
+
+    static Area of(String packagePath) {
+      String p = packagePath.toLowerCase(Locale.ROOT);
+      if (!p.startsWith(PackagePaths.WEBAPPS_PREFIX)) {
+        return INSTALLATION;
+      }
+      if (p.contains("/web-inf/lib/")) {
+        return WEBAPP_LIBRARIES;
+      }
+      return p.endsWith(".xml") || p.endsWith(".properties") ? WEBAPP_SETTINGS : WEBAPP_OTHER;
+    }
+  }
+
+  /**
+   * What the apply plan does to its files, for the preview: the totals, then one line per area that
+   * has files, then where every path can be read.
+   */
+  private static List<String> applyChanges(List<FileTarget> targets) {
+    Map<Area, int[]> byArea = new EnumMap<>(Area.class);
+    int[] total = new int[3];
+    for (FileTarget t : targets) {
+      int[] counts = byArea.computeIfAbsent(Area.of(t.packagePath()), a -> new int[3]);
+      int action =
+          switch (t.action()) {
+            case ADD -> 0;
+            case REPLACE -> 1;
+            case DELETE -> 2;
+          };
+      counts[action]++;
+      total[action]++;
+    }
+    List<String> out = new ArrayList<>();
+    out.add(total[0] + " added, " + total[1] + " replaced, " + total[2] + " deleted");
+    int width = byArea.keySet().stream().mapToInt(a -> a.label.length()).max().orElse(0);
+    for (Map.Entry<Area, int[]> e : byArea.entrySet()) {
+      int[] c = e.getValue();
+      List<String> parts = new ArrayList<>();
+      if (c[0] > 0) {
+        parts.add(c[0] + " added");
+      }
+      if (c[1] > 0) {
+        parts.add(c[1] + " replaced");
+      }
+      if (c[2] > 0) {
+        parts.add(c[2] + " deleted");
+      }
+      out.add(
+          String.format(
+              Locale.ROOT,
+              "%-" + width + "s  %d: %s",
+              e.getKey().label,
+              c[0] + c[1] + c[2],
+              String.join(", ", parts)));
+    }
+    out.add("every path: jrs-hotfix verify <package.zip>");
+    return out;
+  }
+
+  /** What the rollback plan does to the files of its hotfixes, for the preview: the totals. */
+  private static List<String> rollbackChanges(List<RollbackSteps.Input> inputs) {
+    int restored = 0;
+    int removed = 0;
+    int putBack = 0;
+    for (RollbackSteps.Input in : inputs) {
+      for (OwnedFile f : in.hotfix().files()) {
+        switch (f.action()) {
+          case "add" -> removed++;
+          case "delete" -> putBack++;
+          default -> restored++;
+        }
+      }
+    }
+    return List.of(restored + " restored, " + removed + " removed, " + putBack + " put back");
   }
 
   /**
@@ -176,10 +278,10 @@ public final class HotfixPlans {
   }
 
   /**
-   * Per hotfix, newest first and the target last: stop, restore the snapshot, start, wait, mark
-   * rolled back. Refuses a recorded entry, as target or anywhere in the chain (nothing to restore),
-   * and, unless cascading, a hotfix whose files a later installed hotfix also owns. The first stop
-   * refuses before the outage when any snapshot of the chain is missing.
+   * Per hotfix, newest first and the target last: stop, restore the snapshot, clear the JSP cache,
+   * start, wait, mark rolled back. Refuses a recorded entry, as target or anywhere in the chain
+   * (nothing to restore), and, unless cascading, a hotfix whose files a later installed hotfix also
+   * owns. The first stop refuses before the outage when any snapshot of the chain is missing.
    */
   public Plan planRollback(RollbackArgs args) {
     return resolveRollback(args).plan();
@@ -263,6 +365,7 @@ public final class HotfixPlans {
       // the first stop is the start of the outage: every snapshot the chain needs is checked first
       steps.add(i == 0 ? new RollbackSteps.CheckedStop(rt, stop, restores) : stop);
       steps.add(restores.get(i));
+      steps.add(new JspCacheStep(rt, in.phase(), JspCacheStep.ID + in.suffix()));
       steps.add(ServiceSteps.start(rt, in.phase(), ServiceSteps.START + in.suffix()));
       steps.add(ServiceSteps.waitForServer(rt, in.phase(), ServiceSteps.WAIT + in.suffix()));
       steps.add(new RollbackSteps.RecordRolledBack(rt, in));
@@ -294,7 +397,8 @@ public final class HotfixPlans {
             backups,
             rollbackPoints,
             "snapshot",
-            warnings);
+            warnings,
+            rollbackChanges(inputs));
     Plan plan =
         new Plan(
             "hotfix-rollback-" + RunIds.next(rt.clock()),
@@ -430,7 +534,12 @@ public final class HotfixPlans {
     } catch (IOException | UncheckedIOException e) {
       return unreadable("cannot read " + file + ": " + e.getMessage());
     }
-    List<String> problems = applicability(rt, c);
+    List<String> problems;
+    try {
+      problems = applicability(rt, c, FileTarget.resolve(c, rt.paths(), rt.files()));
+    } catch (UncheckedIOException e) {
+      return unreadable("cannot read this installation: " + e.getMessage());
+    }
     return new VerifyReport(
         true,
         c.id(),
@@ -442,7 +551,7 @@ public final class HotfixPlans {
         paths(c.adds()),
         paths(c.replaces()),
         paths(c.deletes()),
-        c.notes());
+        c.noteLines());
   }
 
   private static VerifyReport unreadable(String problem) {
@@ -457,9 +566,11 @@ public final class HotfixPlans {
   /**
    * Why the package does not apply here, empty when it does: the installed release must equal the
    * package's, the edition must match the webapp name, and the hotfix must not be installed
-   * already. Shared by {@code verify} and the apply plan's preflight.
+   * already, by the ledger or, when the ledger does not know it, by the files themselves. Shared by
+   * {@code verify} and the apply plan's preflight; {@code targets} are the package's files as they
+   * were on disk when the caller resolved them.
    */
-  static List<String> applicability(HotfixRuntime rt, PackageContents c) {
+  static List<String> applicability(HotfixRuntime rt, PackageContents c, List<FileTarget> targets) {
     List<String> problems = new ArrayList<>();
     String installed = JrsVersion.ofWebapp(rt.settings().webappDir()).orElse("");
     if (!installed.equals(c.release())) {
@@ -481,8 +592,25 @@ public final class HotfixPlans {
     }
     if (rt.ledger().find(c.id()).filter(e -> e.state() == HotfixState.INSTALLED).isPresent()) {
       problems.add(c.id() + " is already installed");
+    } else if (problems.isEmpty() && inPlace(targets)) {
+      problems.add(
+          c.id()
+              + " is already on this server: every file of the package is in place with the"
+              + " package's content and nothing is left to delete, but the ledger does not list"
+              + " it as installed; it was applied by hand or by another tool, so run `jrs-hotfix"
+              + " record <package.zip>` and the ledger will know it");
     }
     return problems;
+  }
+
+  /**
+   * True when applying would change nothing: every add and replace is on disk at the hash the
+   * package would leave there, and no deletion is left. An empty list is not "in place".
+   */
+  static boolean inPlace(List<FileTarget> targets) {
+    return !targets.isEmpty()
+        && targets.stream()
+            .allMatch(t -> t.action() != Action.DELETE && t.before().equals(t.after()));
   }
 
   /** Every ledger entry, installed and rolled back alike, in install order. */
@@ -491,15 +619,17 @@ public final class HotfixPlans {
   }
 
   /**
-   * The package readme's manual steps carried in {@code plan}'s summary warnings, in order, with
-   * {@link #NOTE_PREFIX} stripped; empty for a rollback plan, which never adds any. Never executed
-   * by this tool.
+   * The package readme's manual steps carried in {@code plan}'s summary warnings, in order and
+   * whole, with {@link #NOTE_PREFIX} and {@link #QUOTE_PREFIX} stripped; empty for a rollback plan,
+   * which never adds any. Never executed by this tool.
    */
   public static List<String> notesOf(Plan plan) {
     List<String> notes = new ArrayList<>();
     for (String warning : plan.summary().warnings()) {
       if (warning.startsWith(NOTE_PREFIX)) {
         notes.add(warning.substring(NOTE_PREFIX.length()));
+      } else if (warning.startsWith(QUOTE_PREFIX)) {
+        notes.add(warning.substring(QUOTE_PREFIX.length()));
       }
     }
     return notes;

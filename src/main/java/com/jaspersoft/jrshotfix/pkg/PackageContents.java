@@ -8,7 +8,8 @@ import java.util.Optional;
  * What one official package would do to this installation, decided at read time. Invariants: paths
  * are package paths ({@code webapps/<name>/...} or installation-relative); an add or replace
  * carries the SHA-256 of the payload; a delete carries none; entries are in package order with
- * deletions last; notes are the readme's manual steps, never executed.
+ * deletions last; notes are what the operator must know or do by hand, the readme's own lines among
+ * them in the readme's order, never executed.
  */
 public record PackageContents(
     String id,
@@ -18,25 +19,70 @@ public record PackageContents(
     String title,
     String sha256,
     List<Entry> entries,
-    List<String> notes) {
+    List<Note> notes) {
   public PackageContents {
     entries = List.copyOf(entries);
     notes = List.copyOf(notes);
   }
 
-  /** One file: where it lands, what happens, and where its bytes are in the package. */
+  /**
+   * One line for the operator: a sentence of jrs-hotfix's own, or, when {@code quoted}, a line of
+   * the package readme exactly as the readme has it (it may be blank).
+   */
+  public record Note(String text, boolean quoted) {
+    public Note {
+      Objects.requireNonNull(text);
+    }
+
+    public static Note said(String sentence) {
+      return new Note(sentence, false);
+    }
+
+    public static Note quoted(String line) {
+      return new Note(line, true);
+    }
+  }
+
+  /** The text of every note, in order. */
+  public List<String> noteLines() {
+    return notes.stream().map(Note::text).toList();
+  }
+
+  /**
+   * One file: where it lands, what happens, and where its bytes are in the package. {@code sha256}
+   * is the hash of what lands. It is the payload's, except for a settings file merged with this
+   * server's ({@link SiteSettings}): then {@code packageSha256} holds the payload's hash and {@code
+   * sha256} the merged file's.
+   */
   public record Entry(
       String path,
       Action action,
       Optional<String> sha256,
       Optional<String> source,
-      String entryName) {
+      String entryName,
+      Optional<String> packageSha256) {
     public Entry {
       Objects.requireNonNull(path);
       Objects.requireNonNull(action);
       Objects.requireNonNull(sha256);
       Objects.requireNonNull(source);
       Objects.requireNonNull(entryName);
+      Objects.requireNonNull(packageSha256);
+    }
+
+    /** An entry whose payload lands as it is. */
+    public Entry(
+        String path,
+        Action action,
+        Optional<String> sha256,
+        Optional<String> source,
+        String entryName) {
+      this(path, action, sha256, source, entryName, Optional.empty());
+    }
+
+    /** True when what lands is the payload merged with this server's file. */
+    public boolean merged() {
+      return packageSha256.isPresent();
     }
   }
 

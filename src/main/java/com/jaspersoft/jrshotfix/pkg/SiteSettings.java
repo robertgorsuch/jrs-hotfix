@@ -1,0 +1,128 @@
+package com.jaspersoft.jrshotfix.pkg;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * The webapp's properties files the installer fills in for one site (the scheduler's public
+ * address, the database connection, the keystore location). On every server they differ from the
+ * vendor's copy, so a hotfix that ships one must not simply replace it: what lands is the package's
+ * file with this server's values ({@link PropertiesMerge}). Invariants: only the files listed here
+ * are merged, and only when the server has the file; a file larger than {@link #MAX_BYTES} is never
+ * merged, so what is held in memory is bounded (these files are a few kilobytes; the bound is what
+ * allows reading one whole, which the payload never is); bytes are read and written as ISO-8859-1,
+ * which maps every byte to itself, in the package's line ends; nothing is written here.
+ */
+public final class SiteSettings {
+
+  /** A settings file larger than this is replaced as any other file, with the usual warning. */
+  public static final int MAX_BYTES = 1 << 20;
+
+  private static final Set<String> FILES =
+      Set.of(
+          "web-inf/js.quartz.properties",
+          "web-inf/js.jdbc.properties",
+          "web-inf/classes/hibernate.properties",
+          "web-inf/classes/keystore.init.properties");
+
+  private SiteSettings() {}
+
+  /** True when {@code packagePath} is one of these files under a webapp. */
+  public static boolean holdsSiteValues(String packagePath) {
+    if (!packagePath.startsWith(PackagePaths.WEBAPPS_PREFIX)) {
+      return false;
+    }
+    int webapp = packagePath.indexOf('/', PackagePaths.WEBAPPS_PREFIX.length());
+    return webapp > 0 && FILES.contains(packagePath.substring(webapp + 1).toLowerCase(Locale.ROOT));
+  }
+
+  /**
+   * What lands in place of the package's file: its text, one character per byte, the hash of those
+   * bytes, and what was kept of this server's file, by key name only (a value may be a password).
+   */
+  public record Merged(String text, String sha256, List<String> kept, List<String> carried) {
+    public Merged {
+      kept = List.copyOf(kept);
+      carried = List.copyOf(carried);
+    }
+
+    /** The file as it is written. */
+    public byte[] bytes() {
+      return text.getBytes(StandardCharsets.ISO_8859_1);
+    }
+
+    /** The text is the server's settings, which may hold a secret: it is never printed. */
+    @Override
+    public String toString() {
+      return "Merged[" + sha256 + ", kept=" + kept + ", carried=" + carried + "]";
+    }
+  }
+
+  /** The whole of {@code in} when it is at most {@link #MAX_BYTES} long, else empty. */
+  public static Optional<byte[]> bounded(InputStream in) throws IOException {
+    byte[] bytes = in.readNBytes(MAX_BYTES + 1);
+    return bytes.length > MAX_BYTES ? Optional.empty() : Optional.of(bytes);
+  }
+
+  /**
+   * The server's file {@code mine} merged into the package's {@code theirs}; empty when the server
+   * has nothing to keep (the package's file lands as it is), or when the server's file is absent or
+   * too large to merge.
+   */
+  public static Optional<Merged> merge(Path mine, byte[] theirs) throws IOException {
+    if (!Files.isRegularFile(mine) || Files.size(mine) > MAX_BYTES) {
+      return Optional.empty();
+    }
+    Optional<byte[]> site;
+    try (InputStream in = Files.newInputStream(mine)) {
+      site = bounded(in);
+    }
+    return site.flatMap(bytes -> merge(bytes, theirs));
+  }
+
+  static Optional<Merged> merge(byte[] mine, byte[] theirs) {
+    String vendor = new String(theirs, StandardCharsets.ISO_8859_1);
+    PropertiesMerge.Result result =
+        PropertiesMerge.merge(lines(new String(mine, StandardCharsets.ISO_8859_1)), lines(vendor));
+    if (!result.changed()) {
+      return Optional.empty();
+    }
+    String eol = vendor.contains("\r\n") ? "\r\n" : "\n";
+    String text = String.join(eol, result.lines()) + (vendor.endsWith("\n") ? eol : "");
+    return Optional.of(
+        new Merged(
+            text,
+            sha256(text.getBytes(StandardCharsets.ISO_8859_1)),
+            result.kept(),
+            result.carried()));
+  }
+
+  private static List<String> lines(String text) {
+    List<String> lines = new ArrayList<>(Arrays.asList(text.split("\r?\n", -1)));
+    // the text after the last line end is a line only when there is some
+    if (lines.get(lines.size() - 1).isEmpty()) {
+      lines.remove(lines.size() - 1);
+    }
+    return lines;
+  }
+
+  static String sha256(byte[] bytes) {
+    try {
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 is mandatory in every JRE", e);
+    }
+  }
+}

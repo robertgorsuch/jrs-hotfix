@@ -30,12 +30,14 @@ class RollbackPlanTest {
       throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
+      Path cache = ApplyPlanTest.jspCache(f);
       Plan rb =
           f.plans.planRollback(new HotfixPlans.RollbackArgs("JRSHF-10.0.0-20260730-0457", false));
       assertThat(HotfixFixture.ids(rb))
           .containsExactly(
               "stop-service",
               "restore-snapshot",
+              "clear-jsp-cache",
               "start-service",
               "wait-for-server",
               "record-rolled-back");
@@ -45,6 +47,8 @@ class RollbackPlanTest {
           .containsKeys("settings", "hotfix:JRSHF-10.0.0-20260730-0457")
           .containsKey("file:" + f.target(HotfixFixture.FOO));
       assertThat(f.run(rb, "r2")).isInstanceOf(RunOutcome.Succeeded.class);
+      // restored pages are older than what Tomcat compiled from the hotfix's, so it would keep them
+      assertThat(cache).doesNotExist();
       assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
           .isEqualTo("old foo");
       assertThat(f.target("webapps/jasperserver-pro/WEB-INF/lib/new-1.0.jar")).doesNotExist();
@@ -53,6 +57,26 @@ class RollbackPlanTest {
       assertThat(Files.readString(f.target(HotfixFixture.TOOL))).isEqualTo("old tool");
       assertThat(f.ledger.find("JRSHF-10.0.0-20260730-0457").orElseThrow().state())
           .isEqualTo(HotfixState.ROLLED_BACK);
+    }
+  }
+
+  @Test
+  void should_install_again_when_a_rolled_back_hotfix_is_applied_again() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      assertThat(f.run(f.plan(), "r1")).isInstanceOf(RunOutcome.Succeeded.class);
+      assertThat(
+              f.run(
+                  f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false)),
+                  "r2"))
+          .isInstanceOf(RunOutcome.Succeeded.class);
+      assertThat(f.run(f.plan(), "r3")).isInstanceOf(RunOutcome.Succeeded.class);
+      assertThat(Files.readString(f.target(HotfixFixture.FOO))).isEqualTo("patched foo");
+      // one entry per id: the new installation replaces the rolled-back one
+      assertThat(f.ledger.all()).filteredOn(e -> e.id().equals(HotfixFixture.ID)).hasSize(1);
+      LedgerEntry e = f.ledger.find(HotfixFixture.ID).orElseThrow();
+      assertThat(e.state()).isEqualTo(HotfixState.INSTALLED);
+      assertThat(e.runId()).isEqualTo("r3");
+      assertThat(e.snapshotRef()).contains("r3/snapshot");
     }
   }
 

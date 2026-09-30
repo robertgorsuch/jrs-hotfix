@@ -8,9 +8,12 @@ import com.jaspersoft.jrshotfix.engine.Plan;
 import com.jaspersoft.jrshotfix.engine.Sleeper;
 import com.jaspersoft.jrshotfix.event.EventSink;
 import com.jaspersoft.jrshotfix.platform.ServiceController;
+import com.jaspersoft.jrshotfix.service.ServerProbe;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -29,6 +32,37 @@ class PreflightTest {
   @Test
   void should_pass_when_the_installation_matches_the_package() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      Plan plan = f.plan();
+      assertThat(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r")))
+          .isNotInstanceOf(CheckResult.Fail.class);
+    }
+  }
+
+  /** What an operator following the readme leaves behind: every file in place, no ledger entry. */
+  static void applyByHand(HotfixFixture f) throws Exception {
+    Files.writeString(f.target(HotfixFixture.FOO), "patched foo");
+    Files.writeString(f.target(HotfixFixture.NEW), "brand new");
+    Files.writeString(f.target(HotfixFixture.TOOL), "patched tool");
+    Files.delete(f.target(HotfixFixture.BAR));
+    Files.delete(f.target(HotfixFixture.FOO_OLDER));
+  }
+
+  @Test
+  void should_refuse_and_name_record_when_the_hotfix_was_applied_by_hand() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      applyByHand(f);
+      Plan plan = f.plan();
+      assertThat(failure(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r"))))
+          .contains(HotfixFixture.ID + " is already on this server")
+          .contains("jrs-hotfix record");
+    }
+  }
+
+  @Test
+  void should_pass_when_only_a_deletion_is_left_to_do() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      applyByHand(f);
+      Files.writeString(f.target(HotfixFixture.BAR), "bar");
       Plan plan = f.plan();
       assertThat(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r")))
           .isNotInstanceOf(CheckResult.Fail.class);
@@ -98,6 +132,46 @@ class PreflightTest {
               calls.incrementAndGet();
               return Optional.of(problem);
             }));
+  }
+
+  @Test
+  void should_let_the_base_url_probe_wait_for_a_slow_answer_while_the_service_runs()
+      throws Exception {
+    // a real JRS 10.0.0 took over ten seconds to answer one serverInfo request (2026-09-29) and a
+    // five-second probe refused the rollback of a healthy server
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      List<Duration> patience = new ArrayList<>();
+      ServerProbe recording =
+          new ServerProbe() {
+            @Override
+            public Optional<String> problem() {
+              throw new AssertionError("preflight must say how long its request may take");
+            }
+
+            @Override
+            public Optional<String> problem(Duration p) {
+              patience.add(p);
+              return Optional.empty();
+            }
+          };
+      HotfixPlans plans =
+          new HotfixPlans(
+              new HotfixRuntime(
+                  f.home,
+                  f.settings,
+                  f.platform,
+                  f.ledger,
+                  f.snapshots,
+                  Clock.systemUTC(),
+                  Sleeper.none(),
+                  recording));
+      Plan plan = plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true));
+      assertThat(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r")))
+          .isNotInstanceOf(CheckResult.Fail.class);
+      assertThat(patience)
+          .singleElement()
+          .satisfies(p -> assertThat(p.toSeconds()).isGreaterThanOrEqualTo(30));
+    }
   }
 
   @Test

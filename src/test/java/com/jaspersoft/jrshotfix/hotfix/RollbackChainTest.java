@@ -54,11 +54,13 @@ class RollbackChainTest {
           .containsExactly(
               "stop-service:" + later,
               "restore-snapshot:" + later,
+              "clear-jsp-cache:" + later,
               "start-service:" + later,
               "wait-for-server:" + later,
               "record-rolled-back:" + later,
               "stop-service:" + FIRST,
               "restore-snapshot:" + FIRST,
+              "clear-jsp-cache:" + FIRST,
               "start-service:" + FIRST,
               "wait-for-server:" + FIRST,
               "record-rolled-back:" + FIRST);
@@ -91,7 +93,9 @@ class RollbackChainTest {
       throws Exception {
     try (HotfixFixture f = twoApplied(tmp)) {
       Plan plan = f.plans.planRollback(new HotfixPlans.RollbackArgs(Packages.laterId(), false));
-      assertThat(HotfixFixture.ids(plan)).hasSize(5).contains("restore-snapshot");
+      assertThat(HotfixFixture.ids(plan))
+          .hasSize(6)
+          .contains("restore-snapshot", "clear-jsp-cache");
 
       assertThat(f.run(plan, "r3")).isInstanceOf(RunOutcome.Succeeded.class);
 

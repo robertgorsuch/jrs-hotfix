@@ -4,6 +4,7 @@ import com.jaspersoft.jrshotfix.engine.Plan;
 import com.jaspersoft.jrshotfix.engine.PlanSummary;
 import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.home.Home;
+import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
 import com.jaspersoft.jrshotfix.redact.Redactor;
 import java.io.PrintWriter;
 import java.nio.file.Path;
@@ -22,6 +23,9 @@ final class PlanPrinter {
 
   private static final int MAX_LISTED_FILES = 20;
 
+  /** Lines of one block of readme text shown in the preview. */
+  private static final int MAX_QUOTED_LINES = 8;
+
   private PlanPrinter() {}
 
   /** Two-digit step number for position {@code index} (0-based). */
@@ -36,9 +40,18 @@ final class PlanPrinter {
     lines.add("Plan  " + s.operation() + "  " + s.target());
     lines.add("Summary");
     TextTable summary = new TextTable();
-    summary.row("  files", count(s.filesTouched().size(), "file"));
-    for (String f : listed(s.filesTouched())) {
-      summary.row("", f);
+    String files = count(s.filesTouched().size(), "file");
+    if (s.changes().isEmpty()) {
+      summary.row("  files", files);
+      for (String f : listed(s.filesTouched())) {
+        summary.row("", f);
+      }
+    } else {
+      // counted by area and action: twenty of five hundred paths tell the operator nothing
+      summary.row("  files", files + ": " + s.changes().get(0));
+      for (String change : s.changes().subList(1, s.changes().size())) {
+        summary.row("", change);
+      }
     }
     if (!s.resourcesTouched().isEmpty()) {
       summary.row("  resources", count(s.resourcesTouched().size(), "resource"));
@@ -63,9 +76,7 @@ final class PlanPrinter {
       }
     }
     lines.addAll(summary.lines());
-    for (String w : s.warnings()) {
-      lines.add("  ! " + w);
-    }
+    lines.addAll(warnings(s.warnings()));
     lines.add("Steps");
     TextTable steps = new TextTable();
     List<Step> all = plan.steps();
@@ -91,6 +102,41 @@ final class PlanPrinter {
       out.println(redactor.redact(line.stripTrailing()));
     }
     out.flush();
+  }
+
+  /**
+   * The warnings as printed. A block of the package readme's own lines is shown up to {@link
+   * #MAX_QUOTED_LINES}, followed by where the rest is: the preview is read before an outage and the
+   * whole text is a command away.
+   */
+  private static List<String> warnings(List<String> warnings) {
+    List<String> out = new ArrayList<>();
+    int i = 0;
+    while (i < warnings.size()) {
+      String w = warnings.get(i);
+      if (!w.startsWith(HotfixPlans.QUOTE_PREFIX)) {
+        out.add("  ! " + w);
+        i++;
+        continue;
+      }
+      int end = i;
+      while (end < warnings.size() && warnings.get(end).startsWith(HotfixPlans.QUOTE_PREFIX)) {
+        end++;
+      }
+      int shown = Math.min(end - i, MAX_QUOTED_LINES);
+      for (String quoted : warnings.subList(i, i + shown)) {
+        out.add("  !   | " + quoted.substring(HotfixPlans.QUOTE_PREFIX.length()));
+      }
+      if (end - i > shown) {
+        out.add(
+            "  !   | ... "
+                + count(end - i - shown, "more line")
+                + ": `jrs-hotfix verify <package.zip>` prints them all, and a run saves them to"
+                + " notes.txt in its directory");
+      }
+      i = end;
+    }
+    return out;
   }
 
   private static String count(int n, String noun) {

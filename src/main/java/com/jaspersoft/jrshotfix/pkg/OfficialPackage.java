@@ -37,7 +37,8 @@ import java.util.zip.ZipInputStream;
  * the package carries the SHA-256 of the whole file; an entry is {@code replace} only when the file
  * exists on this server now and {@code add} otherwise; deletes come from the readme's "Deleted
  * files" list and its "Important" globs, expanded against this installation and never covering a
- * file the package itself lays down; nothing on the server is touched here.
+ * file the package itself lays down; the readme's manual steps are carried verbatim and whole, a
+ * section both inner readmes hold only once; nothing on the server is touched here.
  */
 public final class OfficialPackage {
 
@@ -61,8 +62,11 @@ public final class OfficialPackage {
 
   private static final String README = "readme.txt";
 
-  /** Lines of one readme section carried into the notes; the rest is left to readme.txt. */
-  static final int MAX_NOTE_LINES = 60;
+  /** Webapp settings files named in the overwrite warning; the rest is a count. */
+  private static final int MAX_NAMED_SETTINGS = 20;
+
+  /** Keys of a merged settings file named in its note. Names only: a value may be a secret. */
+  private static final int MAX_NAMED_KEYS = 10;
 
   // Case-insensitive, and "Product:" as well as "Product Name:": readmes differ in capitalisation.
   private static final Pattern PRODUCT = Pattern.compile("(?i)^Product(?: Name)?:\\s*(.+?)\\s*$");
@@ -288,7 +292,8 @@ public final class OfficialPackage {
     List<PackageContents.Entry> entries = new ArrayList<>();
     Set<String> added = new LinkedHashSet<>();
     List<Readme> readmes = new ArrayList<>();
-    List<String> notes = new ArrayList<>();
+    Notes notes = new Notes();
+    Payload payload = new Payload(paths, entries, added, notes);
     MessageDigest whole = sha256();
     try (InputStream in = new DigestInputStream(Files.newInputStream(source), whole);
         ZipInputStream outer = new ZipInputStream(in)) {
@@ -300,21 +305,14 @@ public final class OfficialPackage {
         String name = entry.getName().replace('\\', '/');
         switch (shape.kind(name)) {
           case README -> header = Header.parse(readLines(outer));
-          case WEBAPP_ZIP -> readmes.add(inner(outer, name, webappPrefix, paths, entries, added));
-          case INSTALL_ZIP -> readmes.add(inner(outer, name, "", paths, entries, added));
+          case WEBAPP_ZIP -> readmes.add(inner(outer, name, webappPrefix, payload));
+          case INSTALL_ZIP -> readmes.add(inner(outer, name, "", payload));
           case WEBAPP_FILE -> {
             String under = shape.underWebapp(name);
             if (under.equalsIgnoreCase(README)) {
               treeReadme = Readme.parse(webappPrefix, readLines(outer));
             } else {
-              entries.add(
-                  hashEntry(
-                      outer,
-                      webappPrefix + under,
-                      Optional.empty(),
-                      entry.getName(),
-                      paths,
-                      added));
+              payload.hash(outer, webappPrefix + under, Optional.empty(), entry.getName());
             }
           }
           case IGNORE -> {}
@@ -340,10 +338,13 @@ public final class OfficialPackage {
       readmes.add(treeReadme);
     }
     for (Readme r : readmes) {
-      entries.addAll(deletions(r, added, paths, notes));
-      notes.addAll(r.notes());
+      List<String> said = new ArrayList<>();
+      entries.addAll(deletions(r, added, paths, said));
+      said.forEach(notes::say);
+      notes.conditions(r.conditions());
+      notes.manual(r.manual());
     }
-    notes.addAll(configNotes(entries));
+    configNotes(entries).forEach(notes::say);
     return new PackageContents(
         header.id(),
         header.release(),
@@ -352,20 +353,67 @@ public final class OfficialPackage {
         header.title(),
         HexFormat.of().formatHex(whole.digest()),
         entries,
-        List.copyOf(new LinkedHashSet<>(notes)));
+        notes.lines());
+  }
+
+  /**
+   * The notes of one package, in the order they were given. Invariants: a sentence of jrs-hotfix's
+   * own is said once; a line of the readme is never dropped because an equal line came before it in
+   * the same section (SQL repeats its lines); a section both inner readmes hold, blank lines aside,
+   * is carried once.
+   */
+  private static final class Notes {
+    private final List<PackageContents.Note> lines = new ArrayList<>();
+    private final Set<String> said = new HashSet<>();
+    private final Set<String> conditionsSeen = new HashSet<>();
+    private final Set<List<String>> manualSeen = new HashSet<>();
+
+    void say(String sentence) {
+      if (said.add(sentence)) {
+        lines.add(PackageContents.Note.said(sentence));
+      }
+    }
+
+    private void quote(List<String> readmeLines) {
+      readmeLines.forEach(line -> lines.add(PackageContents.Note.quoted(line)));
+    }
+
+    /** The Important section's sentences; one an earlier readme gave is not repeated. */
+    void conditions(List<String> conditions) {
+      List<String> fresh = conditions.stream().filter(c -> !conditionsSeen.contains(c)).toList();
+      if (fresh.isEmpty()) {
+        return;
+      }
+      conditionsSeen.addAll(fresh);
+      say(
+          "the package readme's Important section names conditions to check by hand (an earlier"
+              + " build, source map files); read readme.txt in the package");
+      quote(fresh);
+    }
+
+    /** The Additional Notes section, whole and in the readme's own lines. */
+    void manual(List<String> manual) {
+      List<String> text =
+          manual.stream().map(String::strip).filter(line -> !line.isEmpty()).toList();
+      if (text.isEmpty() || !manualSeen.add(text)) {
+        return;
+      }
+      say(
+          "the package readme's Additional Notes section describes manual steps, such as SQL for"
+              + " some databases and optional properties; jrs-hotfix runs none of them");
+      quote(manual);
+    }
+
+    List<PackageContents.Note> lines() {
+      return List.copyOf(lines);
+    }
   }
 
   /**
    * Hashes every file of one inner archive into {@code entries} and returns its parsed readme. The
    * outer stream is wrapped, not closed, so the outer walk continues after it.
    */
-  private static Readme inner(
-      InputStream source,
-      String outerName,
-      String prefix,
-      PackagePaths paths,
-      List<PackageContents.Entry> entries,
-      Set<String> added)
+  private static Readme inner(InputStream source, String outerName, String prefix, Payload payload)
       throws IOException {
     Readme readme = Readme.empty();
     ZipInputStream zip = new ZipInputStream(source);
@@ -379,35 +427,69 @@ public final class OfficialPackage {
         readme = Readme.parse(prefix, readLines(zip));
         continue;
       }
-      entries.add(
-          hashEntry(zip, prefix + name, Optional.of(outerName), entry.getName(), paths, added));
+      payload.hash(zip, prefix + name, Optional.of(outerName), entry.getName());
     }
     return readme;
   }
 
-  /**
-   * Streams one file of the package through a digest, writing nothing, and returns its entry:
-   * {@code replace} when the file exists here now, else {@code add}.
-   */
-  private static PackageContents.Entry hashEntry(
-      InputStream in,
-      String path,
-      Optional<String> source,
-      String entryName,
-      PackagePaths paths,
-      Set<String> added)
-      throws IOException {
-    if (!PackagePaths.pathProblems(path).isEmpty()) {
-      throw unusable(entryName, Optional.empty());
+  /** Where the files of the package are collected while it is read. */
+  private record Payload(
+      PackagePaths paths, List<PackageContents.Entry> entries, Set<String> added, Notes notes) {
+
+    /**
+     * Streams one file of the package through a digest, writing nothing, and adds its entry: {@code
+     * replace} when the file exists here now, else {@code add}. A settings file this server has
+     * values of its own in ({@link SiteSettings}) is planned as the merged file.
+     */
+    void hash(InputStream in, String path, Optional<String> source, String entryName)
+        throws IOException {
+      if (!PackagePaths.pathProblems(path).isEmpty()) {
+        throw unusable(entryName, Optional.empty());
+      }
+      Path target = paths.resolve(path);
+      Action action = Files.isRegularFile(target) ? Action.REPLACE : Action.ADD;
+      MessageDigest md = sha256();
+      Optional<SiteSettings.Merged> merged = Optional.empty();
+      if (action == Action.REPLACE && SiteSettings.holdsSiteValues(path)) {
+        byte[] head = in.readNBytes(SiteSettings.MAX_BYTES + 1);
+        md.update(head);
+        if (head.length <= SiteSettings.MAX_BYTES) {
+          merged = SiteSettings.merge(target, head);
+        }
+      }
+      try (OutputStream digest = new DigestOutputStream(OutputStream.nullOutputStream(), md)) {
+        in.transferTo(digest);
+      }
+      String payload = HexFormat.of().formatHex(md.digest());
+      added.add(path);
+      if (merged.isEmpty()) {
+        entries.add(
+            new PackageContents.Entry(path, action, Optional.of(payload), source, entryName));
+        return;
+      }
+      SiteSettings.Merged m = merged.get();
+      entries.add(
+          new PackageContents.Entry(
+              path, action, Optional.of(m.sha256()), source, entryName, Optional.of(payload)));
+      notes.say(
+          path
+              + " holds values written for this server and is merged, not replaced. Keys whose"
+              + " value here is kept where the package ships another: "
+              + keys(m.kept())
+              + ". Keys only this server has, carried over: "
+              + keys(m.carried())
+              + ". Compare a kept value with the package's if a fix depends on it; the file as it"
+              + " was is in the snapshot");
     }
-    MessageDigest md = sha256();
-    try (OutputStream digest = new DigestOutputStream(OutputStream.nullOutputStream(), md)) {
-      in.transferTo(digest);
+
+    private static String keys(List<String> keys) {
+      if (keys.isEmpty()) {
+        return "none";
+      }
+      List<String> named = keys.size() > MAX_NAMED_KEYS ? keys.subList(0, MAX_NAMED_KEYS) : keys;
+      return String.join(", ", named)
+          + (keys.size() > named.size() ? " and " + (keys.size() - named.size()) + " more" : "");
     }
-    Action action = Files.isRegularFile(paths.resolve(path)) ? Action.REPLACE : Action.ADD;
-    added.add(path);
-    return new PackageContents.Entry(
-        path, action, Optional.of(HexFormat.of().formatHex(md.digest())), source, entryName);
   }
 
   /**
@@ -513,11 +595,16 @@ public final class OfficialPackage {
     return out;
   }
 
-  /** Warnings about files that usually hold site settings and are about to be replaced. */
+  /**
+   * The warning about files that usually hold site settings and are about to be replaced: the
+   * webapp's files by name, because the running server reads them, and the installation's templates
+   * as a count.
+   */
   private static List<String> configNotes(List<PackageContents.Entry> entries) {
     List<String> paths =
         entries.stream()
-            .filter(e -> e.action() == Action.REPLACE)
+            // a merged file keeps this server's settings and has a note of its own
+            .filter(e -> e.action() == Action.REPLACE && !e.merged())
             .map(PackageContents.Entry::path)
             .filter(OfficialPackage::isSettingsFile)
             .sorted()
@@ -525,13 +612,33 @@ public final class OfficialPackage {
     if (paths.isEmpty()) {
       return List.of();
     }
-    List<String> shown = paths.size() > 8 ? paths.subList(0, 8) : paths;
+    List<String> webapp =
+        paths.stream().filter(p -> p.startsWith(PackagePaths.WEBAPPS_PREFIX)).toList();
+    List<String> templates =
+        paths.stream().filter(p -> !p.startsWith(PackagePaths.WEBAPPS_PREFIX)).toList();
+    String counted =
+        templates.size()
+            + (templates.size() == 1 ? " configuration template" : " configuration templates")
+            + " under "
+            + String.join(
+                ", ",
+                templates.stream().map(p -> p.substring(0, p.indexOf('/'))).distinct().toList())
+            + " (read by the installer's scripts, not by the running server)";
+    if (webapp.isEmpty()) {
+      return List.of(
+          counted + " are overwritten; settings you changed in them must be applied again");
+    }
+    List<String> shown =
+        webapp.size() > MAX_NAMED_SETTINGS ? webapp.subList(0, MAX_NAMED_SETTINGS) : webapp;
     String more =
-        paths.size() > shown.size() ? " and " + (paths.size() - shown.size()) + " more" : "";
+        webapp.size() > shown.size()
+            ? " and " + (webapp.size() - shown.size()) + " more in the webapp"
+            : "";
     return List.of(
         "settings you changed in these files are overwritten and must be applied again: "
             + String.join(", ", shown)
-            + more);
+            + more
+            + (templates.isEmpty() ? "" : "; so are " + counted));
   }
 
   /** True for the configuration files a site edits, as opposed to code the hotfix ships. */
@@ -547,7 +654,8 @@ public final class OfficialPackage {
         new BufferedReader(new InputStreamReader(in, StandardCharsets.ISO_8859_1));
     String line;
     while ((line = reader.readLine()) != null) {
-      lines.add(line.strip());
+      // indentation is kept: the readme's SQL and numbered steps go into the notes as they are
+      lines.add(line.stripTrailing());
     }
     return lines;
   }
@@ -567,7 +675,8 @@ public final class OfficialPackage {
       String release = "";
       String edition = "PRO";
       String build = "";
-      for (String line : lines) {
+      for (String raw : lines) {
+        String line = raw.strip();
         Matcher m = RELEASE.matcher(line);
         if (m.matches()) {
           release = m.group(1);
@@ -612,14 +721,15 @@ public final class OfficialPackage {
   }
 
   /**
-   * The parts of an inner readme jrs-hotfix acts on: what to delete, and what to do by hand. The
-   * notes are a summary sentence per section followed by the section's own non-empty lines,
-   * verbatim, at most {@link #MAX_NOTE_LINES} of them.
+   * The parts of an inner readme jrs-hotfix acts on: what to delete, and what to do by hand. {@code
+   * conditions} are the sentences of the Important section; {@code manual} is the Additional Notes
+   * section as the readme has it, indentation and inner blank lines included, every line of it.
    */
-  private record Readme(List<String> deleted, List<String> globs, List<String> notes) {
+  private record Readme(
+      List<String> deleted, List<String> globs, List<String> conditions, List<String> manual) {
 
     static Readme empty() {
-      return new Readme(List.of(), List.of(), List.of());
+      return new Readme(List.of(), List.of(), List.of(), List.of());
     }
 
     static Readme parse(String prefix, List<String> lines) {
@@ -628,7 +738,8 @@ public final class OfficialPackage {
       List<String> manual = new ArrayList<>();
       List<String> conditions = new ArrayList<>();
       Section section = Section.NONE;
-      for (String line : lines) {
+      for (String raw : lines) {
+        String line = raw.strip();
         Section heading = Section.of(line);
         if (heading != null) {
           section = heading;
@@ -636,6 +747,10 @@ public final class OfficialPackage {
         }
         if (line.startsWith("=====")) {
           section = Section.NONE;
+          continue;
+        }
+        if (section == Section.NOTES) {
+          manual.add(raw);
           continue;
         }
         if (line.isEmpty()) {
@@ -655,34 +770,22 @@ public final class OfficialPackage {
               conditions.add(line);
             }
           }
-          case NOTES -> manual.add(line);
-          case NONE -> {}
+          case NOTES, NONE -> {}
         }
       }
-      List<String> notes = new ArrayList<>();
-      if (!conditions.isEmpty()) {
-        notes.add(
-            "the package readme's Important section names conditions to check by hand (an earlier"
-                + " build, source map files); read readme.txt in the package");
-        notes.addAll(capped(conditions));
-      }
-      if (!manual.isEmpty()) {
-        notes.add(
-            "the package readme's Additional Notes section describes manual steps, such as SQL for"
-                + " some databases and optional properties; jrs-hotfix runs none of them");
-        notes.addAll(capped(manual));
-      }
-      return new Readme(deleted, globs, notes);
+      return new Readme(deleted, globs, conditions, withoutOuterBlankLines(manual));
     }
 
-    /** The section's lines as the readme has them, at most {@link #MAX_NOTE_LINES}. */
-    private static List<String> capped(List<String> lines) {
-      if (lines.size() <= MAX_NOTE_LINES) {
-        return lines;
+    private static List<String> withoutOuterBlankLines(List<String> lines) {
+      int from = 0;
+      int to = lines.size();
+      while (from < to && lines.get(from).isBlank()) {
+        from++;
       }
-      List<String> out = new ArrayList<>(lines.subList(0, MAX_NOTE_LINES));
-      out.add("… (see readme.txt for the rest)");
-      return out;
+      while (to > from && lines.get(to - 1).isBlank()) {
+        to--;
+      }
+      return List.copyOf(lines.subList(from, to));
     }
 
     private enum Section {
