@@ -394,7 +394,7 @@ public final class MergeWorkspace {
     Durability.sync(file);
     List<String> checks = List.of();
     if (state == State.REVIEW) {
-      checks = XmlChecks.problems(base, mine, bytes);
+      checks = XmlChecks.problems(base, mine, theirs, bytes);
       if (!checks.isEmpty()) {
         state = State.CONFLICT;
         note = "merged by line without a conflict, but the result fails its checks";
@@ -505,7 +505,11 @@ public final class MergeWorkspace {
       findings.add("a conflict marker is left in it");
     } else if (FileClass.valueOf(record.fileClass()) == FileClass.X) {
       findings.addAll(
-          XmlChecks.problems(read(side(id, path, BASE)), read(side(id, path, MINE)), bytes));
+          XmlChecks.problems(
+              read(side(id, path, BASE)),
+              read(side(id, path, MINE)),
+              read(side(id, path, THEIRS)),
+              bytes));
     }
     if (!findings.isEmpty()) {
       save(

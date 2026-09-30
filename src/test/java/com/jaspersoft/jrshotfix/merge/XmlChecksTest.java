@@ -14,7 +14,8 @@ class XmlChecksTest {
   }
 
   private static List<String> problems(String base, String mine, String merged) {
-    return XmlChecks.problems(xml(base), xml(mine), merged.getBytes(StandardCharsets.UTF_8));
+    return XmlChecks.problems(
+        xml(base), xml(mine), xml(base), merged.getBytes(StandardCharsets.UTF_8));
   }
 
   private static final String BASE =
@@ -94,6 +95,34 @@ class XmlChecksTest {
   }
 
   @Test
+  void should_let_the_vendors_own_repeats_pass_and_catch_one_the_merge_added() {
+    // the 10.0.0 web.xml declares the same listener ten times, and a merge must not be refused
+    // for what the vendor ships; a listener the merge doubled beyond either side is another matter
+    String twice =
+        "<web-app><listener><listener-class>a.B</listener-class></listener>"
+            + "<listener><listener-class>a.B</listener-class></listener></web-app>";
+    String thrice =
+        twice.replace(
+            "</web-app>", "<listener><listener-class>a.B</listener-class></listener></web-app>");
+    assertThat(
+            XmlChecks.problems(
+                xml(twice), xml(twice), xml(thrice), thrice.getBytes(StandardCharsets.UTF_8)))
+        .isEmpty();
+    assertThat(
+            XmlChecks.problems(
+                xml(twice), xml(twice), xml(twice), thrice.getBytes(StandardCharsets.UTF_8)))
+        .containsExactly("the listener a.B is defined twice");
+    String beansTwice = "<beans><bean id=\"cacheManager\"/><bean id=\"cacheManager\"/></beans>";
+    assertThat(
+            XmlChecks.problems(
+                xml(beansTwice),
+                xml(beansTwice),
+                xml(beansTwice),
+                beansTwice.getBytes(StandardCharsets.UTF_8)))
+        .isEmpty();
+  }
+
+  @Test
   void should_not_fetch_a_dtd_or_an_entity_the_file_names() {
     String doctype =
         "<!DOCTYPE web-app PUBLIC \"-//Sun//DTD Web Application 2.3//EN\""
@@ -105,7 +134,10 @@ class XmlChecksTest {
   void should_check_what_it_can_when_the_base_or_the_sites_file_does_not_parse() {
     assertThat(
             XmlChecks.problems(
-                Optional.empty(), xml("<beans"), BASE.getBytes(StandardCharsets.UTF_8)))
+                Optional.empty(),
+                xml("<beans"),
+                Optional.empty(),
+                BASE.getBytes(StandardCharsets.UTF_8)))
         .isEmpty();
   }
 }

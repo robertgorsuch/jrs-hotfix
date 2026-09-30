@@ -337,6 +337,13 @@ file unresolved:
   still present (a resolution that drops the site's bean by accident is caught);
 - in `web.xml`, no `filter-name`, `servlet-name` or `listener-class` appears twice.
 
+As built (2026-09-30): "twice" is relative to the two sides. The vendor's own 10.0.0
+`web.xml` declares the same two listeners ten times each, and fourteen of its contexts
+define a bean twice, so a merged file is refused only when a name stands more often in it
+than in the site's file and in the hotfix's: a repeat the vendor ships passes, one the merge
+doubled does not. Found by the dry run against the real WAR and package, where the first
+rule refused every merged `web.xml`.
+
 A class X file always needs the operator's confirmation, even when the merge was clean: a
 clean line merge of a Spring context can still wire two beans where one was meant.
 
