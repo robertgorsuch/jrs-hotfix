@@ -216,7 +216,7 @@ Without a baseline nothing of this applies: the package is applied as described 
 jrs-hotfix apply C:\Downloads\hotfix_....zip --war C:\build\jasperserver-pro.war --out C:\build\jasperserver-pro-hotfixed.war
 ```
 
-This touches no server: no service, no snapshot, no rollback. The input is never modified; the output is written beside its record, `<out.war>.jrs-hotfix.json`, which says what was applied, from what, and what every file became. The same merge applies: `scan --war <in.war>` and `merge prepare <package.zip> --war <in.war>` read the site's files from the WAR, and a merge prepared for a WAR is what `apply --war` uses, by itself or with `--merge <mergeId>`.
+This touches no server: no service, no snapshot, no rollback. The input is never modified, and the output is the one file written: what it carries is stated by its own `WEB-INF/internal/jasperserver-pro.properties`, as on a server, and the run's record is under `runs/<runId>/` in the home. The same merge applies: `scan --war <in.war>` and `merge prepare <package.zip> --war <in.war>` read the site's files from the WAR, and a merge prepared for a WAR is what `apply --war` uses, by itself or with `--merge <mergeId>`.
 
 The home is `--home` (or `JRS_HOTFIX_HOME`), else `jrs-hotfix` beside the WAR. The baseline of the release goes into that home as for a server; the hotfix's baseline is written by every `apply --war`, so the next hotfix on the output WAR is compared with it. The WAR is unpacked under `<home>/wars/` while it is worked on, one WAR at a time; that copy may be deleted at any time.
 

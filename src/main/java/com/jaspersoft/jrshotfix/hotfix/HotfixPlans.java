@@ -357,8 +357,7 @@ public final class HotfixPlans {
             + target.war().getFileName()
             + " is read, "
             + target.out().getFileName()
-            + " is written beside its record "
-            + target.sidecar().getFileName());
+            + " is written; the package's files go into the home as the hotfix's baseline");
     List<String> changes = new ArrayList<>(applyChanges(targets));
     changes.addAll(supersededChanges(contents));
     merge.ifPresent(m -> changes.addAll(MergePlans.changes(m)));
