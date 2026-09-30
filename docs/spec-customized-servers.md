@@ -700,7 +700,8 @@ files back byte for byte, the edits taken out and the hotfix applied again. Two 
 run taught: the site's listener must be a class the webapp has, because Tomcat redeploys the
 webapp the moment `web.xml` changes (a class that does not exist took the server to 404
 until the file was put back); and a `web.xml` edit while the server runs is itself an
-outage of a minute or two, which the script now waits for.
+outage of a minute or two, which the script now waits for. The same sequence ran on the
+Linux laptop's installation (`ctlscript`) the same day, 80 checks green.
 
 ## Decided 2026-09-30
 
