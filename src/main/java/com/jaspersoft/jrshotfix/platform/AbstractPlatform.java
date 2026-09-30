@@ -261,15 +261,38 @@ abstract class AbstractPlatform implements Platform {
     return new FromProcesses(found, limit);
   }
 
+  /**
+   * The installation around a running Tomcat's {@code catalina.base}, {@code catalina.home} or
+   * working directory. The Tomcat itself is a layout of its own, so the first hit going up is the
+   * Tomcat; the installation is the directory above it that holds the vendor's {@code buildomatic}
+   * or {@code ctlscript}, when there is one (the bundled installer lays them out that way). A
+   * Tomcat with nothing of the kind above it is its own installation.
+   */
   private Optional<Path> installDirAround(Path start) {
     Path probe = start.toAbsolutePath().normalize();
     for (int level = 0; level <= ANCESTOR_LEVELS && probe != null; level++) {
-      if (detectTomcat(probe).isPresent()) {
+      Optional<TomcatLayout> layout = detectTomcat(probe);
+      if (layout.isPresent()) {
+        Path parent = probe.getParent();
+        if (parent != null
+            && probe.equals(layout.get().tomcatDir())
+            && isInstallationAbove(parent, layout.get().tomcatDir())) {
+          return Optional.of(parent);
+        }
         return Optional.of(probe);
       }
       probe = probe.getParent();
     }
     return Optional.empty();
+  }
+
+  /** True when {@code dir} is the vendor's installation root for the Tomcat under it. */
+  private boolean isInstallationAbove(Path dir, Path tomcat) {
+    boolean vendorFiles =
+        Files.isDirectory(dir.resolve("buildomatic"))
+            || Files.isRegularFile(dir.resolve("ctlscript.sh"))
+            || Files.isRegularFile(dir.resolve("ctlscript.bat"));
+    return vendorFiles && detectTomcat(dir).map(l -> l.tomcatDir().equals(tomcat)).orElse(false);
   }
 
   /** Existing directories under {@code parent} whose name matches {@code glob}. */

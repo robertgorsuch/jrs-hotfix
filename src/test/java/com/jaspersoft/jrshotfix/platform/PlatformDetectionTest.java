@@ -134,12 +134,45 @@ public class PlatformDetectionTest {
 
     InstallScan scan = windows.scanInstallDirs();
 
-    Path tomcat = install.resolve("apache-tomcat").toAbsolutePath().normalize();
-    assertThat(scan.candidates()).first().isEqualTo(tomcat);
-    assertThat(scan.isRunning(tomcat)).isTrue();
+    // the installation, not its Tomcat: catalina.base is one level down and the installation
+    // holds buildomatic (the Linux laptop's install was detected as its apache-tomcat, 2026-09-29)
+    Path root = install.toAbsolutePath().normalize();
+    assertThat(scan.candidates()).first().isEqualTo(root);
+    assertThat(scan.isRunning(root)).isTrue();
     assertThat(scan.processScanLimit())
         .hasValueSatisfying(l -> assertThat(l).contains("1 Java process").contains("elevated"));
     assertThat(windows.candidateInstallDirs()).isEqualTo(scan.candidates());
+  }
+
+  private static Platform scanning(Path install) {
+    return new WindowsPlatform(
+        Platform.Arch.X86_64,
+        new FakeProcessRunner(),
+        new DefaultFileOps(),
+        OperatorPrompt.nonInteractive(),
+        new FakeTomcatProcessFinder(
+            List.of(List.of(FakeTomcatProcessFinder.tomcatUnder(install)))));
+  }
+
+  @Test
+  void should_take_the_parent_of_a_running_tomcat_when_it_holds_the_vendor_control_script(
+      @TempDir Path install) throws IOException {
+    fakeInstall(install, "apache-tomcat", "jasperserver-pro", SERVER_XML);
+    Files.delete(install.resolve("buildomatic"));
+    Files.writeString(install.resolve("ctlscript.sh"), "#!/bin/sh\n", StandardCharsets.UTF_8);
+    assertThat(scanning(install).scanInstallDirs().candidates())
+        .first()
+        .isEqualTo(install.toAbsolutePath().normalize());
+  }
+
+  @Test
+  void should_keep_the_tomcat_itself_when_nothing_above_it_is_an_installation(@TempDir Path install)
+      throws IOException {
+    fakeInstall(install, "apache-tomcat", "jasperserver-pro", SERVER_XML);
+    Files.delete(install.resolve("buildomatic"));
+    assertThat(scanning(install).scanInstallDirs().candidates())
+        .first()
+        .isEqualTo(install.resolve("apache-tomcat").toAbsolutePath().normalize());
   }
 
   @Test
