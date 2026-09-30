@@ -549,8 +549,13 @@ As built (2026-09-30, `WarFile`, `WarSteps`, `Bootstrap.forWar`):
   output WAR, given as the next input, is compared with the hotfix's files.
 - Tested: unit (unpack, assemble, check; the commands over a site's WAR with and without a
   baseline, with a merge prepared by `apply` and by `merge prepare`, the home beside the
-  WAR, the refusals) and acceptance scenario 19 through the shaded jar. Not run against
-  the real pristine WAR beyond a dry run of `scan --war` and `apply --war --plan`.
+  WAR, the refusals) and acceptance scenario 19 through the shaded jar. Run against the
+  real pristine 10.0.0 WAR and the package of 2026-07-30, no server involved: a site WAR
+  (the scheduler filled in, one key added to `jasperreports.properties`), the release
+  baseline added, `scan --war --package` naming the one collision, `apply --war --out`
+  in two minutes with both properties files merged automatically, the output holding
+  5844 entries (5819 less 149 deleted plus 174 added, as the check step counts), the
+  site's key and the vendor's new keys in it, and a 116 KB sidecar with 448 files.
 
 ## 8. Commands and menu
 

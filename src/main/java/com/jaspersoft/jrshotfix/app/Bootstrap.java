@@ -258,6 +258,28 @@ final class Bootstrap {
         URI.create("http://localhost/" + stem));
   }
 
+  /**
+   * The runtime for a command that needs no server: this home's settings when it has them, else the
+   * settings a WAR is worked on with, so {@code baseline add} works in a home made for WARs before
+   * any {@code --war} command has been run there. Nothing is written by this.
+   */
+  HotfixRuntime runtimeOrWarLike() {
+    if (settings.isPresent()) {
+      return runtime();
+    }
+    Settings s = warSettings(home, home.root().resolve("jasperserver-pro.war"));
+    ensureHome();
+    return new HotfixRuntime(
+        home,
+        s,
+        platform,
+        new Ledger(home),
+        new SnapshotStore(home, platform.files(), clock),
+        clock,
+        Sleeper.system(),
+        ServerProbe.http(s.baseUrl()));
+  }
+
   HotfixRuntime runtime() {
     Settings s =
         settings.orElseThrow(

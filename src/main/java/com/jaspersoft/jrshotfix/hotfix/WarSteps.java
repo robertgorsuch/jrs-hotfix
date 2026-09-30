@@ -175,9 +175,10 @@ final class WarSteps {
 
     @Override
     public String detail() {
+      long inWar = in.targets().stream().filter(t -> target.pathOf(t).isPresent()).count();
       return target.temporary()
           + ": the input's entries without the "
-          + in.targets().size()
+          + inWar
           + " the package touches, plus the staged files";
     }
 
