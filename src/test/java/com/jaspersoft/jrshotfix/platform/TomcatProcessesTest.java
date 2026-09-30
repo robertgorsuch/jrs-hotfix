@@ -43,15 +43,13 @@ class TomcatProcessesTest {
             TomcatProcesses.describe(
                 45, "jsvc -Dcatalina.base=" + INSTALL + "/apache-tomcat", "/usr/bin/jsvc"))
         .isPresent();
+    // the wrapper's home is derived from its path on Windows only (WindowsTomcatProcessesTest)
     assertThat(
             TomcatProcesses.describe(
                 46,
                 "",
                 "C:\\Jaspersoft\\jasperreports-server-10.0.0\\apache-tomcat\\bin\\tomcat10.exe"))
-        .hasValueSatisfying(
-            t ->
-                assertThat(t.catalinaHome().map(Path::getFileName).map(Path::toString))
-                    .contains("apache-tomcat"));
+        .isPresent();
   }
 
   @Test
