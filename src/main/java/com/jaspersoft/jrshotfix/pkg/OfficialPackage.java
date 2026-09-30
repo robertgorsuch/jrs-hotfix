@@ -65,6 +65,9 @@ public final class OfficialPackage {
   /** Webapp settings files named in the overwrite warning; the rest is a count. */
   private static final int MAX_NAMED_SETTINGS = 20;
 
+  /** Keys of a merged settings file named in its note. Names only: a value may be a secret. */
+  private static final int MAX_NAMED_KEYS = 10;
+
   // Case-insensitive, and "Product:" as well as "Product Name:": readmes differ in capitalisation.
   private static final Pattern PRODUCT = Pattern.compile("(?i)^Product(?: Name)?:\\s*(.+?)\\s*$");
   private static final Pattern RELEASE = Pattern.compile("(?i)^Release Version:\\s*([0-9.]+)\\s*$");
@@ -290,6 +293,7 @@ public final class OfficialPackage {
     Set<String> added = new LinkedHashSet<>();
     List<Readme> readmes = new ArrayList<>();
     Notes notes = new Notes();
+    Payload payload = new Payload(paths, entries, added, notes);
     MessageDigest whole = sha256();
     try (InputStream in = new DigestInputStream(Files.newInputStream(source), whole);
         ZipInputStream outer = new ZipInputStream(in)) {
@@ -301,21 +305,14 @@ public final class OfficialPackage {
         String name = entry.getName().replace('\\', '/');
         switch (shape.kind(name)) {
           case README -> header = Header.parse(readLines(outer));
-          case WEBAPP_ZIP -> readmes.add(inner(outer, name, webappPrefix, paths, entries, added));
-          case INSTALL_ZIP -> readmes.add(inner(outer, name, "", paths, entries, added));
+          case WEBAPP_ZIP -> readmes.add(inner(outer, name, webappPrefix, payload));
+          case INSTALL_ZIP -> readmes.add(inner(outer, name, "", payload));
           case WEBAPP_FILE -> {
             String under = shape.underWebapp(name);
             if (under.equalsIgnoreCase(README)) {
               treeReadme = Readme.parse(webappPrefix, readLines(outer));
             } else {
-              entries.add(
-                  hashEntry(
-                      outer,
-                      webappPrefix + under,
-                      Optional.empty(),
-                      entry.getName(),
-                      paths,
-                      added));
+              payload.hash(outer, webappPrefix + under, Optional.empty(), entry.getName());
             }
           }
           case IGNORE -> {}
@@ -416,13 +413,7 @@ public final class OfficialPackage {
    * Hashes every file of one inner archive into {@code entries} and returns its parsed readme. The
    * outer stream is wrapped, not closed, so the outer walk continues after it.
    */
-  private static Readme inner(
-      InputStream source,
-      String outerName,
-      String prefix,
-      PackagePaths paths,
-      List<PackageContents.Entry> entries,
-      Set<String> added)
+  private static Readme inner(InputStream source, String outerName, String prefix, Payload payload)
       throws IOException {
     Readme readme = Readme.empty();
     ZipInputStream zip = new ZipInputStream(source);
@@ -436,35 +427,69 @@ public final class OfficialPackage {
         readme = Readme.parse(prefix, readLines(zip));
         continue;
       }
-      entries.add(
-          hashEntry(zip, prefix + name, Optional.of(outerName), entry.getName(), paths, added));
+      payload.hash(zip, prefix + name, Optional.of(outerName), entry.getName());
     }
     return readme;
   }
 
-  /**
-   * Streams one file of the package through a digest, writing nothing, and returns its entry:
-   * {@code replace} when the file exists here now, else {@code add}.
-   */
-  private static PackageContents.Entry hashEntry(
-      InputStream in,
-      String path,
-      Optional<String> source,
-      String entryName,
-      PackagePaths paths,
-      Set<String> added)
-      throws IOException {
-    if (!PackagePaths.pathProblems(path).isEmpty()) {
-      throw unusable(entryName, Optional.empty());
+  /** Where the files of the package are collected while it is read. */
+  private record Payload(
+      PackagePaths paths, List<PackageContents.Entry> entries, Set<String> added, Notes notes) {
+
+    /**
+     * Streams one file of the package through a digest, writing nothing, and adds its entry: {@code
+     * replace} when the file exists here now, else {@code add}. A settings file this server has
+     * values of its own in ({@link SiteSettings}) is planned as the merged file.
+     */
+    void hash(InputStream in, String path, Optional<String> source, String entryName)
+        throws IOException {
+      if (!PackagePaths.pathProblems(path).isEmpty()) {
+        throw unusable(entryName, Optional.empty());
+      }
+      Path target = paths.resolve(path);
+      Action action = Files.isRegularFile(target) ? Action.REPLACE : Action.ADD;
+      MessageDigest md = sha256();
+      Optional<SiteSettings.Merged> merged = Optional.empty();
+      if (action == Action.REPLACE && SiteSettings.holdsSiteValues(path)) {
+        byte[] head = in.readNBytes(SiteSettings.MAX_BYTES + 1);
+        md.update(head);
+        if (head.length <= SiteSettings.MAX_BYTES) {
+          merged = SiteSettings.merge(target, head);
+        }
+      }
+      try (OutputStream digest = new DigestOutputStream(OutputStream.nullOutputStream(), md)) {
+        in.transferTo(digest);
+      }
+      String payload = HexFormat.of().formatHex(md.digest());
+      added.add(path);
+      if (merged.isEmpty()) {
+        entries.add(
+            new PackageContents.Entry(path, action, Optional.of(payload), source, entryName));
+        return;
+      }
+      SiteSettings.Merged m = merged.get();
+      entries.add(
+          new PackageContents.Entry(
+              path, action, Optional.of(m.sha256()), source, entryName, Optional.of(payload)));
+      notes.say(
+          path
+              + " holds values written for this server and is merged, not replaced. Keys whose"
+              + " value here is kept where the package ships another: "
+              + keys(m.kept())
+              + ". Keys only this server has, carried over: "
+              + keys(m.carried())
+              + ". Compare a kept value with the package's if a fix depends on it; the file as it"
+              + " was is in the snapshot");
     }
-    MessageDigest md = sha256();
-    try (OutputStream digest = new DigestOutputStream(OutputStream.nullOutputStream(), md)) {
-      in.transferTo(digest);
+
+    private static String keys(List<String> keys) {
+      if (keys.isEmpty()) {
+        return "none";
+      }
+      List<String> named = keys.size() > MAX_NAMED_KEYS ? keys.subList(0, MAX_NAMED_KEYS) : keys;
+      return String.join(", ", named)
+          + (keys.size() > named.size() ? " and " + (keys.size() - named.size()) + " more" : "");
     }
-    Action action = Files.isRegularFile(paths.resolve(path)) ? Action.REPLACE : Action.ADD;
-    added.add(path);
-    return new PackageContents.Entry(
-        path, action, Optional.of(HexFormat.of().formatHex(md.digest())), source, entryName);
   }
 
   /**
@@ -578,7 +603,8 @@ public final class OfficialPackage {
   private static List<String> configNotes(List<PackageContents.Entry> entries) {
     List<String> paths =
         entries.stream()
-            .filter(e -> e.action() == Action.REPLACE)
+            // a merged file keeps this server's settings and has a note of its own
+            .filter(e -> e.action() == Action.REPLACE && !e.merged())
             .map(PackageContents.Entry::path)
             .filter(OfficialPackage::isSettingsFile)
             .sorted()

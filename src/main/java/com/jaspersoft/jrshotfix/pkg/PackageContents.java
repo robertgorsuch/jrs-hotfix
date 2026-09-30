@@ -48,19 +48,41 @@ public record PackageContents(
     return notes.stream().map(Note::text).toList();
   }
 
-  /** One file: where it lands, what happens, and where its bytes are in the package. */
+  /**
+   * One file: where it lands, what happens, and where its bytes are in the package. {@code sha256}
+   * is the hash of what lands. It is the payload's, except for a settings file merged with this
+   * server's ({@link SiteSettings}): then {@code packageSha256} holds the payload's hash and {@code
+   * sha256} the merged file's.
+   */
   public record Entry(
       String path,
       Action action,
       Optional<String> sha256,
       Optional<String> source,
-      String entryName) {
+      String entryName,
+      Optional<String> packageSha256) {
     public Entry {
       Objects.requireNonNull(path);
       Objects.requireNonNull(action);
       Objects.requireNonNull(sha256);
       Objects.requireNonNull(source);
       Objects.requireNonNull(entryName);
+      Objects.requireNonNull(packageSha256);
+    }
+
+    /** An entry whose payload lands as it is. */
+    public Entry(
+        String path,
+        Action action,
+        Optional<String> sha256,
+        Optional<String> source,
+        String entryName) {
+      this(path, action, sha256, source, entryName, Optional.empty());
+    }
+
+    /** True when what lands is the payload merged with this server's file. */
+    public boolean merged() {
+      return packageSha256.isPresent();
     }
   }
 

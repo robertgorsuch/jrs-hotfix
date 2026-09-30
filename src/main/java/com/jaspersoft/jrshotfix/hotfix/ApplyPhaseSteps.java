@@ -8,10 +8,13 @@ import com.jaspersoft.jrshotfix.event.EventSink;
 import com.jaspersoft.jrshotfix.pkg.Action;
 import com.jaspersoft.jrshotfix.pkg.FileTarget;
 import com.jaspersoft.jrshotfix.pkg.PackageStager;
+import com.jaspersoft.jrshotfix.pkg.SiteSettings;
+import com.jaspersoft.jrshotfix.platform.Durability;
 import com.jaspersoft.jrshotfix.platform.FileOps;
 import com.jaspersoft.jrshotfix.platform.Trees;
 import com.jaspersoft.jrshotfix.snapshot.Snapshot;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,7 +34,10 @@ final class ApplyPhaseSteps {
 
   private ApplyPhaseSteps() {}
 
-  /** Step 3: extract the payload into the run's staging directory and verify its hashes. */
+  /**
+   * Step 3: extract the payload into the run's staging directory, put the merged file in the place
+   * of a settings file this server has values of its own in, and verify every hash.
+   */
   static final class StageFiles extends ApplySteps.ReadOnly {
     /**
      * Staging writes a tree under the run directory, so it is a mutation the runner must
@@ -99,6 +105,12 @@ final class ApplyPhaseSteps {
             path -> in.staged(ctx, wanted.get(path)),
             ctx.cancel());
         for (FileTarget t : wanted.values()) {
+          if (t.entry().merged()) {
+            Optional<StepResult> refused = merge(ctx, t);
+            if (refused.isPresent()) {
+              return refused.get();
+            }
+          }
           Optional<String> actual = FileTarget.hashOf(files, in.staged(ctx, t));
           if (!actual.equals(t.after())) {
             return Failures.recoverable(
@@ -117,6 +129,46 @@ final class ApplyPhaseSteps {
             "check free space under " + in.stagingDir(ctx));
       }
       return StepResult.ok();
+    }
+
+    /**
+     * Puts the merged file in the place of the staged payload of a settings file this server has
+     * values of its own in: the payload must be the one that was planned, and the merge with the
+     * server's file as it is now must give the file that was planned, or the server's file has
+     * changed and the plan no longer holds. The swap then moves the merged file as it moves any
+     * other, and the snapshot holds the server's file for a rollback.
+     */
+    private Optional<StepResult> merge(Context ctx, FileTarget t) throws IOException {
+      Path staged = in.staged(ctx, t);
+      Optional<String> payload = FileTarget.hashOf(rt.files(), staged);
+      if (!payload.equals(t.entry().packageSha256())) {
+        return Optional.of(
+            Failures.recoverable(
+                "staged "
+                    + t.packagePath()
+                    + " hashes to "
+                    + payload.orElse("nothing (not in the package)")
+                    + ", expected "
+                    + t.entry().packageSha256().orElse("?"),
+                "the package changed since it was planned; plan again"));
+      }
+      Optional<byte[]> theirs;
+      try (InputStream file = Files.newInputStream(staged)) {
+        theirs = SiteSettings.bounded(file);
+      }
+      Optional<SiteSettings.Merged> merged =
+          theirs.isEmpty() ? Optional.empty() : SiteSettings.merge(t.target(), theirs.get());
+      if (merged.isEmpty() || !Optional.of(merged.get().sha256()).equals(t.after())) {
+        return Optional.of(
+            Failures.recoverable(
+                t.target()
+                    + " changed since the plan was made, so the file planned from it and the"
+                    + " package's is no longer the one to install",
+                "run the command again; it plans from the file as it is now"));
+      }
+      Files.write(staged, merged.get().bytes());
+      Durability.sync(staged);
+      return Optional.empty();
     }
 
     @Override

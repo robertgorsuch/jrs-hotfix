@@ -247,6 +247,80 @@ class OfficialPackageTest {
                     .doesNotContain("applicationContext-0.xml"));
   }
 
+  static final String QUARTZ = "webapps/jasperserver-pro/WEB-INF/js.quartz.properties";
+
+  /** A package whose webapp archive ships {@code WEB-INF/js.quartz.properties} and a jar. */
+  private PackageContents readWithQuartz(String mine, String theirs) throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    Files.writeString(paths.resolve(QUARTZ), mine, StandardCharsets.ISO_8859_1);
+    Map<String, String> payload = new LinkedHashMap<>();
+    payload.put(Packages.LIB + "foo-1.2.3.jar", "x");
+    payload.put("WEB-INF/js.quartz.properties", theirs);
+    return OfficialPackage.read(
+        packageWith("quartz.zip", payload, null), paths, "jasperserver-pro", files);
+  }
+
+  private static String sha256(String text) throws Exception {
+    return java.util.HexFormat.of()
+        .formatHex(
+            java.security.MessageDigest.getInstance("SHA-256")
+                .digest(text.getBytes(StandardCharsets.ISO_8859_1)));
+  }
+
+  @Test
+  void should_plan_the_merged_file_when_an_installer_written_file_holds_this_servers_values()
+      throws Exception {
+    String theirs = "# scheduler\r\na=1\r\nuri=http://localhost:8080/x\r\nfresh=true\r\n";
+    PackageContents c =
+        readWithQuartz("a=1\nuri=http://reports:8081/x\nmail.host=smtp.example.org\n", theirs);
+    PackageContents.Entry e =
+        c.replaces().stream().filter(r -> r.path().equals(QUARTZ)).findFirst().orElseThrow();
+    // the package's layout and line ends, this server's values
+    assertThat(e.sha256())
+        .contains(
+            sha256(
+                "# scheduler\r\na=1\r\nuri=http://reports:8081/x\r\nfresh=true\r\n\r\n"
+                    + PropertiesMerge.CARRIED_HEADING
+                    + "\r\nmail.host=smtp.example.org\r\n"));
+    assertThat(e.packageSha256()).contains(sha256(theirs));
+    assertThat(c.noteLines())
+        .filteredOn(n -> n.contains("js.quartz.properties"))
+        .singleElement()
+        .satisfies(
+            n ->
+                assertThat(n)
+                    .contains("merged")
+                    .contains("uri")
+                    .contains("mail.host")
+                    // key names only: a value may be a password
+                    .doesNotContain("reports:8081")
+                    .doesNotContain("smtp.example.org"));
+    assertThat(c.noteLines()).noneSatisfy(n -> assertThat(n).contains("are overwritten"));
+  }
+
+  @Test
+  void should_replace_plainly_when_the_installer_written_file_has_the_packages_values()
+      throws Exception {
+    String theirs = "# scheduler\na=1\nuri=http://localhost:8080/x\n";
+    PackageContents c = readWithQuartz("uri=http://localhost:8080/x\na=1\n", theirs);
+    PackageContents.Entry e =
+        c.replaces().stream().filter(r -> r.path().equals(QUARTZ)).findFirst().orElseThrow();
+    assertThat(e.sha256()).contains(sha256(theirs));
+    assertThat(e.packageSha256()).isEmpty();
+    assertThat(c.noteLines()).noneSatisfy(n -> assertThat(n).contains("merged"));
+  }
+
+  @Test
+  void should_add_plainly_when_the_installer_written_file_is_not_on_this_server() throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    Map<String, String> payload = new LinkedHashMap<>();
+    payload.put("WEB-INF/js.quartz.properties", "a=1\n");
+    PackageContents c =
+        OfficialPackage.read(
+            packageWith("fresh.zip", payload, null), paths, "jasperserver-pro", files);
+    assertThat(c.adds()).singleElement().satisfies(e -> assertThat(e.packageSha256()).isEmpty());
+  }
+
   @Test
   void should_skip_a_readme_deletion_that_climbs_out_with_a_note() throws Exception {
     PackagePaths paths = Packages.install(tmp.resolve("jrs"));
