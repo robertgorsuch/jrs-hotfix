@@ -9,6 +9,20 @@ stopped for every change under `WEB-INF`, snapshots what it replaces or deletes 
 a hotfix can be rolled back on its own or as part of a cascade, and resumes or
 rolls back a run interrupted by a crash, reboot or Ctrl-C.
 
+On a customized server it keeps what the site changed: given the vendor's own
+WAR as a baseline, it tells which files the site changed, keeps the ones the
+hotfix does not touch, merges settings files by key and pages and XML by line,
+and leaves what it cannot merge cleanly for you to resolve before the outage
+(see Customized servers). It can also make a hotfixed WAR from a WAR, without
+a server. A library an earlier hotfix left behind in an older version is
+deleted with the next hotfix, and a duplicate that would keep Tomcat from
+starting is refused before anything changes.
+
+The current release is [v0.3.1](https://github.com/robertgorsuch/jrs-hotfix/releases/latest);
+each release page carries the archives, `SHA256SUMS` and the release notes, and
+`docs/releases/` in this repository holds every release's notes. Install is at
+the end of this page.
+
 ## Start
 
 Run `jrs-hotfix` at a terminal to open the menu. The first run detects the
@@ -381,4 +395,6 @@ The release also carries `jrs-hotfix.jar` for a host that already has Java 21:
 `java -jar jrs-hotfix.jar`. To upgrade, unpack the new archive and use it instead of the
 old one; what jrs-hotfix keeps lives under the installation (see Files), not in the archive.
 
-`docs/spec.md` is the design.
+`docs/spec.md` is the design of 0.1; `docs/spec-customized-servers.md` the design of
+0.2 and 0.3, with a section on where the built tool differs from it and why;
+`docs/decisions/` the decisions taken along the way.
