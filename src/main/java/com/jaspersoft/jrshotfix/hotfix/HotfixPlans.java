@@ -87,23 +87,7 @@ public final class HotfixPlans {
    */
   public Plan planApply(ApplyArgs args) {
     Path file = args.packageFile().toAbsolutePath().normalize();
-    if (!Files.isRegularFile(file)) {
-      throw new HotfixException(HotfixException.PRECHECK, file + " does not exist", AS_PUBLISHED);
-    }
-    if (!OfficialPackage.looksOfficial(file)) {
-      throw new HotfixException(
-          HotfixException.UNSUPPORTED, file + OfficialPackage.NEITHER_SHAPE_SHORT, AS_PUBLISHED);
-    }
-    PackageContents contents;
-    try {
-      contents = OfficialPackage.read(file, rt.paths(), rt.settings().webappName(), rt.files());
-    } catch (IOException | UncheckedIOException e) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          "cannot read " + file + ": " + e.getMessage(),
-          "check the download; it must be the ZIP as support published it",
-          e);
-    }
+    PackageContents contents = readPackage(file);
     List<FileTarget> targets = FileTarget.resolve(contents, rt.paths(), rt.files());
     ApplyInput in = new ApplyInput(file, contents, rt.paths(), targets);
     List<String> warnings = new ArrayList<>();
@@ -166,6 +150,35 @@ public final class HotfixPlans {
     }
     return new Plan(
         "hotfix-apply-" + RunIds.next(rt.clock()), steps, summary, PlanFingerprint.of(inputs));
+  }
+
+  /**
+   * Reads an official package against this installation; refuses (exit 2) a file that is absent or
+   * unreadable and (exit 6) one that is not an official package. Writes nothing.
+   */
+  public PackageContents readPackage(Path packageFile) {
+    Path file = packageFile.toAbsolutePath().normalize();
+    if (!Files.isRegularFile(file)) {
+      throw new HotfixException(HotfixException.PRECHECK, file + " does not exist", AS_PUBLISHED);
+    }
+    if (!OfficialPackage.looksOfficial(file)) {
+      throw new HotfixException(
+          HotfixException.UNSUPPORTED, file + OfficialPackage.NEITHER_SHAPE_SHORT, AS_PUBLISHED);
+    }
+    try {
+      return OfficialPackage.read(file, rt.paths(), rt.settings().webappName(), rt.files());
+    } catch (IOException | UncheckedIOException e) {
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          "cannot read " + file + ": " + e.getMessage(),
+          "check the download; it must be the ZIP as support published it",
+          e);
+    }
+  }
+
+  /** The runtime these plans are built over. */
+  public HotfixRuntime runtime() {
+    return rt;
   }
 
   /** Where a file of a package lands, as the plan preview groups them. */
@@ -427,27 +440,7 @@ public final class HotfixPlans {
    * rolled back by this tool.
    */
   public LedgerEntry record(Path packageFile) {
-    Path file = packageFile.toAbsolutePath().normalize();
-    if (!Files.isRegularFile(file)) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          file + " does not exist",
-          "point jrs-hotfix record at the hotfix ZIP as support published it");
-    }
-    if (!OfficialPackage.looksOfficial(file)) {
-      throw new HotfixException(
-          HotfixException.UNSUPPORTED, file + OfficialPackage.NEITHER_SHAPE_SHORT, AS_PUBLISHED);
-    }
-    PackageContents c;
-    try {
-      c = OfficialPackage.read(file, rt.paths(), rt.settings().webappName(), rt.files());
-    } catch (IOException | UncheckedIOException e) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          "cannot read " + file + ": " + e.getMessage(),
-          "check the file, then run again",
-          e);
-    }
+    PackageContents c = readPackage(packageFile);
     Optional<LedgerEntry> existing = rt.ledger().find(c.id());
     if (existing.isPresent()) {
       LedgerEntry h = existing.get();

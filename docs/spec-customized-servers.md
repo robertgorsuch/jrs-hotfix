@@ -186,6 +186,26 @@ Without a release baseline the tool cannot say what the site changed. It then be
 0.1 with two differences: installer-written files are still merged (section 4.4, which
 needs no base), and the warning names the command that would enable the rest.
 
+As built (2026-09-30, `BaselineStore`, `BaseView`):
+
+- A manifest row also holds the hash of the file with line ends normalised (`textSha256`),
+  for the text classes X, P, T and G. It is what lets a script or stylesheet, which has no
+  payload, be compared without its line ends (section 3).
+- A hotfix manifest also holds `deleted`: every path and glob the package's readmes list
+  for deletion. Seen through the hotfix, a release file its readme deletes is absent, so
+  the scan does not report it as removed by the site.
+- The 95 percent test is made through the hotfix: a library the hotfix ships is compared
+  with the hotfix's hash, and one its readme deletes is not expected. Without that, a
+  cumulative hotfix that replaces a good part of `WEB-INF/lib` would make every release
+  baseline look like another release.
+- The build the webapp states selects the base. It must be a release baseline's build, or a
+  hotfix baseline's; any other build has no base, and `scan` exits 2 naming
+  `baseline add <package.zip>`.
+- Measured on the JRS 10.0.0 PRO on this machine: the release baseline has 5819 files,
+  1093 of them mergeable and kept, five installer-written as listed in 4.4; the baseline
+  of the package of 2026-07-30 has 299 files under the webapp, 9 of them mergeable. Adding
+  each takes about 20 seconds.
+
 ## 3. Scan
 
 `jrs-hotfix scan [--package <package.zip>]` is read-only and answers the diagram's first
@@ -216,6 +236,25 @@ diagram's collision test:
 
 Line endings are normalised to LF before comparison for text classes, so a file saved by
 a Windows editor is not a customization.
+
+As built (2026-09-30, `Scan`, `jrs-hotfix scan`):
+
+- A class G file the vendor ships and the site changed is listed by path as `CHANGED`, with
+  its class beside it: it is the file the package will overwrite, and a count would hide
+  it. `GENERATED` counts only files the vendor does not ship: anything under
+  `WEB-INF/logs/`, and scripts or stylesheets the base does not have.
+- A file the installer writes whole, which the vendor's WAR therefore does not hold
+  (`WEB-INF/classes/keystore.init.properties`), is `INSTALLER`, not `ADDED`.
+- The verdict table has three more rows than the design's: `new in the package` (neither
+  the base nor the server has the file), `removed by the site` with the package shipping
+  the base's copy (it stays removed), and `installer-written` (section 4.4).
+- A class G or B file that both changed is a collision the package wins: the row's action
+  is "replace (the site's change is lost)".
+- Measured on the JRS 10.0.0 PRO on this machine, with the hotfix of 2026-07-30 applied:
+  `customized: 1 changed, 4 added, 0 removed` (`js.config.properties`, a backup copy of
+  it, `iijdbc.jar`, `actian-chart-customizers.jar`, and `keystore.init.properties` before
+  the rule above). The scan takes about 15 seconds once the files are in the file cache
+  and 100 seconds when they are not.
 
 ## 4. Merge
 

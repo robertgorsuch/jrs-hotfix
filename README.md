@@ -109,6 +109,38 @@ Every other `.xml` and `.properties` file the package ships is replaced, and
 the plan names the ones in the webapp: settings you changed in them must be
 applied again.
 
+## Customized servers
+
+jrs-hotfix can tell what a site changed in the webapp, given the vendor's own
+files to compare with. They are kept in the home as baselines:
+
+```
+jrs-hotfix baseline add <jasperserver-pro.war>   the release as the vendor shipped it
+jrs-hotfix baseline add <package.zip>            a hotfix that is on the server
+jrs-hotfix baseline list
+jrs-hotfix baseline remove <id>
+```
+
+The WAR is the one the server was installed from (the directory that holds it,
+or an unpacked copy, will do). It is read as a stream; the baseline keeps a hash
+of every file and the content of the files that can be merged: settings, XML
+and pages. When a hotfix is on the server, its package is needed too, because
+the files it replaced are the vendor's and not the site's.
+
+`jrs-hotfix scan` compares every file of the webapp with the baseline and
+changes nothing. Its first line is the answer, `vanilla: no vendor file was
+changed` or `customized: N changed, M added, K removed`, and the files follow,
+each with its class: `X` reviewed XML, `P` properties, `T` pages, `G` scripts
+and stylesheets, `B` binary. Files that differ in line ends only are equal.
+Files the installer fills in for one server are listed as `INSTALLER` and are
+not customizations; logs and built scripts are counted, not listed; a deployed
+`applicationContext-externalAuth*.xml` is listed under its own heading. Exit 0
+either way, 2 when there is no baseline that fits this installation.
+
+`jrs-hotfix scan --package <package.zip>` adds what the package would meet:
+for each file it ships, whether only the vendor changed it (replaced), only the
+site (kept), or both (a collision).
+
 ## Rollback
 
 `jrs-hotfix rollback <id>` restores a hotfix's snapshot: replaced files come

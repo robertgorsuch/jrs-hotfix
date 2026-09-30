@@ -49,6 +49,16 @@ public record Home(Path root) {
     return root.resolve("snapshots");
   }
 
+  /** The vendor's files this installation is compared with, one directory per baseline. */
+  public Path baselines() {
+    return root.resolve("baselines");
+  }
+
+  /** The merge workspaces, one directory per merge. */
+  public Path merges() {
+    return root.resolve("merges");
+  }
+
   public Path nativeTemp() {
     return root.resolve("tmp");
   }
