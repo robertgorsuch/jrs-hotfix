@@ -28,10 +28,10 @@ import java.util.Set;
 /**
  * The steps of an apply whose target is a WAR (0.2 design, section 7): the input WAR is never
  * modified, the hotfixed WAR is written beside the output path and renamed only once checked, and
- * there is no ledger entry (a WAR has no server to be the inventory of): the output's own build
- * file and the hotfix baseline in the home say what it carries. Invariants: every step re-checks
- * the state on disk before it acts, so a resumed run converges; the only files written outside the
- * home are the output and its temporary name; there is no service, no snapshot and no rollback.
+ * there is no undo (a WAR has no server to put back): the output's own build file and the hotfix
+ * baseline in the home say what it carries. Invariants: every step re-checks the state on disk
+ * before it acts, so a resumed run converges; the only files written outside the home are the
+ * output and its temporary name; there is no service, no snapshot and no rollback.
  */
 final class WarSteps {
 

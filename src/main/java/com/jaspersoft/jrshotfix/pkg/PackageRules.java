@@ -227,11 +227,11 @@ final class PackageRules {
                             + ": Tomcat refuses to deploy a webapp with two fragments of one"
                             + " name, so the older one must go first. "
                             + (policy.delete()
-                                ? "Neither the ledger nor a baseline knows it as the vendor's:"
-                                    + " if an earlier hotfix brought it, `jrs-hotfix record` that"
-                                    + " hotfix's package or `jrs-hotfix baseline add` it, and the"
-                                    + " jar is deleted as superseded; if it is this site's own,"
-                                    + " remove it by hand"
+                                ? "Neither the latest apply nor a baseline knows it as the"
+                                    + " vendor's: if an earlier hotfix brought it, `jrs-hotfix"
+                                    + " baseline add` that hotfix's package, and the jar is"
+                                    + " deleted as superseded; if it is this site's own, remove it"
+                                    + " by hand"
                                 : "--keep-superseded would leave it; run without, or remove it"
                                     + " by hand")));
       }
@@ -245,7 +245,7 @@ final class PackageRules {
               + (known.size() == 1 ? "is" : "are")
               + " deleted as superseded: "
               + String.join(", ", known)
-              + "; the ledger or a baseline knows "
+              + "; the latest apply or a baseline knows "
               + (known.size() == 1 ? "it" : "them")
               + " as the vendor's, and a rollback puts "
               + (known.size() == 1 ? "it" : "them")
@@ -259,7 +259,7 @@ final class PackageRules {
               + String.join(", ", unknown)
               + "; "
               + (policy.delete()
-                  ? "neither the ledger nor a baseline knows "
+                  ? "neither the latest apply nor a baseline knows "
                       + (unknown.size() == 1 ? "it" : "them")
                       + " as the vendor's, so nothing is deleted"
                   : "left as --keep-superseded asks")

@@ -20,7 +20,7 @@ public final class GlobalOptions {
       scope = ScopeType.INHERIT,
       paramLabel = "<dir>",
       description =
-          "jrs-hotfix home: settings, ledger, snapshots, runs and logs live here (default:"
+          "jrs-hotfix home: settings, the undo, runs and logs live here (default:"
               + " $JRS_HOTFIX_HOME, else <installDir>/jrs-hotfix).")
   Path home;
 

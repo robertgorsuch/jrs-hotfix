@@ -96,7 +96,7 @@ class CustomizedServerTest {
       assertThat(read(webapp, "WEB-INF/jsp/site.jsp")).isEqualTo("<p>ours</p>\n");
       assertThat(read(webapp, Wars.WEB_XML)).contains(">main2<");
       assertThat(read(webapp, Packages.LIB + "foo-1.2.3.jar")).isEqualTo("patched foo");
-      assertThat(f.listRow(SiteFixture.HOTFIX_ID)).contains("INSTALLED");
+      assertThat(f.undoable()).contains(SiteFixture.HOTFIX_ID);
       assertThat(f.tomcatRunning()).isTrue();
       // the hotfix is the vendor's level now: what the site changed is still what differs
       assertThat(f.cli.run("scan").assertExit(0).stdout())
@@ -106,7 +106,7 @@ class CustomizedServerTest {
   }
 
   @Test
-  void s11_should_notice_a_hotfix_applied_by_hand_when_the_webapp_states_a_newer_build()
+  void s11_should_ask_for_the_baseline_of_a_hotfix_applied_by_hand_when_it_compares_files()
       throws Exception {
     try (Fixture f = Fixture.create(tmp)) {
       Path webapp = install(f);
@@ -117,9 +117,11 @@ class CustomizedServerTest {
       payload.put(Wars.STAMPS, Wars.stamps("20260830", "0100"));
       Path next = hotfix("next.zip", "20260830_0100", payload, null);
 
+      // the server is simply at 20260815_0000, older than the package: nothing to record
       Cli.Result plan = f.cli.run("apply", next.toString(), "--plan").assertExit(0);
       assertThat(plan.stdout())
-          .contains("a hotfix with build 20260815_0000 was applied outside jrs-hotfix");
+          .doesNotContain("will be refused")
+          .doesNotContain("jrs-hotfix record");
       assertThat(f.cli.run("list").assertExit(0).stdout()).contains("build 20260815_0000");
 
       // with a baseline the tool must know that hotfix's files before it compares anything
@@ -206,7 +208,7 @@ class CustomizedServerTest {
       assertThat(f.cli.run("verify", zip.toString()).assertExit(2).stdout())
           .contains("merged by jrs-hotfix with this site's file");
 
-      f.cli.run("rollback", SiteFixture.HOTFIX_ID, "--yes").assertExit(0);
+      f.cli.run("rollback", "--yes").assertExit(0);
       assertThat(read(webapp, Wars.WEB_XML)).isEqualTo(siteWeb);
       assertThat(read(webapp, Wars.LOGIN)).isEqualTo(siteLogin);
       assertThat(read(webapp, Wars.SECURITY)).isEqualTo(vendor(Wars.SECURITY));
@@ -227,7 +229,7 @@ class CustomizedServerTest {
           .isEqualTo(
               "# scheduler\nreport.scheduler.web.deployment.uri=http://reports:8081/x\nnew.key=1\n");
       assertThat(read(webapp, Wars.CONTAINER)).isEqualTo(container);
-      f.cli.run("rollback", SiteFixture.HOTFIX_ID, "--yes").assertExit(0);
+      f.cli.run("rollback", "--yes").assertExit(0);
       f.cli.run("runs", "prune", "--older-than", "0").assertExit(0);
 
       // with one: the same result, through the merge
@@ -311,7 +313,7 @@ class CustomizedServerTest {
       assertThat(read(webapp, Wars.CONTEXT)).isEqualTo(siteContext);
       assertThat(read(webapp, Wars.WEB_XML)).contains(">main2<");
       assertThat(f.pendingRunIds()).isEmpty();
-      assertThat(f.listRow(SiteFixture.HOTFIX_ID)).contains("INSTALLED");
+      assertThat(f.undoable()).contains(SiteFixture.HOTFIX_ID);
       assertThat(f.tomcatRunning()).as("started by the resume").isTrue();
     }
   }

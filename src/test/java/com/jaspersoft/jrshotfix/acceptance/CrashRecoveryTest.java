@@ -14,7 +14,7 @@ import org.junit.jupiter.api.io.TempDir;
  * Scenario 5: a run killed by the operating system part way, then resumed or rolled back from the
  * journal by a new process. Invariants: the kill is real (the JVM is gone and leaves its lock file
  * behind); a pending run blocks a new mutating command with exit 8; recovery leaves the files and
- * the ledger as a completed or a never-started run would.
+ * the undo as a completed or a never-started run would.
  */
 class CrashRecoveryTest {
 
@@ -39,7 +39,7 @@ class CrashRecoveryTest {
       assertThat(f.target(LIB + "bar-0.9.jar")).doesNotExist();
       assertThat(read(f, "buildomatic/lib/tool-2.0.jar")).isEqualTo("patched tool");
       assertThat(f.pendingRunIds()).isEmpty();
-      assertThat(f.listRow(STANDARD_ID)).contains("INSTALLED");
+      assertThat(f.undoable()).contains(STANDARD_ID);
       assertThat(f.tomcatRunning()).as("started by the resume").isTrue();
     }
   }
@@ -67,17 +67,17 @@ class CrashRecoveryTest {
   }
 
   @Test
-  void should_resume_the_record_step_when_killed_after_the_swap() throws Exception {
+  void should_resume_the_promote_step_when_killed_after_the_swap() throws Exception {
     try (Fixture f = Fixture.create(tmp)) {
-      Crash.kill(Crash.startAndPauseAt(f, "record-installed"));
+      Crash.kill(Crash.startAndPauseAt(f, "promote-undo"));
       assertThat(read(f, LIB + "foo-1.2.3.jar")).isEqualTo("patched foo");
-      assertThat(f.tomcatRunning()).as("started before the record step").isTrue();
+      assertThat(f.tomcatRunning()).as("started before the promote step").isTrue();
       assertThat(f.cli.run("list").assertExit(0).stdout()).doesNotContain(STANDARD_ID);
 
       f.cli.run("runs", "resume", f.pendingRunId(), "--yes").assertExit(0);
 
       assertThat(f.pendingRunIds()).isEmpty();
-      assertThat(f.listRow(STANDARD_ID)).contains("INSTALLED");
+      assertThat(f.undoable()).contains(STANDARD_ID);
       assertThat(read(f, LIB + "foo-1.2.3.jar")).isEqualTo("patched foo");
     }
   }

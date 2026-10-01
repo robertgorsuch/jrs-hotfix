@@ -5,10 +5,10 @@ import static java.util.Objects.requireNonNull;
 import java.nio.file.Path;
 
 /**
- * A snapshot on disk: {@code snapshots/<runId>/<stepId>/} holding {@code manifest.json} and the
- * {@code payload/} tree (spec §5.6). Invariants: {@code runId} and {@code stepId} equal the
- * manifest's; {@link #dir()} is absolute; the snapshot is complete, because the store writes the
- * manifest last and never lists a directory without one.
+ * A snapshot on disk: {@code runs/<runId>/<stepId>/}, or {@code undo/}, holding {@code
+ * manifest.json} and the {@code payload/} tree (spec §5.6). Invariants: {@code runId} and {@code
+ * stepId} equal the manifest's; {@link #dir()} is absolute; the snapshot is complete, because the
+ * store writes the manifest last and never lists a directory without one.
  */
 public record Snapshot(String runId, String stepId, Path dir, SnapshotManifest manifest) {
 

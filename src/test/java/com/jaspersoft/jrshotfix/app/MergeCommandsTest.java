@@ -109,7 +109,7 @@ class MergeCommandsTest {
     assertThat(f.out()).contains("merges removed      none");
 
     // a rollback brings the site's files back
-    assertThat(f.run("rollback", SiteFixture.HOTFIX_ID, "--yes")).isEqualTo(0);
+    assertThat(f.run("rollback", "--yes")).isEqualTo(0);
     assertThat(s.read(Wars.WEB_XML)).contains(">60<").doesNotContain("main2");
     assertThat(s.read(Wars.SECURITY)).contains("allow.list=a,b,c").contains("max.upload=10");
     assertThat(f.run("scan")).isEqualTo(0);

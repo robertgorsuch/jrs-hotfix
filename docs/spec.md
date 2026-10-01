@@ -2,6 +2,10 @@
 
 Design, 2026-09-28. Status: approved for planning.
 
+> **0.6.0:** the ledger (sections 3, 4.1 step 8, 4.2 and 4.3) is gone. The build the webapp
+> states is the inventory, and one level of undo, `undo/`, replaces `ledger.json`,
+> `snapshots/`, `record`, `forget` and `--cascade`. See `docs/spec-no-ledger.md`.
+
 ## Problem
 
 jrsctl (final release v2.3.0) does five jobs in one tool: hotfixes, customizations,

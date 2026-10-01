@@ -35,10 +35,7 @@ class ScenarioTest {
     try (Fixture f = Fixture.create(tmp)) {
       Cli.Result r = f.cli.run("apply", f.pkg().toString(), "--yes").assertExit(0);
 
-      assertThat(r.stdout())
-          .contains("preflight")
-          .contains("record-installed")
-          .contains(STANDARD_ID);
+      assertThat(r.stdout()).contains("preflight").contains("promote-undo").contains(STANDARD_ID);
       assertThat(read(f, LIB + "foo-1.2.3.jar")).isEqualTo("patched foo");
       assertThat(read(f, LIB + "new-1.0.jar")).isEqualTo("brand new");
       assertThat(f.target(LIB + "bar-0.9.jar")).doesNotExist();
@@ -48,7 +45,7 @@ class ScenarioTest {
       assertThat(f.home.resolve("runs"))
           .isDirectoryContaining(p -> Files.exists(p.resolve("notes.txt")));
       assertThat(f.pendingRunIds()).isEmpty();
-      assertThat(f.listRow(STANDARD_ID)).contains("INSTALLED").contains("tool");
+      assertThat(f.undoable()).contains(STANDARD_ID);
       assertThat(f.tomcatRunning()).as("service started again").isTrue();
     }
   }
@@ -66,8 +63,8 @@ class ScenarioTest {
       assertThat(read(f, LIB + "foo-1.2.3.jar")).isEqualTo("later foo");
       assertThat(read(f, LIB + "new-1.0.jar")).isEqualTo("brand new");
       assertThat(f.target(LIB + "foo-1.0.0.jar")).doesNotExist();
-      assertThat(f.listRow(STANDARD_ID)).contains("INSTALLED");
-      assertThat(f.listRow(Packages.laterId())).contains("INSTALLED");
+      // one level of undo: the later apply is the one to undo
+      assertThat(f.undoable()).contains(Packages.laterId());
     }
   }
 
@@ -76,50 +73,53 @@ class ScenarioTest {
     try (Fixture f = Fixture.create(tmp)) {
       f.cli.run("apply", f.pkg().toString(), "--yes").assertExit(0);
 
-      f.cli.run("rollback", STANDARD_ID, "--yes").assertExit(0);
+      f.cli.run("rollback", "--yes").assertExit(0);
 
       assertThat(read(f, LIB + "foo-1.2.3.jar")).isEqualTo("old foo");
       assertThat(f.target(LIB + "new-1.0.jar")).doesNotExist();
       assertThat(read(f, LIB + "bar-0.9.jar")).isEqualTo("bar");
       assertThat(read(f, LIB + "foo-1.0.0.jar")).isEqualTo("older foo left by an earlier hotfix");
       assertThat(read(f, "buildomatic/lib/tool-2.0.jar")).isEqualTo("old tool");
-      assertThat(f.listRow(STANDARD_ID)).contains("ROLLED_BACK");
+      assertThat(f.undoable()).contains("nothing");
+      // the snapshot was kept for that one rollback only
+      assertThat(f.home.resolve("undo")).doesNotExist();
     }
   }
 
   @Test
-  void s4_should_refuse_an_older_rollback_when_a_later_hotfix_owns_its_files_unless_cascade()
-      throws Exception {
+  void s4_should_undo_only_the_latest_hotfix_and_then_have_nothing_to_undo() throws Exception {
     try (Fixture f = Fixture.create(tmp)) {
       f.cli.run("apply", f.pkg().toString(), "--yes").assertExit(0);
       f.cli.run("apply", f.laterPkg().toString(), "--yes").assertExit(0);
 
-      Cli.Result refused = f.cli.run("rollback", STANDARD_ID, "--yes").assertExit(2);
-      assertThat(refused.stderr()).contains(Packages.laterId());
-      assertThat(read(f, LIB + "foo-1.2.3.jar")).isEqualTo("later foo");
+      f.cli.run("rollback", "--yes").assertExit(0);
 
-      f.cli.run("rollback", STANDARD_ID, "--cascade", "--yes").assertExit(0);
-
-      assertThat(read(f, LIB + "foo-1.2.3.jar")).isEqualTo("old foo");
-      assertThat(f.target(LIB + "new-1.0.jar")).doesNotExist();
-      assertThat(read(f, LIB + "bar-0.9.jar")).isEqualTo("bar");
-      assertThat(read(f, "buildomatic/lib/tool-2.0.jar")).isEqualTo("old tool");
-      assertThat(f.listRow(STANDARD_ID)).contains("ROLLED_BACK");
-      assertThat(f.listRow(Packages.laterId())).contains("ROLLED_BACK");
+      assertThat(read(f, LIB + "foo-1.2.3.jar")).isEqualTo("patched foo");
+      assertThat(read(f, LIB + "new-1.0.jar")).isEqualTo("brand new");
+      assertThat(f.undoable()).contains("nothing");
+      Cli.Result refused = f.cli.run("rollback", "--yes").assertExit(2);
+      assertThat(refused.stderr()).contains("nothing to undo");
+      assertThat(read(f, LIB + "foo-1.2.3.jar")).isEqualTo("patched foo");
     }
   }
 
   @Test
-  void s6_should_record_a_hand_applied_package_and_refuse_to_roll_it_back_when_asked()
+  void s6_should_refuse_to_undo_a_changed_server_and_apply_again_after_a_redeploy()
       throws Exception {
     try (Fixture f = Fixture.create(tmp)) {
-      f.cli.run("record", f.pkg().toString(), "--yes").assertExit(0);
+      f.cli.run("apply", f.pkg().toString(), "--yes").assertExit(0);
+      // the operator redeploys the webapp: its jars are the release's again
+      Files.writeString(f.target(LIB + "foo-1.2.3.jar"), "old foo");
 
-      assertThat(f.listRow(STANDARD_ID)).contains("INSTALLED").contains("recorded");
-      Cli.Result refused = f.cli.run("rollback", STANDARD_ID, "--yes").assertExit(2);
-      assertThat(refused.stdout() + refused.stderr()).contains("by hand");
-      assertThat(read(f, LIB + "foo-1.2.3.jar")).isEqualTo("old foo");
-      assertThat(f.listRow(STANDARD_ID)).contains("INSTALLED");
+      Cli.Result refused = f.cli.run("rollback", "--yes").assertExit(2);
+      assertThat(refused.stdout() + refused.stderr())
+          .contains("changed since " + STANDARD_ID)
+          .contains("foo-1.2.3.jar");
+      assertThat(f.tomcatRunning()).as("refused before the outage").isTrue();
+
+      f.cli.run("apply", f.pkg().toString(), "--yes").assertExit(0);
+      assertThat(read(f, LIB + "foo-1.2.3.jar")).isEqualTo("patched foo");
+      assertThat(f.undoable()).contains(STANDARD_ID);
     }
   }
 

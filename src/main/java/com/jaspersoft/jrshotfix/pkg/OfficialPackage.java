@@ -109,8 +109,8 @@ public final class OfficialPackage {
   /**
    * What the reader does with a library under {@code WEB-INF/lib} that is an older version of one
    * the package brings and that no readme names (0.2 design, section 6). {@code vendors} says
-   * whether a webapp path is known to be the vendor's, from a baseline or a ledger entry: only such
-   * a library is deleted, so one the site added never is. With {@code delete} false, or for a
+   * whether a webapp path is known to be the vendor's, from a baseline or the latest apply: only
+   * such a library is deleted, so one the site added never is. With {@code delete} false, or for a
    * library not known, the library is reported and left.
    */
   public record Superseded(Predicate<String> vendors, boolean delete) {

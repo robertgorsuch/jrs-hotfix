@@ -26,7 +26,7 @@ class VerifyTest {
       assertThat(r.replaces()).hasSize(2);
       assertThat(r.deletes()).hasSize(2);
       assertThat(r.notes()).isNotEmpty();
-      assertThat(f.ledger.all()).isEmpty();
+      assertThat(f.undo.read()).isEmpty();
       assertThat(f.home.runs()).doesNotExist();
     }
   }
@@ -39,15 +39,15 @@ class VerifyTest {
       assertThat(r.readable()).isTrue();
       assertThat(r.applicable()).isFalse();
       assertThat(r.ok()).isFalse();
-      // said once: the ledger knows it, so the files being in place is no second finding
+      // said once: every file is in place, the one finding where the webapp states no build
       assertThat(r.problems())
           .singleElement()
-          .satisfies(p -> assertThat(p).contains("already installed"));
+          .satisfies(p -> assertThat(p).contains("already on this server"));
     }
   }
 
   @Test
-  void should_name_record_when_the_hotfix_was_applied_by_hand() throws Exception {
+  void should_say_already_on_this_server_when_the_hotfix_was_applied_by_hand() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       PreflightTest.applyByHand(f);
       HotfixPlans.VerifyReport r = f.plans.verify(f.packageFile());
@@ -56,10 +56,7 @@ class VerifyTest {
       assertThat(r.problems())
           .singleElement()
           .satisfies(
-              p ->
-                  assertThat(p)
-                      .contains("is already on this server")
-                      .contains("jrs-hotfix record"));
+              p -> assertThat(p).contains("is already on this server").doesNotContain("record"));
     }
   }
 

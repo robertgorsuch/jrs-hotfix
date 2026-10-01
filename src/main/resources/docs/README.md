@@ -1,13 +1,13 @@
 # jrs-hotfix
 
-jrs-hotfix applies, verifies, records and rolls back official Jaspersoft cumulative
+jrs-hotfix applies, verifies and rolls back official Jaspersoft cumulative
 hotfix packages on JasperReports Server 10.x running under Tomcat, on Windows and
 Linux. The only input it reads is the ZIP exactly as Jaspersoft Support publishes
 it: a `readme.txt` plus one or both of `jasperserver[-pro].zip` (paths under the
 webapp) and `js-install.zip` (paths under the installation). It keeps the service
 stopped for every change under `WEB-INF`, snapshots what it replaces or deletes so
-a hotfix can be rolled back on its own or as part of a cascade, and resumes or
-rolls back a run interrupted by a crash, reboot or Ctrl-C.
+the latest hotfix can be taken out again, and resumes or rolls back a run
+interrupted by a crash, reboot or Ctrl-C.
 
 ## Start
 
@@ -23,7 +23,7 @@ about to run, so using the menu also teaches the scripted form.
 jrs-hotfix                                   menu at a terminal; usage otherwise
 jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--keep-superseded] [--plan] [--yes]
 jrs-hotfix apply <package.zip> --war <in.war> --out <out.war> [--merge <mergeId>]
-jrs-hotfix rollback <id> [--cascade] [--plan] [--yes]
+jrs-hotfix rollback [--plan] [--yes]
 jrs-hotfix verify <package.zip>
 jrs-hotfix scan [--package <package.zip>] [--war <file.war>]
 jrs-hotfix baseline [list | add <war | dir | package.zip> | remove <id>]
@@ -32,8 +32,6 @@ jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war>
                   | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
                   | discard <mergeId>]
 jrs-hotfix list
-jrs-hotfix record <package.zip>
-jrs-hotfix forget <id>
 jrs-hotfix runs [list | show <id> | resume <id> | rollback <id> | prune --older-than <days> [--include-failed]]
 jrs-hotfix settings [show | set <key> <value> | detect]
 jrs-hotfix --docs | --version | --help
@@ -47,12 +45,13 @@ would otherwise be needed.
 
 ## What apply does
 
-1. preflight - the installed release and edition match the readme; the hotfix
-   is not on the server already, by the ledger, by the build the webapp states
-   or by its files; there is free space for staging and the snapshot; the
-   webapp and install tree are writable; no run is pending.
+1. preflight - the installed release and edition match the readme; the build
+   the webapp states is older than the package's (when it states none, the
+   package's files are not all in place already); there is free space for
+   staging and the snapshot; the webapp and install tree are writable; no run
+   is pending.
 2. snapshot - copy every file the package will replace or delete into
-   `snapshots/<runId>`, with hashes.
+   `runs/<runId>/snapshot`, with hashes.
 3. stage - extract the payload into `runs/<runId>/staging`, put the merged
    files in the place of the package's copies, and hash every file.
 4. stop - stop the service and wait for its JVM to end within the timeout;
@@ -65,19 +64,22 @@ would otherwise be needed.
 7. start - start the service, the companion database first when the host has
    one.
 8. wait - poll for the server to answer, capped.
-9. record - write the ledger entry `INSTALLED` with the file list, and the
-   package's files as the hotfix's baseline; remove the staging directory.
+9. keep the undo - the snapshot, with a record of every file the hotfix wrote
+   or deleted, becomes `undo/` in the home, replacing the previous one; the
+   package's files become the hotfix's baseline; remove the staging directory.
 
 The service is always stopped for the swap.
 
-The ledger lives in the home, beside the installation, not in the webapp. After
-the webapp is redeployed from a WAR, the ledger still lists the hotfixes it had;
-preflight notices (the webapp states an older build than the ledger's newest
-entry) and refuses. `jrs-hotfix forget <id>` takes such an entry out.
+The packages are cumulative, so the build the webapp states about itself
+(`WEB-INF/internal/jasperserver-pro.properties`) says what is installed,
+whoever installed it; jrs-hotfix keeps no list of hotfixes beside it. A
+package of that build is refused as installed already, and one older than it
+as taking the server back (exit 2). `jrs-hotfix list` shows the build and what
+`rollback` would undo.
 
 A library under `WEB-INF/lib` that is an older version of one the package
 brings, and that no readme list names, is deleted as superseded when the
-ledger or a baseline knows it as the vendor's; a rollback puts it back, and
+latest apply or a baseline knows it as the vendor's; a rollback puts it back, and
 `--keep-superseded` leaves it. One nothing knows may be the site's: it is
 reported and left.
 
@@ -138,15 +140,13 @@ unless `--home` says otherwise. `scan --war` and
 
 ## Rollback
 
-`jrs-hotfix rollback <id>` restores a hotfix's snapshot: replaced files come
+`jrs-hotfix rollback` undoes the latest apply, from `undo/`: replaced files come
 back, files the hotfix added are removed, and files it deleted are restored.
-Rollback is last-in-first-out: if a newer installed hotfix owns any of the same
-files, rollback is refused with the blocking ids unless `--cascade` is given,
-which rolls the blocking hotfixes back newest first, then the one asked for.
-Restore is per file and idempotent, so a crash mid-restore resumes cleanly. The
-JSP cache is removed after the restore, as it is after a swap. An entry that
-was recorded (a hotfix applied by hand) has no snapshot and cannot be rolled
-back by this tool.
+There is one level of undo: the rollback uses it up and the next apply replaces
+it. Before the service is stopped every file is checked against what the apply
+left; if the server changed since, the rollback is refused (exit 2) and names
+the files. Restore is per file and idempotent, so a crash mid-restore resumes
+cleanly. The JSP cache is removed after the restore, as it is after a swap.
 
 ## Manual steps
 
@@ -172,10 +172,11 @@ printed in the plan preview, printed again after the run finishes, and saved to
 
 A run whose journal has no terminal state blocks every mutating command with
 exit 8 until `jrs-hotfix runs resume <id>` finishes it or
-`jrs-hotfix runs rollback <id>` undoes it; the menu's entry 7 offers both first.
-Its snapshot lives under `snapshots/<runId>` in the home (see Files below) and is
-never pruned while the hotfix it belongs to is installed; the snapshot of a run
-that failed with exit 4 is kept too, unless `runs prune --include-failed`.
+`jrs-hotfix runs rollback <id>` undoes it; the menu's entry 6 offers both first.
+A run's snapshot lives in its run directory while the run lasts (see Files
+below): an apply's becomes the undo, any other is deleted when the run ends. A
+run that failed with exit 4 keeps its snapshot until `runs prune
+--include-failed`.
 `jrs-hotfix runs show <id>` prints the run's record, every step transition, and
 the stored plan's steps, so you can see exactly where it stopped.
 
@@ -194,7 +195,6 @@ Everything jrs-hotfix keeps lives under its home, `<installDir>/jrs-hotfix/`
 
 ```
 settings.json
-ledger.json
 lock                          pid + start time of the running command
 runs/<runId>/run.json         the run's record: operation, start, end, state, exit code
 runs/<runId>/plan.json        the fingerprinted plan as built
@@ -203,10 +203,11 @@ runs/<runId>/run.log
 runs/<runId>/notes.txt        the readme's manual steps for this package
 runs/<runId>/staging/         payload extracted before the outage; removed at the end
 runs/<runId>/stop-service.stopped   marker: this run stopped the service
-snapshots/<runId>/snapshot/manifest.json              apply: the files before the hotfix
-snapshots/<runId>/snapshot/payload/...                replaced and deleted files, at their relative paths
-snapshots/<rollbackRunId>/pre-rollback-<id>/manifest.json   rollback: the files before the rollback
-snapshots/<rollbackRunId>/pre-rollback-<id>/payload/...
+runs/<runId>/<step>/manifest.json   the run's snapshot while it runs (snapshot/, pre-rollback-<id>/)
+runs/<runId>/<step>/payload/...     replaced and deleted files, at their relative paths
+undo/undo.json                what the latest apply did: every file it wrote or deleted, before and after
+undo/manifest.json            the latest apply's snapshot, until the next apply or a rollback
+undo/payload/...
 baselines/<id>/manifest.json  the vendor's files: a hash for every file of a release's WAR or of a hotfix
 baselines/<id>/payload/...    the content of the mergeable ones (settings, XML, pages)
 merges/<mergeId>/merge.json   a prepared merge: what an apply does with every file the package ships

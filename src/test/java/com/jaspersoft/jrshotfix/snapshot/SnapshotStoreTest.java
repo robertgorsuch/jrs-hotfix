@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jaspersoft.jrshotfix.home.Home;
 import com.jaspersoft.jrshotfix.platform.DiskSpace;
+import com.jaspersoft.jrshotfix.platform.Durability;
 import com.jaspersoft.jrshotfix.platform.FileOps;
 import com.jaspersoft.jrshotfix.platform.Platforms;
 import java.io.IOException;
@@ -13,13 +14,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -28,13 +27,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 class SnapshotStoreTest {
 
-  /** A clock the test moves by hand so snapshots get distinct, controllable timestamps. */
+  /** A fixed clock, so manifests get a controllable timestamp. */
   private static final class ManualClock extends Clock {
-    private Instant now = Instant.parse("2026-09-08T10:00:00Z");
-
-    void advance(Duration by) {
-      now = now.plus(by);
-    }
+    private final Instant now = Instant.parse("2026-09-08T10:00:00Z");
 
     @Override
     public ZoneId getZone() {
@@ -77,7 +72,7 @@ class SnapshotStoreTest {
   void should_write_manifest_and_payload_when_creating() throws IOException {
     Snapshot snapshot = store.create("run-1", "step-a", List.of(jar, props), install);
 
-    assertThat(snapshot.dir()).isEqualTo(homeDir.resolve("snapshots/run-1/step-a"));
+    assertThat(snapshot.dir()).isEqualTo(homeDir.resolve("runs/run-1/step-a"));
     assertThat(snapshot.manifestFile()).isRegularFile();
     assertThat(snapshot.manifest().createdAt()).isEqualTo(clock.instant());
     assertThat(snapshot.manifest().baseDir()).isEqualTo(install.toAbsolutePath().normalize());
@@ -269,50 +264,22 @@ class SnapshotStoreTest {
   }
 
   @Test
-  void should_list_find_and_size_snapshots_when_several_exist() throws IOException {
+  void should_find_a_snapshot_in_its_run_in_undo_and_where_0_5_kept_it() throws IOException {
     Snapshot a = store.create("run-1", "step-a", List.of(jar), install);
-    clock.advance(Duration.ofMinutes(1));
-    Snapshot b = store.create("run-1", "step-b", List.of(props), install);
-    clock.advance(Duration.ofMinutes(1));
-    Snapshot c = store.create("run-2", "step-a", List.of(jar, props), install);
-    Files.createDirectories(homeDir.resolve("snapshots/run-3/partial/payload"));
+    Snapshot b = store.create("run-2", "snapshot", List.of(props), install);
 
-    assertThat(store.list()).containsExactly(a, b, c);
-    assertThat(store.find("run-1", "step-b")).contains(b);
-    assertThat(store.find("run-9", "step-b")).isEmpty();
-    assertThat(store.totalBytes())
-        .isGreaterThan(
-            a.manifest().totalSize() + b.manifest().totalSize() + c.manifest().totalSize());
-  }
+    assertThat(store.find("run-1", "step-a")).contains(a);
+    assertThat(store.find("run-9", "step-a")).isEmpty();
 
-  @Test
-  void should_keep_protected_runs_when_pruning_by_count() throws IOException {
-    Snapshot oldest = store.create("run-1", "step-a", List.of(jar), install);
-    clock.advance(Duration.ofDays(1));
-    Snapshot protectedOne = store.create("run-2", "step-a", List.of(jar), install);
-    clock.advance(Duration.ofDays(1));
-    Snapshot middle = store.create("run-3", "step-a", List.of(jar), install);
-    clock.advance(Duration.ofDays(1));
-    Snapshot newest = store.create("run-4", "step-a", List.of(jar), install);
+    Durability.move(b.dir(), homeDir.resolve("undo"));
+    assertThat(store.find("run-2", "snapshot").orElseThrow().dir())
+        .isEqualTo(homeDir.resolve("undo"));
+    assertThat(store.find("run-1", "snapshot")).isEmpty();
 
-    List<Snapshot> removed = store.prune(Duration.ofDays(30), 2, Set.of("run-2"));
-
-    assertThat(removed).containsExactly(oldest, middle);
-    assertThat(store.list()).containsExactly(protectedOne, newest);
-    assertThat(homeDir.resolve("snapshots/run-1")).doesNotExist();
-  }
-
-  @Test
-  void should_delete_expired_unprotected_snapshots_when_pruning_by_age() throws IOException {
-    Snapshot expiredProtected = store.create("run-1", "step-a", List.of(jar), install);
-    Snapshot expired = store.create("run-2", "step-a", List.of(jar), install);
-    clock.advance(Duration.ofDays(10));
-    Snapshot fresh = store.create("run-3", "step-a", List.of(jar), install);
-
-    List<Snapshot> removed = store.prune(Duration.ofDays(7), 0, Set.of("run-1"));
-
-    assertThat(removed).containsExactly(expired);
-    assertThat(store.list()).containsExactly(expiredProtected, fresh);
+    Files.createDirectories(homeDir.resolve("snapshots/run-1"));
+    Durability.move(a.dir(), homeDir.resolve("snapshots/run-1/step-a"));
+    assertThat(store.find("run-1", "step-a").orElseThrow().dir())
+        .isEqualTo(homeDir.resolve("snapshots/run-1/step-a"));
   }
 
   @Test

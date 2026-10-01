@@ -9,18 +9,25 @@ import com.jaspersoft.jrshotfix.engine.RunLock;
 import com.jaspersoft.jrshotfix.engine.RunOutcome;
 import com.jaspersoft.jrshotfix.engine.RunRecord;
 import com.jaspersoft.jrshotfix.engine.Runner;
+import com.jaspersoft.jrshotfix.engine.TerminalState;
 import com.jaspersoft.jrshotfix.event.EventBus;
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
 import com.jaspersoft.jrshotfix.redact.Redactor;
 import com.jaspersoft.jrshotfix.state.RunPlans;
+import com.jaspersoft.jrshotfix.state.UndoStore;
+import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -83,7 +90,7 @@ final class PlanExecutor {
     // rebuilt after the answer: inputs that changed while the prompt waited are refused
     PlanFingerprint recomputed;
     try {
-      recomputed = boot.plans().rebuild(operation, freshArgs(operation, argsJson)).fingerprint();
+      recomputed = boot.plans().rebuild(operation, argsJson).fingerprint();
     } catch (HotfixException e) {
       return ExitCodes.fail(
           err,
@@ -104,21 +111,7 @@ final class PlanExecutor {
   }
 
   /**
-   * The arguments the pre-run recheck plans with: a rollback's stored chain is for recovery only,
-   * so the recheck recomputes the chain from the ledger as it is now, and a hotfix rolled back
-   * elsewhere while this prompt waited is refused.
-   */
-  static String freshArgs(String operation, String argsJson) {
-    if (!operation.equals(HotfixPlans.ROLLBACK)) {
-      return argsJson;
-    }
-    HotfixPlans.RollbackArgs stored = HotfixPlans.rollbackArgs(argsJson);
-    return HotfixPlans.rollbackArgsJson(
-        new HotfixPlans.RollbackArgs(stored.hotfixId(), stored.cascade()));
-  }
-
-  /**
-   * Runs a mutation outside the engine (prune, record, settings) under the same gates as a run:
+   * Runs a mutation outside the engine (prune, settings, merges) under the same gates as a run:
    * exit 9 when the run lock is held, exit 8 while a run is pending; the run lock is held for the
    * whole of {@code body}, so no run can start in between.
    */
@@ -169,8 +162,7 @@ final class PlanExecutor {
           ExitCodes.PRECHECK_FAILED,
           "run " + runId + " has no stored plan",
           Optional.of(
-              "restore the files by hand from the snapshot under "
-                  + boot.home().snapshots().resolve(runId)));
+              "restore the files by hand from the snapshot under " + boot.home().runDir(runId)));
     }
     Plan plan;
     try {
@@ -198,7 +190,7 @@ final class PlanExecutor {
           "the installation changed since run " + runId + " started: " + changed,
           Optional.of(
               "put back what changed, or restore the files by hand from the snapshot under "
-                  + boot.home().snapshots().resolve(runId)));
+                  + boot.home().runDir(runId)));
     }
     out.println(
         (resume ? "resume" : "roll back")
@@ -254,6 +246,44 @@ final class PlanExecutor {
     return changed;
   }
 
+  /**
+   * Converts a home written by 0.1 to 0.5 once, under the run lock (0.6 design, section 7): the
+   * newest hotfix the ledger lists as installed becomes the undo, the snapshots of failed runs move
+   * into their runs, and {@code ledger.json} is set aside. Empty when done or not needed.
+   */
+  private Optional<Integer> convertLegacy() {
+    if (!Files.isRegularFile(boot.home().ledgerFile())) {
+      return Optional.empty();
+    }
+    Set<String> failed = new HashSet<>();
+    for (RunRecord run : runs.journal().runs()) {
+      if (run.terminalState().equals(Optional.of(TerminalState.FAILED))) {
+        failed.add(run.runId());
+      }
+    }
+    try (RunLock unused = new RunLock(boot.home(), "convert", boot.clock().instant())) {
+      if (new UndoStore(boot.home()).convertLegacy(failed)) {
+        out.println(
+            "converted this home from jrs-hotfix 0.5: "
+                + boot.home().ledgerFile().getFileName()
+                + " is kept as "
+                + boot.home().ledgerFile().getFileName()
+                + ".0.5 and no longer read");
+        out.flush();
+      }
+      return Optional.empty();
+    } catch (LockHeldException held) {
+      return Optional.of(lockHeld(held.holderRunId(), held.holderPid()));
+    } catch (IOException | UncheckedIOException e) {
+      return Optional.of(
+          ExitCodes.fail(
+              err,
+              ExitCodes.PRECHECK_FAILED,
+              "cannot convert this home from jrs-hotfix 0.5: " + e.getMessage(),
+              Optional.of("check the rights and free space under " + boot.home().root())));
+    }
+  }
+
   /** Reports the run lock held by another process: exit 9. */
   private int lockHeld(String runId, String pid) {
     return ExitCodes.fail(
@@ -263,7 +293,10 @@ final class PlanExecutor {
         Optional.of("wait for that jrs-hotfix process to finish, then run this again"));
   }
 
-  /** Exit 9 when the run lock is held; with {@code pendingToo}, exit 8 for a pending run. */
+  /**
+   * Exit 9 when the run lock is held; with {@code pendingToo}, exit 8 for a pending run, and
+   * otherwise a home written by 0.1 to 0.5 is converted first.
+   */
   private Optional<Integer> blocked(boolean pendingToo) {
     Optional<RunLock.Holder> holder = runs.lockHolder();
     if (holder.isPresent()) {
@@ -274,7 +307,7 @@ final class PlanExecutor {
     }
     List<RunRecord> pending = runs.pendingRuns();
     if (pending.isEmpty()) {
-      return Optional.empty();
+      return convertLegacy();
     }
     err.println(
         redactor.redact(

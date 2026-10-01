@@ -70,7 +70,7 @@ class MenuTest {
   }
 
   @Test
-  void should_print_eight_entries_and_run_apply_when_1_is_chosen() {
+  void should_print_seven_entries_and_run_apply_when_1_is_chosen() {
     Prompter.override(new StringReader("1\n" + pkg + "\nq\n"));
     Menu m =
         new Menu(
@@ -84,7 +84,7 @@ class MenuTest {
     assertThat(text())
         .contains("1) Apply a hotfix")
         .contains("4) Check the server for customizations")
-        .contains("8) Settings")
+        .contains("7) Settings")
         .contains("q) Quit")
         .contains("release 10.0.0 PRO")
         .contains("Running: jrs-hotfix apply " + pkg)
@@ -116,23 +116,22 @@ class MenuTest {
                 nl,
                 "What do you want to do?",
                 "  1) Apply a hotfix",
-                "  2) Roll back a hotfix",
+                "  2) Undo the latest hotfix",
                 "  3) Verify a hotfix package",
                 "  4) Check the server for customizations",
-                "  5) List installed hotfixes",
-                "  6) Record a hotfix applied by hand",
-                "  7) Recent runs and recovery",
-                "  8) Settings",
+                "  5) Show the installed build",
+                "  6) Recent runs and recovery",
+                "  7) Settings",
                 "  q) Quit",
                 "Each entry runs an ordinary command and prints it first. jrs-hotfix --help lists"
                     + " every command.",
-                "Choose [1-8, q]: "));
+                "Choose [1-7, q]: "));
     assertThat(ran).isEmpty();
   }
 
   @Test
   void should_offer_only_recovery_when_a_run_is_pending() {
-    Prompter.override(new StringReader("1\n7\n1\nq\n"));
+    Prompter.override(new StringReader("1\n6\n1\nq\n"));
     Menu m =
         new Menu(
             out,
@@ -145,8 +144,8 @@ class MenuTest {
     assertThat(text())
         .contains("interrupted")
         .contains("jrs-hotfix runs resume stuck     (or runs rollback stuck)")
-        .contains("finish or undo the interrupted job first (entry 7)");
-    // choosing 1 while pending printed a refusal and did not run apply; 7 lists the runs first
+        .contains("finish or undo the interrupted job first (entry 6)");
+    // choosing 1 while pending printed a refusal and did not run apply; 6 lists the runs first
     assertThat(ran).hasSize(2);
     assertThat(ran.get(0)).containsExactly("runs", "list");
     assertThat(ran.get(1)).containsExactly("runs", "resume", "stuck");
@@ -154,7 +153,7 @@ class MenuTest {
 
   @Test
   void should_refuse_every_changing_entry_when_a_run_is_pending() {
-    Prompter.override(new StringReader("2\n3\n6\n8\n1\n8\n2\n5\nq\n"));
+    Prompter.override(new StringReader("2\n3\n7\n1\n7\n2\n5\nq\n"));
     new Menu(
             out,
             List.of(),
@@ -188,8 +187,8 @@ class MenuTest {
   }
 
   @Test
-  void should_pass_cascade_when_the_operator_says_yes_to_later_hotfixes() {
-    Prompter.override(new StringReader("2\nJRSHF-1\ny\nq\n"));
+  void should_run_rollback_without_asking_which_hotfix_when_2_is_chosen() {
+    Prompter.override(new StringReader("2\nq\n"));
     new Menu(
             out,
             List.of(),
@@ -198,14 +197,14 @@ class MenuTest {
             () -> Optional.of(settings),
             () -> "10.0.0 PRO")
         .run();
-    assertThat(ran).hasSize(2);
-    assertThat(ran.get(0)).containsExactly("list");
-    assertThat(ran.get(1)).containsExactly("rollback", "JRSHF-1", "--cascade");
+    // the plan names the latest hotfix and asks; there is no other to choose
+    assertThat(ran).hasSize(1);
+    assertThat(ran.get(0)).containsExactly("rollback");
   }
 
   @Test
   void should_pass_the_global_options_on_and_report_a_failure_when_a_command_fails() {
-    Prompter.override(new StringReader("5\n8\n1\nbaseUrl\nhttp://h:1/x\nq\n"));
+    Prompter.override(new StringReader("5\n7\n1\nbaseUrl\nhttp://h:1/x\nq\n"));
     new Menu(
             out,
             List.of("--home", "h"),
@@ -310,7 +309,7 @@ class MenuTest {
           opens.incrementAndGet();
           return real.open(options);
         };
-    Prompter.override(new StringReader("5\n7\n5\nq\n"));
+    Prompter.override(new StringReader("5\n6\n5\nq\n"));
     assertThat(root.menu(out, this::recorder).run()).isZero();
     assertThat(opens).hasValue(1);
     assertThat(ran).hasSize(3);

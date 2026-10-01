@@ -9,41 +9,31 @@ import com.jaspersoft.jrshotfix.platform.Durability;
 import com.jaspersoft.jrshotfix.platform.FileOps;
 import com.jaspersoft.jrshotfix.platform.Trees;
 import java.io.IOException;
-import java.nio.file.DirectoryStream;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.StreamSupport;
 
 /**
- * Creates, verifies, restores and prunes file snapshots under {@code $JRS_HOTFIX_HOME/snapshots}
- * (spec §5.6). Invariants: a snapshot is only visible (listed, findable) once its manifest exists,
- * and the manifest is written last, so a crash mid-copy leaves a directory that is ignored and
- * rebuilt on the next attempt; every payload copy is hashed while streaming and compared with the
- * source hash and with a re-read of the copy before it is recorded; {@link #restore} verifies the
- * whole snapshot before touching a single original, replaces each original atomically, re-applies
- * the captured permissions and confirms the restored hash; {@link #create} is idempotent for a
- * given {@code runId/stepId} (an existing, verified snapshot is returned unchanged so a retried
- * step keeps the pre-change state); {@link #prune} never removes a snapshot of a protected run.
- * Payload copies keep the permissions of the snapshots tree; the originals' permissions live in the
- * manifest. "Written last" is a durability claim as well as an ordering one: every payload and the
- * manifest itself are forced to stable storage before the rename that publishes the manifest, so a
- * power cut cannot leave a valid manifest describing payloads that were never written.
+ * Creates, verifies and restores file snapshots, each in the directory of the run that took it,
+ * {@code runs/<runId>/<stepId>} (spec §5.6; 0.6 design, section 3). Invariants: a snapshot is only
+ * visible (listed, findable) once its manifest exists, and the manifest is written last, so a crash
+ * mid-copy leaves a directory that is ignored and rebuilt on the next attempt; every payload copy
+ * is hashed while streaming and compared with the source hash and with a re-read of the copy before
+ * it is recorded; {@link #restore} verifies the whole snapshot before touching a single original,
+ * replaces each original atomically, re-applies the captured permissions and confirms the restored
+ * hash; {@link #create} is idempotent for a given {@code runId/stepId} (an existing, verified
+ * snapshot is returned unchanged so a retried step keeps the pre-change state). Payload copies keep
+ * the permissions of the snapshots tree; the originals' permissions live in the manifest. "Written
+ * last" is a durability claim as well as an ordering one: every payload and the manifest itself are
+ * forced to stable storage before the rename that publishes the manifest, so a power cut cannot
+ * leave a valid manifest describing payloads that were never written.
  */
 public final class SnapshotStore {
 
@@ -65,7 +55,7 @@ public final class SnapshotStore {
 
   /**
    * Captures {@code paths} (absolute, or relative to {@code baseDir}; all must lie beneath it) into
-   * {@code snapshots/runId/stepId}. Returns the existing snapshot when one is already complete.
+   * {@code runs/runId/stepId}. Returns the existing snapshot when one is already complete.
    */
   public Snapshot create(String runId, String stepId, List<Path> paths, Path baseDir)
       throws IOException {
@@ -190,128 +180,28 @@ public final class SnapshotStore {
     }
   }
 
-  /** Every complete snapshot, oldest first. */
-  public List<Snapshot> list() throws IOException {
-    List<Snapshot> found = new ArrayList<>();
-    Path root = home.snapshots();
-    if (!Files.isDirectory(root)) {
-      return found;
-    }
-    for (Path runDir : subdirectories(root)) {
-      for (Path stepDir : subdirectories(runDir)) {
-        readSnapshot(stepDir).ifPresent(found::add);
-      }
-    }
-    found.sort(
-        Comparator.comparing((Snapshot s) -> s.manifest().createdAt())
-            .thenComparing(Snapshot::runId)
-            .thenComparing(Snapshot::stepId));
-    return List.copyOf(found);
-  }
-
+  /**
+   * The snapshot step {@code stepId} of run {@code runId} took: in the run's directory while the
+   * run is going, in {@code undo/} once the apply made it the undo, or where 0.1 to 0.5 kept it.
+   */
   public Optional<Snapshot> find(String runId, String stepId) throws IOException {
     validateId(runId, "runId");
     validateId(stepId, "stepId");
-    return readSnapshot(snapshotDir(runId, stepId));
+    Optional<Snapshot> own = readSnapshot(snapshotDir(runId, stepId));
+    if (own.isPresent()) {
+      return own;
+    }
+    Optional<Snapshot> undo =
+        readSnapshot(home.undo()).filter(s -> s.runId().equals(runId) && s.stepId().equals(stepId));
+    if (undo.isPresent()) {
+      return undo;
+    }
+    return readSnapshot(home.snapshots().resolve(runId).resolve(stepId));
   }
 
-  /** Bytes used on disk by the whole snapshots tree, manifests included. */
-  public long totalBytes() throws IOException {
-    Path root = home.snapshots();
-    if (!Files.isDirectory(root)) {
-      return 0;
-    }
-    long[] total = {0};
-    Files.walkFileTree(
-        root,
-        new SimpleFileVisitor<>() {
-          @Override
-          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-            total[0] += attrs.size();
-            return FileVisitResult.CONTINUE;
-          }
-        });
-    return total[0];
-  }
-
-  /**
-   * Deletes unprotected runs whose snapshots have all passed {@code retention} (age pruning is
-   * disabled for a zero or negative duration), then whole unprotected runs, oldest first, until at
-   * most {@code maxSnapshots} snapshots remain in total ({@code 0} means no cap). Returns what was
-   * deleted.
-   */
-  public List<Snapshot> prune(Duration retention, int maxSnapshots, Set<String> protectedRunIds)
-      throws IOException {
-    List<Snapshot> removed = pruneCandidates(retention, maxSnapshots, protectedRunIds);
-    for (Snapshot snapshot : removed) {
-      Diag.info("pruning snapshot {}/{}", snapshot.runId(), snapshot.stepId());
-      Trees.deleteRecursively(snapshot.dir());
-      deleteIfEmpty(snapshot.dir().getParent());
-    }
-    return removed;
-  }
-
-  /**
-   * What {@link #prune} with the same arguments would delete, oldest first, without touching the
-   * disk: every unprotected run whose snapshots have all passed {@code retention}, then whole
-   * unprotected runs, oldest first, until at most {@code maxSnapshots} snapshots remain. A run
-   * whose id is in {@code protectedRunIds} is never a candidate.
-   *
-   * <p>A run is the unit, not a snapshot, because the snapshots of one run only mean anything
-   * together: an upgrade's rollback point is its configuration and its keystore and its archives,
-   * and restoring some of them is worse than restoring none. So a run keeps every snapshot until it
-   * can lose them all, and {@code maxSnapshots} may be undershot when the run that has to go holds
-   * several. Disk space is a budget; a half-restorable rollback point is a trap.
-   */
-  public List<Snapshot> pruneCandidates(
-      Duration retention, int maxSnapshots, Set<String> protectedRunIds) throws IOException {
-    if (maxSnapshots < 0) {
-      throw new IllegalArgumentException("maxSnapshots must not be negative");
-    }
-    Optional<Instant> cutoff =
-        retention.isZero() || retention.isNegative()
-            ? Optional.empty()
-            : Optional.of(clock.instant().minus(retention));
-    Map<String, List<Snapshot>> runs = new LinkedHashMap<>();
-    for (Snapshot snapshot : list()) {
-      runs.computeIfAbsent(snapshot.runId(), id -> new ArrayList<>()).add(snapshot);
-    }
-    List<Snapshot> removed = new ArrayList<>();
-    int surviving = 0;
-    List<String> survivingRuns = new ArrayList<>();
-    for (Map.Entry<String, List<Snapshot>> run : runs.entrySet()) {
-      boolean expired =
-          cutoff.isPresent()
-              && run.getValue().stream()
-                  .allMatch(s -> s.manifest().createdAt().isBefore(cutoff.get()));
-      if (expired && !protectedRunIds.contains(run.getKey())) {
-        removed.addAll(run.getValue());
-      } else {
-        surviving += run.getValue().size();
-        survivingRuns.add(run.getKey());
-      }
-    }
-    if (maxSnapshots > 0) {
-      for (String runId : survivingRuns) {
-        if (surviving <= maxSnapshots) {
-          break;
-        }
-        if (protectedRunIds.contains(runId)) {
-          continue;
-        }
-        removed.addAll(runs.get(runId));
-        surviving -= runs.get(runId).size();
-      }
-    }
-    removed.sort(
-        Comparator.comparing((Snapshot s) -> s.manifest().createdAt())
-            .thenComparing(Snapshot::runId)
-            .thenComparing(Snapshot::stepId));
-    return List.copyOf(removed);
-  }
-
-  private Path snapshotDir(String runId, String stepId) {
-    return home.snapshots().resolve(runId).resolve(stepId).toAbsolutePath().normalize();
+  /** Where step {@code stepId} of run {@code runId} writes its snapshot: under the run's dir. */
+  public Path snapshotDir(String runId, String stepId) {
+    return home.runDir(runId).resolve(stepId).toAbsolutePath().normalize();
   }
 
   private static Optional<Snapshot> readSnapshot(Path dir) throws IOException {
@@ -323,12 +213,6 @@ public final class SnapshotStore {
     return Optional.of(
         new Snapshot(
             manifest.runId(), manifest.stepId(), dir.toAbsolutePath().normalize(), manifest));
-  }
-
-  private static List<Path> subdirectories(Path dir) throws IOException {
-    try (DirectoryStream<Path> children = Files.newDirectoryStream(dir, Files::isDirectory)) {
-      return StreamSupport.stream(children.spliterator(), false).sorted().toList();
-    }
   }
 
   private static Set<Path> uniqueSources(List<Path> paths, Path base) throws IOException {
@@ -361,17 +245,5 @@ public final class SnapshotStore {
       joined.append(element);
     }
     return joined.toString();
-  }
-
-  private static void deleteIfEmpty(Path dir) throws IOException {
-    if (dir == null || !Files.isDirectory(dir)) {
-      return;
-    }
-    try (DirectoryStream<Path> children = Files.newDirectoryStream(dir)) {
-      if (children.iterator().hasNext()) {
-        return;
-      }
-    }
-    Files.delete(dir);
   }
 }

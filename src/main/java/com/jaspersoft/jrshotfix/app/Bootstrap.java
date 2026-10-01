@@ -18,7 +18,7 @@ import com.jaspersoft.jrshotfix.platform.ServiceConfig;
 import com.jaspersoft.jrshotfix.redact.Redactor;
 import com.jaspersoft.jrshotfix.service.ServerProbe;
 import com.jaspersoft.jrshotfix.snapshot.SnapshotStore;
-import com.jaspersoft.jrshotfix.state.Ledger;
+import com.jaspersoft.jrshotfix.state.UndoStore;
 import com.jaspersoft.jrshotfix.war.WarFile;
 import java.io.Console;
 import java.io.IOException;
@@ -287,7 +287,7 @@ final class Bootstrap {
         home,
         s,
         platform,
-        new Ledger(home),
+        new UndoStore(home),
         new SnapshotStore(home, platform.files(), clock),
         clock,
         Sleeper.system(),

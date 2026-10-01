@@ -24,16 +24,14 @@ import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
 import com.jaspersoft.jrshotfix.platform.Durability;
 import com.jaspersoft.jrshotfix.platform.Trees;
 import com.jaspersoft.jrshotfix.redact.RedactingEventSink;
-import com.jaspersoft.jrshotfix.snapshot.Snapshot;
-import com.jaspersoft.jrshotfix.snapshot.SnapshotStore;
 import com.jaspersoft.jrshotfix.state.FileJournal;
-import com.jaspersoft.jrshotfix.state.HotfixState;
-import com.jaspersoft.jrshotfix.state.Ledger;
-import com.jaspersoft.jrshotfix.state.LedgerEntry;
 import com.jaspersoft.jrshotfix.state.RunPlans;
+import com.jaspersoft.jrshotfix.state.UndoRecord;
+import com.jaspersoft.jrshotfix.state.UndoStore;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -54,26 +52,18 @@ import java.util.function.Supplier;
  * runner and retention. Invariants: a run's plan is stored before its first step; the run lock is
  * taken by the {@link Runner} for exactly the duration of a run, resume or rollback; while one of
  * those executes, every event the runner emits (already redacted) is also written to the run's own
- * log, {@code runs/<id>/run.log}, together with the platform's diagnostics; {@link #prune} never
- * removes a pending run, the snapshot of a pending run, or the snapshot of an installed hotfix, and
- * keeps a failed run (exit 4) and its snapshot unless asked to include them.
+ * log, {@code runs/<id>/run.log}, together with the platform's diagnostics; a run's own snapshots
+ * are deleted when it ends, except after exit 4, whose snapshots the operator restores from (0.6
+ * design, section 3); {@link #prune} never removes a pending run, and keeps a failed run (exit 4)
+ * and its snapshots unless asked to include them.
  */
 final class RunService {
 
-  /**
-   * What {@link #prune} removed: run ids, {@code runId/stepId} snapshots, ledger ids, hotfix
-   * baseline ids and merge ids.
-   */
+  /** What {@link #prune} removed: run ids, hotfix baseline ids and merge ids. */
   record PruneResult(
-      List<String> runsRemoved,
-      List<String> snapshotsRemoved,
-      List<String> ledgerEntriesRemoved,
-      List<String> baselinesRemoved,
-      List<String> mergesRemoved) {
+      List<String> runsRemoved, List<String> baselinesRemoved, List<String> mergesRemoved) {
     PruneResult {
       runsRemoved = List.copyOf(runsRemoved);
-      snapshotsRemoved = List.copyOf(snapshotsRemoved);
-      ledgerEntriesRemoved = List.copyOf(ledgerEntriesRemoved);
       baselinesRemoved = List.copyOf(baselinesRemoved);
       mergesRemoved = List.copyOf(mergesRemoved);
     }
@@ -233,10 +223,36 @@ final class RunService {
       try {
         RunOutcome outcome = body.get();
         file.line("outcome " + outcome.getClass().getSimpleName() + " exit " + outcome.exitCode());
+        if (outcome.exitCode() != ExitCodes.FAILED_ROLLBACK_INCOMPLETE) {
+          dropSnapshots(runId, file);
+        }
         return outcome;
       } finally {
         log.set(null);
       }
+    }
+  }
+
+  /**
+   * Deletes the snapshots run {@code runId} took and the undo it used up: a snapshot is kept for
+   * the run that took it, and an apply's has been promoted to {@code undo/} by the time it ends. A
+   * directory of the run that holds a {@code manifest.json} is a snapshot; nothing else of the run
+   * is touched. A failure is logged, not made the run's.
+   */
+  private void dropSnapshots(String runId, LogFile file) {
+    Path run = boot.home().runDir(runId);
+    if (!Files.isDirectory(run)) {
+      return;
+    }
+    try (DirectoryStream<Path> dirs = Files.newDirectoryStream(run, Files::isDirectory)) {
+      for (Path dir : dirs) {
+        if (Files.isRegularFile(dir.resolve("manifest.json"))
+            || dir.getFileName().toString().equals(UndoStore.UNDONE)) {
+          Trees.deleteRecursively(dir);
+        }
+      }
+    } catch (IOException e) {
+      file.line("snapshots of run " + runId + " left behind: " + e.getMessage());
     }
   }
 
@@ -266,15 +282,13 @@ final class RunService {
   }
 
   /**
-   * Removes the merges prepared before {@code cutoff} that no installed hotfix was applied with: a
-   * merge is the record of how its hotfix was applied for as long as that hotfix is installed.
+   * Removes the merges prepared before {@code cutoff} other than the one the latest apply was made
+   * with: that merge is the record of how its hotfix was applied for as long as it can be undone.
    */
-  private List<String> pruneMerges(Ledger ledger, Instant cutoff) throws IOException {
+  private List<String> pruneMerges(Instant cutoff) throws IOException {
     MergeWorkspace merges = new MergeWorkspace(boot.home(), boot.clock());
     Set<String> inUse = new HashSet<>();
-    for (LedgerEntry e : ledger.installed()) {
-      e.mergeId().ifPresent(inUse::add);
-    }
+    new UndoStore(boot.home()).read().flatMap(UndoRecord::mergeId).ifPresent(inUse::add);
     List<String> removed = new ArrayList<>();
     for (MergeDoc doc : merges.list()) {
       if (!inUse.contains(doc.id())
@@ -287,22 +301,19 @@ final class RunService {
   }
 
   /**
-   * Removes what is older than {@code olderThan}: the directories of ended runs; snapshots, except
-   * those of pending runs, of failed runs and of hotfixes the ledger has installed; rolled-back
-   * ledger entries whose snapshot is gone; merges no installed hotfix was applied with; and,
-   * whatever their age, the hotfix baselines older than the newest two. A run that ended {@link
-   * TerminalState#FAILED} (exit 4, its rollback incomplete) keeps its directory and its snapshot,
-   * which its message told the operator to restore from, unless {@code includeFailed}.
+   * Removes what is older than {@code olderThan}: the directories of ended runs, with any snapshot
+   * a failed run kept; merges other than the latest apply's; and, whatever their age, the hotfix
+   * baselines older than the newest two. A run that ended {@link TerminalState#FAILED} (exit 4, its
+   * rollback incomplete) keeps its directory and its snapshots, which its message told the operator
+   * to restore from, unless {@code includeFailed}.
    */
   PruneResult prune(Duration olderThan, boolean includeFailed) {
     Instant cutoff = boot.clock().instant().minus(olderThan);
     List<String> runsRemoved = new ArrayList<>();
-    Set<String> pending = new HashSet<>();
     try {
       for (RunRecord run : journal.runs()) {
         if (run.pending()
             || (!includeFailed && run.terminalState().equals(Optional.of(TerminalState.FAILED)))) {
-          pending.add(run.runId());
           continue;
         }
         if (run.endedAt().filter(e -> e.isBefore(cutoff)).isPresent()) {
@@ -310,35 +321,7 @@ final class RunService {
           runsRemoved.add(run.runId());
         }
       }
-      Ledger ledger = new Ledger(boot.home());
-      Set<String> protectedRunIds = new HashSet<>(pending);
-      for (LedgerEntry e : ledger.all()) {
-        if (e.state() == HotfixState.INSTALLED) {
-          protectedRunIds.add(e.runId());
-        }
-      }
-      SnapshotStore snapshots =
-          new SnapshotStore(boot.home(), boot.platform().files(), boot.clock());
-      List<String> snapshotsRemoved = new ArrayList<>();
-      // SnapshotStore reads a zero retention as "no age limit"; here zero days means "all of it"
-      Duration retention = olderThan.isZero() ? Duration.ofMillis(1) : olderThan;
-      for (Snapshot s : snapshots.prune(retention, Integer.MAX_VALUE, protectedRunIds)) {
-        snapshotsRemoved.add(s.runId() + "/" + s.stepId());
-      }
-      List<String> ledgerRemoved = new ArrayList<>();
-      for (LedgerEntry e : ledger.all()) {
-        if (e.state() == HotfixState.ROLLED_BACK
-            && !Files.exists(boot.home().snapshots().resolve(e.runId()))
-            && ledger.delete(e.id())) {
-          ledgerRemoved.add(e.id());
-        }
-      }
-      return new PruneResult(
-          runsRemoved,
-          snapshotsRemoved,
-          ledgerRemoved,
-          pruneBaselines(),
-          pruneMerges(ledger, cutoff));
+      return new PruneResult(runsRemoved, pruneBaselines(), pruneMerges(cutoff));
     } catch (IOException e) {
       throw new UncheckedIOException("cannot prune " + boot.home().root(), e);
     }

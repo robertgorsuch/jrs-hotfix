@@ -20,12 +20,12 @@ import java.util.function.Supplier;
  * command, with the home the menu resolved (except to the wizard, which places settings itself);
  * without settings the wizard ({@code settings detect}) runs before the menu is shown; while a run
  * is pending, every entry that would change the installation or the settings refuses and points at
- * entry 7; an empty answer where one is required returns to the menu; end of input quits with exit
+ * entry 6; an empty answer where one is required returns to the menu; end of input quits with exit
  * 0; nothing is written by the menu itself.
  */
 final class Menu {
 
-  static final String PENDING_REFUSAL = "finish or undo the interrupted job first (entry 7)";
+  static final String PENDING_REFUSAL = "finish or undo the interrupted job first (entry 6)";
 
   private final PrintWriter out;
   private final Supplier<List<String>> globalArgs;
@@ -105,24 +105,23 @@ final class Menu {
       for (String id : pending) {
         out.println("    jrs-hotfix runs resume " + id + "     (or runs rollback " + id + ")");
       }
-      out.println("  Choose 7 below to do this.");
+      out.println("  Choose 6 below to do this.");
     }
     while (true) {
       out.println();
       out.println("What do you want to do?");
       out.println("  1) Apply a hotfix");
-      out.println("  2) Roll back a hotfix");
+      out.println("  2) Undo the latest hotfix");
       out.println("  3) Verify a hotfix package");
       out.println("  4) Check the server for customizations");
-      out.println("  5) List installed hotfixes");
-      out.println("  6) Record a hotfix applied by hand");
-      out.println("  7) Recent runs and recovery");
-      out.println("  8) Settings");
+      out.println("  5) Show the installed build");
+      out.println("  6) Recent runs and recovery");
+      out.println("  7) Settings");
       out.println("  q) Quit");
       out.println(
           "Each entry runs an ordinary command and prints it first. jrs-hotfix --help lists every"
               + " command.");
-      Optional<String> choice = Prompter.line(out, "Choose [1-8, q]: ");
+      Optional<String> choice = Prompter.line(out, "Choose [1-7, q]: ");
       if (choice.isEmpty() || choice.get().equalsIgnoreCase("q")) {
         return ExitCodes.SUCCESS;
       }
@@ -134,7 +133,8 @@ final class Menu {
         }
         case "2" -> {
           if (notPending()) {
-            rollback();
+            // the plan names the hotfix it undoes, and asks; with nothing to undo it says so
+            execute("rollback");
           }
         }
         case "3" -> {
@@ -144,14 +144,9 @@ final class Menu {
         }
         case "4" -> scan();
         case "5" -> execute("list");
-        case "6" -> {
-          if (notPending()) {
-            existingFile("Hotfix package (.zip)").ifPresent(p -> execute("record", p));
-          }
-        }
-        case "7" -> runs();
-        case "8" -> settingsEntry();
-        default -> out.println("Please type a number from 1 to 8, or q.");
+        case "6" -> runs();
+        case "7" -> settingsEntry();
+        default -> out.println("Please type a number from 1 to 7, or q.");
       }
     }
   }
@@ -182,21 +177,6 @@ final class Menu {
     Optional<String> source = path("WAR or hotfix ZIP (Enter to go back)");
     if (source.isPresent() && execute("baseline", "add", source.get()) == ExitCodes.SUCCESS) {
       execute("scan");
-    }
-  }
-
-  private void rollback() {
-    execute("list");
-    Optional<String> id = text("Hotfix id to roll back");
-    if (id.isEmpty()) {
-      return;
-    }
-    // a cumulative hotfix applied later owns the same files; rollback is last-in-first-out, so
-    // without --cascade a blocked rollback stops with exit 2
-    if (Prompter.yes(out, "Also roll back the hotfixes applied after it, if any? [y/N] ", false)) {
-      execute("rollback", id.get(), "--cascade");
-    } else {
-      execute("rollback", id.get());
     }
   }
 

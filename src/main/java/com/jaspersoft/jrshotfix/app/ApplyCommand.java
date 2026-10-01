@@ -63,7 +63,8 @@ final class ApplyCommand extends AppCommand {
       description =
           "Leave a library under WEB-INF/lib that is an older version of one the package brings"
               + " and that no readme list names. By default such a library is deleted when the"
-              + " ledger or a baseline knows it as the vendor's; one the site added is never.")
+              + " latest apply or a baseline knows it as the vendor's; one the site added is"
+              + " never.")
   boolean keepSuperseded;
 
   @Option(

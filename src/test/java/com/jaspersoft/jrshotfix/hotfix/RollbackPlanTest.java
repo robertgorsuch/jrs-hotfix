@@ -8,15 +8,10 @@ import com.jaspersoft.jrshotfix.engine.RunOutcome;
 import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.engine.StepResult;
 import com.jaspersoft.jrshotfix.event.EventSink;
+import com.jaspersoft.jrshotfix.pkg.Packages;
 import com.jaspersoft.jrshotfix.platform.Trees;
-import com.jaspersoft.jrshotfix.state.HotfixState;
-import com.jaspersoft.jrshotfix.state.LedgerEntry;
-import com.jaspersoft.jrshotfix.state.Origin;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
-import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -31,8 +26,7 @@ class RollbackPlanTest {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
       Path cache = ApplyPlanTest.jspCache(f);
-      Plan rb =
-          f.plans.planRollback(new HotfixPlans.RollbackArgs("JRSHF-10.0.0-20260730-0457", false));
+      Plan rb = f.plans.planRollback();
       assertThat(HotfixFixture.ids(rb))
           .containsExactly(
               "stop-service",
@@ -40,61 +34,131 @@ class RollbackPlanTest {
               "clear-jsp-cache",
               "start-service",
               "wait-for-server",
-              "record-rolled-back");
+              "discard-undo");
       assertThat(rb.planId()).startsWith("hotfix-rollback-");
       assertThat(rb.summary().operation()).isEqualTo("hotfix.rollback");
+      assertThat(rb.summary().target()).isEqualTo(HotfixFixture.ID);
       assertThat(rb.fingerprint().inputs())
-          .containsKeys("settings", "hotfix:JRSHF-10.0.0-20260730-0457")
-          .containsKey("file:" + f.target(HotfixFixture.FOO));
+          .containsEntry("hotfix:" + HotfixFixture.ID, "r1")
+          .containsKeys("settings", "file:" + f.target(HotfixFixture.FOO));
       assertThat(f.run(rb, "r2")).isInstanceOf(RunOutcome.Succeeded.class);
       // restored pages are older than what Tomcat compiled from the hotfix's, so it would keep them
       assertThat(cache).doesNotExist();
-      assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
-          .isEqualTo("old foo");
-      assertThat(f.target("webapps/jasperserver-pro/WEB-INF/lib/new-1.0.jar")).doesNotExist();
-      assertThat(f.target("webapps/jasperserver-pro/WEB-INF/lib/bar-0.9.jar")).exists();
-      assertThat(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.0.0.jar")).exists();
+      assertThat(Files.readString(f.target(HotfixFixture.FOO))).isEqualTo("old foo");
+      assertThat(f.target(HotfixFixture.NEW)).doesNotExist();
+      assertThat(f.target(HotfixFixture.BAR)).exists();
+      assertThat(f.target(HotfixFixture.FOO_OLDER)).exists();
       assertThat(Files.readString(f.target(HotfixFixture.TOOL))).isEqualTo("old tool");
-      assertThat(f.ledger.find("JRSHF-10.0.0-20260730-0457").orElseThrow().state())
-          .isEqualTo(HotfixState.ROLLED_BACK);
+      // one level of undo: it is used up
+      assertThat(f.undo.read()).isEmpty();
+      assertThat(f.home.undo()).doesNotExist();
     }
   }
 
   @Test
-  void should_install_again_when_a_rolled_back_hotfix_is_applied_again() throws Exception {
+  void should_undo_the_latest_apply_only_and_then_have_nothing_left_to_undo() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       assertThat(f.run(f.plan(), "r1")).isInstanceOf(RunOutcome.Succeeded.class);
-      assertThat(
-              f.run(
-                  f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false)),
-                  "r2"))
+      Path later = Packages.later(tmp.resolve("dl/later.zip"));
+      assertThat(f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(later, true)), "r2"))
           .isInstanceOf(RunOutcome.Succeeded.class);
-      assertThat(f.run(f.plan(), "r3")).isInstanceOf(RunOutcome.Succeeded.class);
+      assertThat(f.undo.read().orElseThrow().id()).isEqualTo(Packages.laterId());
+      // the first apply's snapshot went when the second replaced the undo
+      assertThat(f.snapshots.find("r1", ApplySteps.SNAPSHOT)).isEmpty();
+
+      Plan rb = f.plans.planRollback();
+      assertThat(rb.summary().target()).isEqualTo(Packages.laterId());
+      assertThat(f.run(rb, "r3")).isInstanceOf(RunOutcome.Succeeded.class);
+
       assertThat(Files.readString(f.target(HotfixFixture.FOO))).isEqualTo("patched foo");
-      // one entry per id: the new installation replaces the rolled-back one
-      assertThat(f.ledger.all()).filteredOn(e -> e.id().equals(HotfixFixture.ID)).hasSize(1);
-      LedgerEntry e = f.ledger.find(HotfixFixture.ID).orElseThrow();
-      assertThat(e.state()).isEqualTo(HotfixState.INSTALLED);
-      assertThat(e.runId()).isEqualTo("r3");
-      assertThat(e.snapshotRef()).contains("r3/snapshot");
+      assertThat(f.target(HotfixFixture.NEW)).exists();
+      assertThatThrownBy(() -> f.plans.planRollback())
+          .isInstanceOf(HotfixException.class)
+          .hasMessageContaining("nothing to undo");
     }
   }
 
   @Test
-  void should_refuse_when_the_snapshot_directory_was_deleted_by_hand() throws Exception {
+  void should_keep_the_previous_undo_when_an_apply_is_compensated() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      assertThat(f.run(f.plan(), "r1")).isInstanceOf(RunOutcome.Succeeded.class);
+      Path later = Packages.later(tmp.resolve("dl/later.zip"));
+      Plan second = f.plans.planApply(new HotfixPlans.ApplyArgs(later, true));
+      // the service does not stop: the apply undoes what it did before the outage
+      f.platform.controller.hangOnStop(100);
+
+      assertThat(f.run(second, "r2")).isInstanceOf(RunOutcome.RolledBack.class);
+
+      assertThat(f.undo.read().orElseThrow().runId()).isEqualTo("r1");
+      assertThat(Files.readString(f.target(HotfixFixture.FOO))).isEqualTo("patched foo");
+    }
+  }
+
+  @Test
+  void should_refuse_when_there_is_nothing_to_undo() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      assertThatThrownBy(() -> f.plans.planRollback())
+          .isInstanceOf(HotfixException.class)
+          .hasMessageContaining("nothing to undo");
+    }
+  }
+
+  @Test
+  void should_refuse_before_the_stop_and_name_the_file_when_it_changed_since_the_apply()
+      throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      f.run(f.plan(), "r1");
+      Files.writeString(f.target(HotfixFixture.FOO), "edited by hand");
+      Plan rb = f.plans.planRollback();
+      assertThat(rb.summary().warnings())
+          .anySatisfy(
+              w ->
+                  assertThat(w)
+                      .startsWith("this plan will be refused")
+                      .contains("1 file(s) changed since " + HotfixFixture.ID)
+                      .contains(f.target(HotfixFixture.FOO).toString()));
+      int callsBefore = f.platform.controller.calls().size();
+
+      RunOutcome out = f.run(rb, "r2");
+
+      assertThat(out).isInstanceOf(RunOutcome.PrecheckFailed.class);
+      assertThat(((RunOutcome.PrecheckFailed) out).message())
+          .contains("changed since")
+          .contains(f.target(HotfixFixture.FOO).toString());
+      assertThat(((RunOutcome.PrecheckFailed) out).remediation())
+          .contains(f.home.undo().toString());
+      assertThat(f.platform.controller.calls()).hasSize(callsBefore);
+      assertThat(Files.readString(f.target(HotfixFixture.FOO))).isEqualTo("edited by hand");
+      assertThat(f.undo.read()).isPresent();
+    }
+  }
+
+  @Test
+  void should_refuse_when_a_deleted_file_is_back() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      f.run(f.plan(), "r1");
+      Files.writeString(f.target(HotfixFixture.BAR), "bar again");
+
+      RunOutcome out = f.run(f.plans.planRollback(), "r2");
+
+      assertThat(out).isInstanceOf(RunOutcome.PrecheckFailed.class);
+      assertThat(((RunOutcome.PrecheckFailed) out).message())
+          .contains(f.target(HotfixFixture.BAR) + " is ");
+    }
+  }
+
+  @Test
+  void should_refuse_when_the_snapshot_was_deleted_by_hand() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
-      Trees.deleteRecursively(f.home.snapshots().resolve("r1"));
+      Files.delete(f.home.undo().resolve("manifest.json"));
       int callsBefore = f.platform.controller.calls().size();
-      RunOutcome out =
-          f.run(
-              f.plans.planRollback(
-                  new HotfixPlans.RollbackArgs("JRSHF-10.0.0-20260730-0457", false)),
-              "r2");
+      RunOutcome out = f.run(f.plans.planRollback(), "r2");
       assertThat(out).isInstanceOf(RunOutcome.PrecheckFailed.class);
-      assertThat(((RunOutcome.PrecheckFailed) out).message()).contains("snapshot").contains("r1");
-      assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
-          .isEqualTo("patched foo");
+      assertThat(((RunOutcome.PrecheckFailed) out).message())
+          .contains("snapshot")
+          .contains("missing");
+      assertThat(Files.readString(f.target(HotfixFixture.FOO))).isEqualTo("patched foo");
       // refused before the outage: the service was never stopped
       assertThat(f.platform.controller.calls()).hasSize(callsBefore);
     }
@@ -104,9 +168,8 @@ class RollbackPlanTest {
   void should_touch_nothing_when_the_restore_finds_the_snapshot_missing() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
-      Plan rb =
-          f.plans.planRollback(new HotfixPlans.RollbackArgs("JRSHF-10.0.0-20260730-0457", false));
-      Trees.deleteRecursively(f.home.snapshots().resolve("r1"));
+      Plan rb = f.plans.planRollback();
+      Trees.deleteRecursively(f.home.undo());
       StepResult result =
           HotfixFixture.step(rb, "restore-snapshot").execute(f.ctx("r2"), EventSink.discard());
       assertThat(result).isNotInstanceOf(StepResult.Ok.class);
@@ -116,106 +179,64 @@ class RollbackPlanTest {
   }
 
   @Test
-  void should_refuse_a_recorded_entry_when_rolled_back() throws Exception {
-    try (HotfixFixture f = HotfixFixture.create(tmp)) {
-      f.ledger.recordInstalled(
-          new LedgerEntry(
-              "JRSHF-10.0.0-20260101-0000",
-              "10.0.0",
-              "PRO",
-              "20260101_0000",
-              "by hand",
-              HotfixState.INSTALLED,
-              Origin.RECORDED,
-              "recorded",
-              Optional.empty(),
-              Instant.now(),
-              List.of()));
-      assertThatThrownBy(
-              () ->
-                  f.plans.planRollback(
-                      new HotfixPlans.RollbackArgs("JRSHF-10.0.0-20260101-0000", false)))
-          .isInstanceOf(HotfixException.class)
-          .hasMessageContaining("by hand");
-    }
-  }
-
-  @Test
-  void should_refuse_when_the_hotfix_is_unknown_or_not_installed() throws Exception {
-    try (HotfixFixture f = HotfixFixture.create(tmp)) {
-      assertThatThrownBy(
-              () -> f.plans.planRollback(new HotfixPlans.RollbackArgs("JRSHF-nope", false)))
-          .isInstanceOf(HotfixException.class)
-          .hasMessageContaining("unknown hotfix");
-      f.run(f.plan(), "r1");
-      f.ledger.updateState(HotfixFixture.ID, HotfixState.ROLLED_BACK);
-      assertThatThrownBy(
-              () -> f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false)))
-          .isInstanceOf(HotfixException.class)
-          .hasMessageContaining("is not installed");
-    }
-  }
-
-  @Test
-  void should_stay_rolled_back_when_recorded_twice_and_flip_back_when_compensated()
-      throws Exception {
+  void should_converge_when_the_undo_is_discarded_twice_and_put_back_twice() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       f.run(f.plan(), "r1");
-      Plan rb = f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false));
-      Step record = HotfixFixture.step(rb, "record-rolled-back");
-      assertThat(record.execute(f.ctx("r2"), EventSink.discard())).isEqualTo(StepResult.ok());
-      assertThat(record.execute(f.ctx("r2"), EventSink.discard())).isEqualTo(StepResult.ok());
-      assertThat(f.ledger.find(HotfixFixture.ID).orElseThrow().state())
-          .isEqualTo(HotfixState.ROLLED_BACK);
-      assertThat(record.compensate(f.ctx("r2"), EventSink.discard())).isEqualTo(StepResult.ok());
-      assertThat(record.compensate(f.ctx("r2"), EventSink.discard())).isEqualTo(StepResult.ok());
-      assertThat(f.ledger.find(HotfixFixture.ID).orElseThrow().state())
-          .isEqualTo(HotfixState.INSTALLED);
+      Plan rb = f.plans.planRollback();
+      Step discard = HotfixFixture.step(rb, "discard-undo");
+      assertThat(discard.execute(f.ctx("r2"), EventSink.discard())).isEqualTo(StepResult.ok());
+      assertThat(discard.execute(f.ctx("r2"), EventSink.discard())).isEqualTo(StepResult.ok());
+      assertThat(f.undo.read()).isEmpty();
+      assertThat(f.undo.find("r1")).isPresent();
+      assertThat(discard.compensate(f.ctx("r2"), EventSink.discard())).isEqualTo(StepResult.ok());
+      assertThat(discard.compensate(f.ctx("r2"), EventSink.discard())).isEqualTo(StepResult.ok());
+      assertThat(f.undo.read().orElseThrow().runId()).isEqualTo("r1");
     }
   }
 
   @Test
-  void should_round_trip_the_arguments_when_stored_as_json() {
-    HotfixPlans.RollbackArgs args = new HotfixPlans.RollbackArgs("JRSHF-x", true);
+  void should_round_trip_the_arguments_and_refuse_those_of_an_earlier_version() {
+    HotfixPlans.RollbackArgs args = new HotfixPlans.RollbackArgs("r1");
     assertThat(HotfixPlans.rollbackArgs(HotfixPlans.rollbackArgsJson(args))).isEqualTo(args);
-    HotfixPlans.RollbackArgs chained =
-        new HotfixPlans.RollbackArgs("JRSHF-x", true, List.of("JRSHF-y", "JRSHF-x"));
-    assertThat(HotfixPlans.rollbackArgs(HotfixPlans.rollbackArgsJson(chained))).isEqualTo(chained);
+    assertThatThrownBy(
+            () ->
+                HotfixPlans.rollbackArgs(
+                    "{\"hotfixId\":\"JRSHF-x\",\"cascade\":false,\"chain\":[\"JRSHF-x\"]}"))
+        .isInstanceOf(HotfixException.class)
+        .hasMessageContaining("0.5 or earlier");
   }
 
   @Test
-  void should_rebuild_the_stored_plan_when_the_ledger_already_says_rolled_back() throws Exception {
+  void should_rebuild_the_stored_plan_when_the_undo_is_already_used_up() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
-      HotfixPlans.ResolvedRollback resolved =
-          f.plans.resolveRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false));
-      assertThat(resolved.args().chain()).containsExactly(HotfixFixture.ID);
-      f.ledger.updateState(HotfixFixture.ID, HotfixState.ROLLED_BACK);
+      Plan planned = f.plans.planRollback();
+      String args = HotfixPlans.rollbackArgsJson(new HotfixPlans.RollbackArgs("r1"));
+      // the run reached its last step before a crash: the undo is in the run, not in undo/
+      HotfixFixture.step(planned, "discard-undo").execute(f.ctx("r2"), EventSink.discard());
 
-      Plan rebuilt =
-          f.plans.rebuild(HotfixPlans.ROLLBACK, HotfixPlans.rollbackArgsJson(resolved.args()));
+      Plan rebuilt = f.plans.rebuild(HotfixPlans.ROLLBACK, args);
 
-      assertThat(HotfixFixture.ids(rebuilt)).isEqualTo(HotfixFixture.ids(resolved.plan()));
-      assertThat(rebuilt.steps().stream().map(Step::phase).toList())
-          .isEqualTo(resolved.plan().steps().stream().map(Step::phase).toList());
-      assertThatThrownBy(
-              () -> f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false)))
+      assertThat(HotfixFixture.ids(rebuilt)).isEqualTo(HotfixFixture.ids(planned));
+      assertThat(rebuilt.fingerprint().inputs()).containsEntry("hotfix:" + HotfixFixture.ID, "r1");
+      assertThatThrownBy(() -> f.plans.planRollback())
           .isInstanceOf(HotfixException.class)
-          .hasMessageContaining("not installed");
+          .hasMessageContaining("nothing to undo");
     }
   }
 
   @Test
-  void should_refuse_a_rebuild_when_a_chained_hotfix_left_the_ledger() throws Exception {
+  void should_refuse_a_rebuild_when_another_apply_replaced_the_undo() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
-      f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
-      HotfixPlans.RollbackArgs args =
-          new HotfixPlans.RollbackArgs(HotfixFixture.ID, false, List.of(HotfixFixture.ID));
-      f.ledger.delete(HotfixFixture.ID);
+      f.run(f.plan(), "r1");
+      f.run(
+          f.plans.planApply(
+              new HotfixPlans.ApplyArgs(Packages.later(tmp.resolve("dl/later.zip")), true)),
+          "r2");
 
-      assertThatThrownBy(() -> f.plans.planRollback(args))
+      assertThatThrownBy(() -> f.plans.planRollback(new HotfixPlans.RollbackArgs("r1")))
           .isInstanceOf(HotfixException.class)
-          .hasMessageContaining("is no longer in the ledger");
+          .hasMessageContaining("is gone");
     }
   }
 
@@ -223,9 +244,7 @@ class RollbackPlanTest {
   void should_refuse_before_the_stop_when_the_base_url_does_not_answer() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r1");
-      Plan rb =
-          PreflightTest.withProbe(f, "HTTP 404", new AtomicInteger())
-              .planRollback(new HotfixPlans.RollbackArgs("JRSHF-10.0.0-20260730-0457", false));
+      Plan rb = PreflightTest.withProbe(f, "HTTP 404", new AtomicInteger()).planRollback();
       int callsBefore = f.platform.controller.calls().size();
       RunOutcome out = f.run(rb, "r2");
       assertThat(out).isInstanceOf(RunOutcome.PrecheckFailed.class);

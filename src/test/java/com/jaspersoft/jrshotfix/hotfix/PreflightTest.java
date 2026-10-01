@@ -1,7 +1,6 @@
 package com.jaspersoft.jrshotfix.hotfix;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jaspersoft.jrshotfix.engine.CheckResult;
 import com.jaspersoft.jrshotfix.engine.Context;
@@ -10,15 +9,10 @@ import com.jaspersoft.jrshotfix.engine.Sleeper;
 import com.jaspersoft.jrshotfix.event.EventSink;
 import com.jaspersoft.jrshotfix.platform.ServiceController;
 import com.jaspersoft.jrshotfix.service.ServerProbe;
-import com.jaspersoft.jrshotfix.state.HotfixState;
-import com.jaspersoft.jrshotfix.state.LedgerEntry;
-import com.jaspersoft.jrshotfix.state.Origin;
-import com.jaspersoft.jrshotfix.state.OwnedFile;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -44,7 +38,7 @@ class PreflightTest {
     }
   }
 
-  /** What an operator following the readme leaves behind: every file in place, no ledger entry. */
+  /** What an operator following the readme leaves behind: every file in place. */
   static void applyByHand(HotfixFixture f) throws Exception {
     Files.writeString(f.target(HotfixFixture.FOO), "patched foo");
     Files.writeString(f.target(HotfixFixture.NEW), "brand new");
@@ -54,13 +48,13 @@ class PreflightTest {
   }
 
   @Test
-  void should_refuse_and_name_record_when_the_hotfix_was_applied_by_hand() throws Exception {
+  void should_refuse_when_every_file_is_in_place_and_the_webapp_states_no_build() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       applyByHand(f);
       Plan plan = f.plan();
       assertThat(failure(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r"))))
           .contains(HotfixFixture.ID + " is already on this server")
-          .contains("jrs-hotfix record");
+          .doesNotContain("record");
     }
   }
 
@@ -75,100 +69,42 @@ class PreflightTest {
         "PRO_VERSION=10.0.0\n  BUILD_DATE_STAMP=" + date + "\n  BUILD_TIME_STAMP=" + time + "\n");
   }
 
-  /** A ledger entry for a hotfix of {@code build} that shipped the build file. */
-  static void installed(HotfixFixture f, String id, String build) {
-    f.ledger.recordInstalled(
-        new LedgerEntry(
-            id,
-            "10.0.0",
-            "PRO",
-            build,
-            "an earlier hotfix",
-            HotfixState.INSTALLED,
-            Origin.RECORDED,
-            HotfixPlans.RECORDED_RUN_ID,
-            Optional.empty(),
-            Instant.parse("2026-08-01T00:00:00Z"),
-            List.of(
-                new OwnedFile(
-                    f.settings.webappDir().resolve(STAMPS),
-                    "replace",
-                    Optional.of("a"),
-                    Optional.of("b")))));
-  }
-
   private static String warning(CheckResult r) {
     assertThat(r).isInstanceOf(CheckResult.Warn.class);
     return ((CheckResult.Warn) r).message();
   }
 
   @Test
-  void should_refuse_and_name_record_when_the_webapp_states_the_packages_build() throws Exception {
+  void should_refuse_when_the_webapp_states_the_packages_build() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       // one file of the package differs, so the files alone would not say "already applied"
       stateBuild(f, "20260730", "0457");
       Plan plan = f.plan();
       assertThat(failure(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r"))))
-          .contains(HotfixFixture.ID + " is already on this server")
+          .contains(HotfixFixture.ID + " is already installed")
           .contains("build 20260730_0457")
-          .contains("jrs-hotfix record");
+          .doesNotContain("record");
       assertThat(plan.summary().warnings())
-          .anySatisfy(w -> assertThat(w).contains("will be refused").contains("jrs-hotfix record"));
+          .anySatisfy(w -> assertThat(w).contains("will be refused").contains("already installed"));
     }
   }
 
   @Test
-  void should_pass_when_the_webapp_states_the_build_of_the_newest_entry() throws Exception {
+  void should_refuse_a_package_older_than_the_build_the_webapp_states() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
-      stateBuild(f, "20260601", "1200");
-      installed(f, "JRSHF-10.0.0-20260601-1200", "20260601_1200");
-      Plan plan = f.plan();
-      assertThat(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r")))
-          .isInstanceOf(CheckResult.Pass.class);
-    }
-  }
-
-  @Test
-  void should_refuse_when_the_webapp_is_older_than_the_ledger_says() throws Exception {
-    try (HotfixFixture f = HotfixFixture.create(tmp)) {
-      stateBuild(f, "20260121", "2317");
-      installed(f, "JRSHF-10.0.0-20260601-1200", "20260601_1200");
+      stateBuild(f, "20260801", "0000");
       Plan plan = f.plan();
       assertThat(failure(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r"))))
-          .contains("build 20260121_2317")
-          .contains("older than JRSHF-10.0.0-20260601-1200")
-          .contains("replaced under the ledger")
-          .contains("jrs-hotfix forget JRSHF-10.0.0-20260601-1200")
-          // the ledger's word against the webapp's: the webapp is not told it has the hotfix
-          .doesNotContain("is already installed");
-      // the way out: forget the entry, and the plan is accepted
-      f.plans.forget("JRSHF-10.0.0-20260601-1200");
-      assertThat(f.ledger.find("JRSHF-10.0.0-20260601-1200")).isEmpty();
-      assertThat(HotfixFixture.step(f.plan(), "preflight").precheck(f.ctx("r")))
-          .isNotInstanceOf(CheckResult.Fail.class);
-      assertThatThrownBy(() -> f.plans.forget("JRSHF-10.0.0-20260601-1200"))
-          .isInstanceOf(HotfixException.class)
-          .hasMessageContaining("unknown hotfix");
+          .contains("the webapp states build 20260801_0000, newer than this package's")
+          .contains("20260730_0457")
+          .contains("take the server back");
     }
   }
 
   @Test
-  void should_warn_and_go_on_when_a_hotfix_was_applied_outside_the_tool() throws Exception {
+  void should_pass_without_a_word_when_the_webapp_states_an_older_build() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
-      stateBuild(f, "20260615", "0900");
-      installed(f, "JRSHF-10.0.0-20260601-1200", "20260601_1200");
-      Plan plan = f.plan();
-      assertThat(warning(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r"))))
-          .contains("build 20260615_0900 was applied outside jrs-hotfix");
-      assertThat(plan.summary().warnings())
-          .anySatisfy(w -> assertThat(w).contains("applied outside jrs-hotfix"));
-    }
-  }
-
-  @Test
-  void should_say_nothing_about_the_build_when_the_ledger_is_empty() throws Exception {
-    try (HotfixFixture f = HotfixFixture.create(tmp)) {
-      // without an entry or a baseline, a release's own build cannot be told from a hotfix's
+      // the release, a hotfix applied by hand, a redeploy: whoever left it, it is older
       stateBuild(f, "20260121", "2317");
       Plan plan = f.plan();
       assertThat(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r")))
@@ -185,29 +121,6 @@ class PreflightTest {
       assertThat(plan.summary().warnings())
           .filteredOn(w -> w.contains("states no build"))
           .hasSize(1);
-    }
-  }
-
-  @Test
-  void should_not_compare_with_an_entry_whose_hotfix_shipped_no_build_file() throws Exception {
-    try (HotfixFixture f = HotfixFixture.create(tmp)) {
-      stateBuild(f, "20260121", "2317");
-      f.ledger.recordInstalled(
-          new LedgerEntry(
-              "JRSHF-10.0.0-20260601-1200",
-              "10.0.0",
-              "PRO",
-              "20260601_1200",
-              "a hotfix of one jar",
-              HotfixState.INSTALLED,
-              Origin.RECORDED,
-              HotfixPlans.RECORDED_RUN_ID,
-              Optional.empty(),
-              Instant.parse("2026-08-01T00:00:00Z"),
-              List.of()));
-      Plan plan = f.plan();
-      assertThat(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r")))
-          .isNotInstanceOf(CheckResult.Fail.class);
     }
   }
 
@@ -277,7 +190,7 @@ class PreflightTest {
             f.home,
             f.settings,
             f.platform,
-            f.ledger,
+            f.undo,
             f.snapshots,
             Clock.systemUTC(),
             Sleeper.none(),
@@ -313,7 +226,7 @@ class PreflightTest {
                   f.home,
                   f.settings,
                   f.platform,
-                  f.ledger,
+                  f.undo,
                   f.snapshots,
                   Clock.systemUTC(),
                   Sleeper.none(),

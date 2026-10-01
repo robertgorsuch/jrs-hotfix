@@ -10,9 +10,8 @@ import com.jaspersoft.jrshotfix.engine.RunOutcome;
 import com.jaspersoft.jrshotfix.engine.StepResult;
 import com.jaspersoft.jrshotfix.event.EventSink;
 import com.jaspersoft.jrshotfix.pkg.Packages;
-import com.jaspersoft.jrshotfix.state.HotfixState;
-import com.jaspersoft.jrshotfix.state.LedgerEntry;
 import com.jaspersoft.jrshotfix.state.OwnedFile;
+import com.jaspersoft.jrshotfix.state.UndoRecord;
 import com.jaspersoft.jrshotfix.text.PropertiesMerge;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -41,7 +40,7 @@ class ApplyPlanTest {
               "clear-jsp-cache",
               "start-service",
               "wait-for-server",
-              "record-installed");
+              "promote-undo");
       assertThat(plan.planId()).startsWith("hotfix-apply-");
       assertThat(plan.summary().operation()).isEqualTo("hotfix.apply");
       assertThat(plan.summary().target()).startsWith(HotfixFixture.ID);
@@ -49,7 +48,7 @@ class ApplyPlanTest {
       assertThat(plan.fingerprint().inputs())
           .containsKey("target:webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")
           .containsKeys("package", "settings", "installed");
-      assertThat(HotfixFixture.step(plan, "record-installed").rollbackAllOnFailure()).isTrue();
+      assertThat(HotfixFixture.step(plan, "promote-undo").rollbackAllOnFailure()).isTrue();
     }
   }
 
@@ -63,13 +62,14 @@ class ApplyPlanTest {
       assertThat(f.target(HotfixFixture.BAR)).doesNotExist();
       assertThat(f.target(HotfixFixture.FOO_OLDER)).doesNotExist();
       assertThat(Files.readString(f.target(HotfixFixture.TOOL))).isEqualTo("patched tool");
-      LedgerEntry e = f.ledger.find(HotfixFixture.ID).orElseThrow();
-      assertThat(e.state()).isEqualTo(HotfixState.INSTALLED);
+      UndoRecord e = f.undo.read().orElseThrow();
+      assertThat(e.id()).isEqualTo(HotfixFixture.ID);
       assertThat(e.runId()).isEqualTo("r1");
-      assertThat(e.snapshotRef()).contains("r1/snapshot");
       assertThat(e.files()).extracting(OwnedFile::action).contains("replace", "add", "delete");
       assertThat(f.home.stagingDir("r1")).doesNotExist();
-      assertThat(f.snapshots.find("r1", "snapshot")).isPresent();
+      // the run's snapshot became the undo
+      assertThat(f.home.runDir("r1").resolve("snapshot")).doesNotExist();
+      assertThat(f.snapshots.find("r1", "snapshot").orElseThrow().dir()).isEqualTo(f.home.undo());
       assertThat(f.platform.controller.calls()).containsExactly("stop", "start");
     }
   }
@@ -124,7 +124,7 @@ class ApplyPlanTest {
       assertThat(Files.readString(f.target(QUARTZ))).isEqualTo(QUARTZ_MERGED);
       assertThat(Files.readString(f.target(HotfixFixture.FOO))).isEqualTo("patched foo");
       OwnedFile owned =
-          f.ledger.find(HotfixFixture.ID).orElseThrow().files().stream()
+          f.undo.read().orElseThrow().files().stream()
               .filter(o -> o.path().equals(f.target(QUARTZ)))
               .findFirst()
               .orElseThrow();
@@ -137,7 +137,7 @@ class ApplyPlanTest {
       throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(quartzPackage(f), true)), "r1");
-      Plan rb = f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false));
+      Plan rb = f.plans.planRollback();
       assertThat(f.run(rb, "r2")).isInstanceOf(RunOutcome.Succeeded.class);
       assertThat(Files.readString(f.target(QUARTZ))).isEqualTo(QUARTZ_MINE);
     }
@@ -194,7 +194,9 @@ class ApplyPlanTest {
       RunOutcome second =
           f.run(f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true)), "r2");
       assertThat(second).isInstanceOf(RunOutcome.PrecheckFailed.class);
-      assertThat(((RunOutcome.PrecheckFailed) second).message()).contains("already installed");
+      // the fixture's webapp states no build: every file in place is what says so
+      assertThat(((RunOutcome.PrecheckFailed) second).message())
+          .contains("is already on this server");
     }
   }
 
@@ -208,7 +210,7 @@ class ApplyPlanTest {
       assertThat(f.target(HotfixFixture.BAR)).exists();
       assertThat(f.target(HotfixFixture.NEW)).doesNotExist();
       assertThat(Files.readString(f.target(HotfixFixture.TOOL))).isEqualTo("old tool");
-      assertThat(f.ledger.find(HotfixFixture.ID)).isEmpty();
+      assertThat(f.undo.read()).isEmpty();
       assertThat(f.home.stagingDir("r1")).doesNotExist();
       assertThat(f.platform.controller.calls()).containsExactly("stop", "start");
     }

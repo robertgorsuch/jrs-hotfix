@@ -20,11 +20,8 @@ import com.jaspersoft.jrshotfix.pkg.PackagePaths;
 import com.jaspersoft.jrshotfix.pkg.SiteDecisions;
 import com.jaspersoft.jrshotfix.scan.Scan;
 import com.jaspersoft.jrshotfix.service.ServiceSteps;
-import com.jaspersoft.jrshotfix.state.HotfixState;
-import com.jaspersoft.jrshotfix.state.Ledger;
-import com.jaspersoft.jrshotfix.state.LedgerEntry;
-import com.jaspersoft.jrshotfix.state.Origin;
 import com.jaspersoft.jrshotfix.state.OwnedFile;
+import com.jaspersoft.jrshotfix.state.UndoRecord;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -55,9 +52,6 @@ public final class HotfixPlans {
 
   /** The audit kind the front end writes to the run log when the package checksum is confirmed. */
   public static final String AUDIT_CHECKSUM_CONFIRMED = ApplySteps.AUDIT_CHECKSUM_CONFIRMED;
-
-  /** The run id of a ledger entry written by {@link #record}: no run installed it. */
-  public static final String RECORDED_RUN_ID = "recorded";
 
   /**
    * Marks a plan summary warning as one of the package readme's manual steps, so {@link
@@ -218,7 +212,7 @@ public final class HotfixPlans {
 
   /**
    * The nine-step apply plan: preflight, snapshot, stage (before the outage), stop, swap, clear the
-   * JSP cache, start, wait, record.
+   * JSP cache, start, wait, and keep the snapshot as the undo.
    */
   public Plan planApply(ApplyArgs args) {
     if (args.war().isPresent()) {
@@ -240,7 +234,7 @@ public final class HotfixPlans {
     steps.add(new JspCacheStep(rt, ApplySteps.APPLY, JspCacheStep.ID));
     steps.add(ServiceSteps.start(rt, ApplySteps.APPLY, ServiceSteps.START));
     steps.add(ServiceSteps.waitForServer(rt, ApplySteps.APPLY, ServiceSteps.WAIT));
-    steps.add(new RecordSteps.RecordInstalled(rt, in));
+    steps.add(new RecordSteps.PromoteUndo(rt, in));
 
     Path snapshotDir = ApplySteps.snapshotDir(rt.home(), "{runId}");
     Map<String, String> rollbackPoints = new LinkedHashMap<>();
@@ -248,8 +242,7 @@ public final class HotfixPlans {
     rollbackPoints.put(ApplySteps.BACKUP, "snapshot written, server untouched");
     rollbackPoints.put(ApplySteps.APPLY, "restore " + snapshotDir + ", restart service");
     rollbackPoints.put(
-        ApplySteps.RECORD,
-        "restore " + snapshotDir + ", restart service, ledger entry marked rolled back");
+        ApplySteps.RECORD, "restore " + snapshotDir + ", restart service, the previous undo kept");
     PlanSummary summary =
         new PlanSummary(
             APPLY,
@@ -414,9 +407,9 @@ public final class HotfixPlans {
   }
 
   /**
-   * The webapp paths known to be the vendor's: every file of every baseline, and every file a
-   * ledger entry owns under the webapp. A library among them that the package supersedes is
-   * deleted; one outside them is the site's and stays.
+   * The webapp paths known to be the vendor's: every file of every baseline, and every file the
+   * latest apply wrote under the webapp (0.6 design, section 5). A library among them that the
+   * package supersedes is deleted; one outside them is the site's and stays.
    */
   static Set<String> vendorFiles(HotfixRuntime rt) {
     Set<String> known = new HashSet<>();
@@ -424,12 +417,10 @@ public final class HotfixPlans {
       b.files().forEach(f -> known.add(f.path()));
     }
     Path webapp = rt.settings().webappDir();
-    for (LedgerEntry e : rt.ledger().all()) {
-      for (OwnedFile f : e.files()) {
-        Path p = f.path().toAbsolutePath().normalize();
-        if (p.startsWith(webapp)) {
-          known.add(webapp.relativize(p).toString().replace('\\', '/'));
-        }
+    for (OwnedFile f : rt.undo().read().map(UndoRecord::files).orElse(List.of())) {
+      Path p = f.path().toAbsolutePath().normalize();
+      if (p.startsWith(webapp)) {
+        known.add(webapp.relativize(p).toString().replace('\\', '/'));
       }
     }
     return known;
@@ -477,12 +468,9 @@ public final class HotfixPlans {
     return new MergePlans(rt).changedSince(doc);
   }
 
-  /** The installed hotfix that was applied with merge {@code id}, if any. */
+  /** The hotfix the latest apply installed with merge {@code id}, if it did. */
   public Optional<String> installedWith(String id) {
-    return rt.ledger().installed().stream()
-        .filter(e -> e.mergeId().equals(Optional.of(id)))
-        .map(LedgerEntry::id)
-        .findFirst();
+    return rt.undo().read().filter(u -> u.mergeId().equals(Optional.of(id))).map(UndoRecord::id);
   }
 
   /** The runtime these plans are built over. */
@@ -573,137 +561,92 @@ public final class HotfixPlans {
     return out;
   }
 
-  /** What the rollback plan does to the files of its hotfixes, for the preview: the totals. */
-  private static List<String> rollbackChanges(List<RollbackSteps.Input> inputs) {
+  /** What the rollback plan does to the files of the hotfix, for the preview: the totals. */
+  private static List<String> rollbackChanges(UndoRecord undo) {
     int restored = 0;
     int removed = 0;
     int putBack = 0;
-    for (RollbackSteps.Input in : inputs) {
-      for (OwnedFile f : in.hotfix().files()) {
-        switch (f.action()) {
-          case "add" -> removed++;
-          case "delete" -> putBack++;
-          default -> restored++;
-        }
+    for (OwnedFile f : undo.files()) {
+      switch (f.action()) {
+        case "add" -> removed++;
+        case "delete" -> putBack++;
+        default -> restored++;
       }
     }
     return List.of(restored + " restored, " + removed + " removed, " + putBack + " put back");
   }
 
   /**
-   * What {@code rollback} was asked to do; stored with the run so the plan can be rebuilt. {@code
-   * chain} is the rollback order computed at plan time, newest first and the target last; empty
-   * means "compute it from the ledger".
+   * What a rollback uses up, stored with the run so the plan can be rebuilt: the apply run whose
+   * undo it restores.
    */
-  public record RollbackArgs(String hotfixId, boolean cascade, List<String> chain) {
+  public record RollbackArgs(String undoRunId) {
     public RollbackArgs {
-      Objects.requireNonNull(hotfixId, "hotfixId");
-      chain = List.copyOf(chain);
-    }
-
-    public RollbackArgs(String hotfixId, boolean cascade) {
-      this(hotfixId, cascade, List.of());
-    }
-  }
-
-  /** A rollback plan and the arguments that rebuild exactly it: {@code args.chain()} is filled. */
-  public record ResolvedRollback(Plan plan, RollbackArgs args) {
-    public ResolvedRollback {
-      Objects.requireNonNull(plan, "plan");
-      Objects.requireNonNull(args, "args");
+      Objects.requireNonNull(undoRunId, "undoRunId");
     }
   }
 
   /**
-   * Per hotfix, newest first and the target last: stop, restore the snapshot, clear the JSP cache,
-   * start, wait, mark rolled back. Refuses a recorded entry, as target or anywhere in the chain
-   * (nothing to restore), and, unless cascading, a hotfix whose files a later installed hotfix also
-   * owns. The first stop refuses before the outage when any snapshot of the chain is missing.
+   * The rollback of the latest apply (0.6 design, section 3): stop, restore the undo's snapshot,
+   * clear the JSP cache, start, wait, use the undo up. Refuses (exit 2) when there is nothing to
+   * undo; the first stop refuses before the outage when the snapshot is damaged or a file changed
+   * since the apply.
+   */
+  public Plan planRollback() {
+    UndoRecord undo =
+        rt.undo()
+            .read()
+            .orElseThrow(
+                () ->
+                    new HotfixException(
+                        HotfixException.PRECHECK,
+                        "there is nothing to undo: no hotfix has been applied with jrs-hotfix since"
+                            + " the last rollback",
+                        "run `jrs-hotfix list` for the build this server states"));
+    return planRollback(undo);
+  }
+
+  /**
+   * The rollback that uses up the undo of run {@code args.undoRunId()}, for recheck and recovery.
    */
   public Plan planRollback(RollbackArgs args) {
-    return resolveRollback(args).plan();
+    UndoRecord undo =
+        rt.undo()
+            .find(args.undoRunId())
+            .orElseThrow(
+                () ->
+                    new HotfixException(
+                        HotfixException.PRECHECK,
+                        "the undo of run "
+                            + args.undoRunId()
+                            + " is gone: an apply or a rollback has run since",
+                        "run `jrs-hotfix list`; a rollback undoes the latest apply only"));
+    return planRollback(undo);
   }
 
-  /**
-   * As {@link #planRollback}, also returning the arguments with the computed chain, which is what a
-   * run must store. With a non-empty {@code args.chain()} (a rebuild for recovery) the state-based
-   * refusals are skipped, because the partial run may already have changed the ledger, and the
-   * chain is used as given; every id must still have a ledger entry.
-   */
-  public ResolvedRollback resolveRollback(RollbackArgs args) {
-    Ledger ledger = rt.ledger();
-    List<String> chain;
-    LedgerEntry target;
-    if (args.chain().isEmpty()) {
-      target =
-          ledger
-              .find(args.hotfixId())
-              .orElseThrow(
-                  () ->
-                      new HotfixException(
-                          HotfixException.PRECHECK,
-                          "unknown hotfix " + args.hotfixId(),
-                          "run jrs-hotfix list"));
-      if (target.state() != HotfixState.INSTALLED) {
-        throw new HotfixException(
-            HotfixException.PRECHECK,
-            args.hotfixId() + " is not installed (state " + target.state() + ")",
-            "run jrs-hotfix list");
-      }
-      refuseRecorded(target);
-      chain = RollbackChain.of(ledger, target, args.cascade());
-      for (String id : chain) {
-        // a recorded entry owns files, so it can be a later blocker the cascade would take off
-        refuseRecorded(ledger.find(id).orElseThrow());
-      }
-    } else {
-      chain = args.chain();
-      for (String id : chain) {
-        requireEntry(ledger, id);
-      }
-      target = requireEntry(ledger, args.hotfixId());
-    }
-    List<RollbackSteps.Input> inputs = new ArrayList<>();
-    List<RollbackSteps.RestoreSnapshot> restores = new ArrayList<>();
-    for (String id : chain) {
-      LedgerEntry hotfix = ledger.find(id).orElseThrow();
-      String suffix = chain.size() > 1 ? ":" + id : "";
-      String phase = chain.size() > 1 ? RollbackSteps.PHASE + ":" + id : RollbackSteps.PHASE;
-      RollbackSteps.Input in = new RollbackSteps.Input(hotfix, phase, suffix);
-      inputs.add(in);
-      restores.add(new RollbackSteps.RestoreSnapshot(rt, in));
-    }
-
+  private Plan planRollback(UndoRecord undo) {
+    RollbackSteps.Input in = new RollbackSteps.Input(undo);
+    RollbackSteps.RestoreSnapshot restore = new RollbackSteps.RestoreSnapshot(rt, in);
     List<Step> steps = new ArrayList<>();
-    List<Path> touched = new ArrayList<>();
-    List<Path> backups = new ArrayList<>();
+    steps.add(RollbackSteps.stop(rt, in, restore));
+    steps.add(restore);
+    steps.add(new JspCacheStep(rt, RollbackSteps.PHASE, JspCacheStep.ID));
+    steps.add(ServiceSteps.start(rt, RollbackSteps.PHASE, ServiceSteps.START));
+    steps.add(ServiceSteps.waitForServer(rt, RollbackSteps.PHASE, ServiceSteps.WAIT));
+    steps.add(new RollbackSteps.DiscardUndo(rt, in));
+
     List<String> warnings = new ArrayList<>();
+    List<String> changed = RollbackSteps.changedSinceApply(rt, undo);
+    if (!changed.isEmpty()) {
+      warnings.add(
+          "this plan will be refused before anything is changed: "
+              + RollbackSteps.changedProblem(undo, changed));
+    }
     Map<String, String> fingerprint = new LinkedHashMap<>();
     fingerprint.put("settings", rt.settings().fingerprintInput());
-    for (int i = 0; i < inputs.size(); i++) {
-      RollbackSteps.Input in = inputs.get(i);
-      LedgerEntry hotfix = in.hotfix();
-      // the first stop is the start of the outage: every snapshot the chain needs is checked first
-      steps.add(RollbackSteps.stop(rt, in, i == 0, restores));
-      steps.add(restores.get(i));
-      steps.add(new JspCacheStep(rt, in.phase(), JspCacheStep.ID + in.suffix()));
-      steps.add(ServiceSteps.start(rt, in.phase(), ServiceSteps.START + in.suffix()));
-      steps.add(ServiceSteps.waitForServer(rt, in.phase(), ServiceSteps.WAIT + in.suffix()));
-      steps.add(new RollbackSteps.RecordRolledBack(rt, in));
-      touched.addAll(in.touched());
-      backups.add(ApplySteps.snapshotDir(rt.home(), hotfix.runId()));
-      fingerprint.put("hotfix:" + in.id(), hotfix.runId());
-      for (OwnedFile f : hotfix.files()) {
-        fingerprint.put(
-            "file:" + f.path(), FileTarget.hashOf(rt.files(), f.path()).orElse("absent"));
-      }
-      if (!in.id().equals(target.id())) {
-        warnings.add(
-            in.id()
-                + " is rolled back first because it owns files "
-                + target.id()
-                + " also owns (--cascade)");
-      }
+    fingerprint.put("hotfix:" + undo.id(), undo.runId());
+    for (OwnedFile f : undo.files()) {
+      fingerprint.put("file:" + f.path(), FileTarget.hashOf(rt.files(), f.path()).orElse("absent"));
     }
     Map<String, String> rollbackPoints = new LinkedHashMap<>();
     rollbackPoints.put(
@@ -711,130 +654,20 @@ public final class HotfixPlans {
     PlanSummary summary =
         new PlanSummary(
             ROLLBACK,
-            String.join(", ", chain),
-            touched,
+            undo.id(),
+            in.touched(),
             List.of(),
             true,
-            backups,
+            List.of(rt.home().undo()),
             rollbackPoints,
             "snapshot",
             warnings,
-            rollbackChanges(inputs));
-    Plan plan =
-        new Plan(
-            "hotfix-rollback-" + RunIds.next(rt.clock()),
-            steps,
-            summary,
-            PlanFingerprint.of(fingerprint));
-    return new ResolvedRollback(plan, new RollbackArgs(args.hotfixId(), args.cascade(), chain));
-  }
-
-  /** The ledger entry of {@code id} for a rollback being rebuilt; refuses (exit 2) a gone one. */
-  private static LedgerEntry requireEntry(Ledger ledger, String id) {
-    return ledger
-        .find(id)
-        .orElseThrow(
-            () ->
-                new HotfixException(
-                    HotfixException.PRECHECK,
-                    id + " is no longer in the ledger",
-                    "the run cannot be rebuilt; restore ledger.json from a backup or remove the run"
-                        + " directory by hand"));
-  }
-
-  private static void refuseRecorded(LedgerEntry hotfix) {
-    if (hotfix.recorded()) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          hotfix.id() + " was applied by hand and only recorded; there is no snapshot to put back",
-          "remove the hotfix by hand following the vendor's readme; the entry stays as the"
-              + " inventory of this server");
-    }
-  }
-
-  /**
-   * Takes a hotfix out of the ledger because the webapp no longer holds it: it was redeployed from
-   * a WAR, or the hotfix was removed by hand. Touches nothing on the server; the entry's snapshot
-   * stays until {@code runs prune}, and the hotfix's baseline stays too. Refuses (exit 2) an id the
-   * ledger does not have.
-   */
-  public LedgerEntry forget(String id) {
-    LedgerEntry entry =
-        rt.ledger()
-            .find(id)
-            .orElseThrow(
-                () ->
-                    new HotfixException(
-                        HotfixException.PRECHECK,
-                        "unknown hotfix " + id,
-                        "run `jrs-hotfix list` for the ids"));
-    rt.ledger().delete(id);
-    return entry;
-  }
-
-  /**
-   * Records a hotfix applied by hand from its package. Touches nothing on the server: the entry's
-   * files are the package's adds and replaces, with the hash on disk now as the before-hash and the
-   * package's payload hash as the after-hash; there is no snapshot, so a recorded entry cannot be
-   * rolled back by this tool. The package's files become the hotfix's baseline, so a later scan or
-   * merge knows them as the vendor's.
-   */
-  public LedgerEntry record(Path packageFile) {
-    PackageContents c = readPackage(packageFile);
-    Optional<LedgerEntry> existing = rt.ledger().find(c.id());
-    if (existing.isPresent()) {
-      LedgerEntry h = existing.get();
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          c.id()
-              + " is already in the ledger ("
-              + h.state()
-              + ", "
-              + (h.recorded() ? "recorded" : "applied by jrs-hotfix in run " + h.runId())
-              + ")",
-          "run jrs-hotfix list; a rolled-back entry must be removed with `jrs-hotfix runs prune`"
-              + " before the same id is recorded again");
-    }
-    List<OwnedFile> files = new ArrayList<>();
-    for (PackageContents.Entry e : c.entries()) {
-      if (e.action() == Action.DELETE) {
-        continue;
-      }
-      Path target = rt.paths().resolve(e.path());
-      files.add(
-          new OwnedFile(
-              target,
-              e.action().name().toLowerCase(Locale.ROOT),
-              FileTarget.hashOf(rt.files(), target),
-              e.sha256()));
-    }
-    LedgerEntry entry =
-        new LedgerEntry(
-            c.id(),
-            c.release(),
-            c.edition(),
-            c.build(),
-            c.title(),
-            HotfixState.INSTALLED,
-            Origin.RECORDED,
-            RECORDED_RUN_ID,
-            Optional.empty(),
-            rt.clock().instant(),
-            files);
-    rt.ledger().recordInstalled(entry);
-    try {
-      rt.baselines()
-          .addHotfix(packageFile.toAbsolutePath().normalize(), c, rt.settings().webappName());
-    } catch (IOException | UncheckedIOException e) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          c.id() + " is recorded, but its baseline could not be written: " + e.getMessage(),
-          "check free space under "
-              + rt.home().baselines()
-              + ", then run `jrs-hotfix baseline add <package.zip>`",
-          e);
-    }
-    return entry;
+            rollbackChanges(undo));
+    return new Plan(
+        "hotfix-rollback-" + RunIds.next(rt.clock()),
+        steps,
+        summary,
+        PlanFingerprint.of(fingerprint));
   }
 
   /**
@@ -875,7 +708,7 @@ public final class HotfixPlans {
     }
     PackageContents c;
     try {
-      // as the apply reads it: what the ledger and the baselines know decides the superseded ones
+      // as the apply reads it: what the undo and the baselines know decides the superseded ones
       c = readPackage(file);
     } catch (HotfixException e) {
       return unreadable(e.getMessage());
@@ -904,14 +737,13 @@ public final class HotfixPlans {
 
   /**
    * What is said about a package beyond its own notes: what the build the webapp states implies,
-   * and, when the hotfix is installed, which of its files were merged with this site's or left as
-   * the site has them. A merged file that still has the hash the apply wrote is as it should be,
-   * not a mismatch with the package.
+   * and, when the latest apply installed it, which of its files were merged with this site's or
+   * left as the site has them. A merged file that still has the hash the apply wrote is as it
+   * should be, not a mismatch with the package.
    */
   private List<String> asApplied(PackageContents c) {
     List<String> out = new ArrayList<>(buildWarnings(rt, c));
-    Optional<LedgerEntry> entry =
-        rt.ledger().find(c.id()).filter(e -> e.state() == HotfixState.INSTALLED);
+    Optional<UndoRecord> entry = rt.undo().read().filter(u -> u.id().equals(c.id()));
     if (entry.isEmpty()) {
       return out;
     }
@@ -923,7 +755,7 @@ public final class HotfixPlans {
                 : f.path() + ": merged by jrs-hotfix, and changed since");
       }
     }
-    for (LedgerEntry.KeptFile k : entry.get().kept()) {
+    for (UndoRecord.KeptFile k : entry.get().kept()) {
       out.add(k.path() + ": kept as the site has it (" + k.reason() + ")");
     }
     return out;
@@ -946,11 +778,10 @@ public final class HotfixPlans {
 
   /**
    * Why the package does not apply here, empty when it does: the installed release must equal the
-   * package's, the edition must match the webapp name, the hotfix must not be installed already, by
-   * the ledger or, when the ledger does not know it, by the build the webapp states or by the files
-   * themselves, and the webapp must not be older than the ledger says ({@link BuildCheck}). Shared
-   * by {@code verify} and the apply plan's preflight; {@code targets} are the package's files as
-   * they were on disk when the caller resolved them.
+   * package's, the edition must match the webapp name, and the build the webapp states must be
+   * older than the package's ({@link BuildCheck}); when the webapp states none, the package must
+   * not be in place already, file by file. Shared by {@code verify} and the apply plan's preflight;
+   * {@code targets} are the package's files as they were on disk when the caller resolved them.
    */
   static List<String> applicability(HotfixRuntime rt, PackageContents c, List<FileTarget> targets) {
     List<String> problems = new ArrayList<>();
@@ -973,43 +804,21 @@ public final class HotfixPlans {
               + rt.settings().webappName());
     }
     problems.addAll(c.conflicts());
-    List<String> build = problems.isEmpty() ? buildCheck(rt, c).problems() : List.of();
-    if (!build.isEmpty()) {
-      // the build says the webapp is not what the ledger describes: "already installed" would
-      // be the ledger's word against the webapp's, so only the build is reported
-      problems.addAll(build);
-    } else if (rt.ledger()
-        .find(c.id())
-        .filter(e -> e.state() == HotfixState.INSTALLED)
-        .isPresent()) {
-      problems.add(c.id() + " is already installed");
-    } else if (problems.isEmpty() && inPlace(targets)) {
+    if (problems.isEmpty()) {
+      problems.addAll(BuildCheck.of(rt.settings().webappDir(), c).problems());
+    }
+    if (problems.isEmpty() && inPlace(targets)) {
       problems.add(
           c.id()
               + " is already on this server: every file of the package is in place with the"
-              + " package's content and nothing is left to delete, but the ledger does not list"
-              + " it as installed; it was applied by hand or by another tool, so run `jrs-hotfix"
-              + " record <package.zip>` and the ledger will know it");
+              + " package's content and nothing is left to delete");
     }
     return problems;
   }
 
-  private static BuildCheck buildCheck(HotfixRuntime rt, PackageContents c) {
-    Set<String> releaseBuilds = new HashSet<>();
-    for (BaselineManifest b : rt.baselines().list()) {
-      if (b.kind() == BaselineManifest.Kind.RELEASE && b.release().equals(c.release())) {
-        releaseBuilds.add(b.build());
-      }
-    }
-    return BuildCheck.of(rt, c, releaseBuilds);
-  }
-
-  /**
-   * What the build the webapp states says without refusing the package: that it cannot be read, or
-   * that a hotfix was applied outside this tool.
-   */
+  /** What the build the webapp states says without refusing the package: that it is unreadable. */
   static List<String> buildWarnings(HotfixRuntime rt, PackageContents c) {
-    return buildCheck(rt, c).warnings();
+    return BuildCheck.of(rt.settings().webappDir(), c).warnings();
   }
 
   /**
@@ -1022,9 +831,9 @@ public final class HotfixPlans {
             .allMatch(t -> t.action() != Action.DELETE && t.before().equals(t.after()));
   }
 
-  /** Every ledger entry, installed and rolled back alike, in install order. */
-  public List<LedgerEntry> list() {
-    return rt.ledger().all();
+  /** The latest apply, which {@code rollback} would undo; empty when there is nothing to undo. */
+  public Optional<UndoRecord> undo() {
+    return rt.undo().read();
   }
 
   /**
@@ -1088,11 +897,7 @@ public final class HotfixPlans {
   }
 
   public static String rollbackArgsJson(RollbackArgs a) {
-    Map<String, Object> m = new LinkedHashMap<>();
-    m.put("hotfixId", a.hotfixId());
-    m.put("cascade", a.cascade());
-    m.put("chain", a.chain());
-    return Json.write(m);
+    return Json.write(Map.of("undoRunId", a.undoRunId()));
   }
 
   public static RollbackArgs rollbackArgs(String json) {
@@ -1102,10 +907,14 @@ public final class HotfixPlans {
     } catch (IOException e) {
       throw new UncheckedIOException("cannot read the rollback arguments: " + e.getMessage(), e);
     }
-    List<String> chain = new ArrayList<>();
-    for (JsonNode id : n.path("chain")) {
-      chain.add(id.asText());
+    if (!n.hasNonNull("undoRunId")) {
+      // a rollback stored by 0.1 to 0.5 names a hotfix and a chain from the ledger
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          "this rollback was started by jrs-hotfix 0.5 or earlier",
+          "finish or undo it with that version (`runs resume` or `runs rollback`), then use this"
+              + " one");
     }
-    return new RollbackArgs(n.get("hotfixId").asText(), n.get("cascade").asBoolean(), chain);
+    return new RollbackArgs(n.get("undoRunId").asText());
   }
 }

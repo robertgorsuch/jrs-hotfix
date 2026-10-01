@@ -89,7 +89,7 @@ class WarTargetTest {
       assertThat(f.pendingRunIds()).isEmpty();
       assertThat(f.tomcatRunning()).as("no server was touched").isTrue();
       // the server's ledger is not the WAR's inventory
-      assertThat(f.cli.run("list").assertExit(0).stdout()).contains("no hotfixes recorded");
+      assertThat(f.cli.run("list").assertExit(0).stdout()).contains("can be undone:  nothing");
     }
   }
 }
