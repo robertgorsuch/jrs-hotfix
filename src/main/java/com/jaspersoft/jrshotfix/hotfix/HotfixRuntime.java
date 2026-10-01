@@ -14,7 +14,7 @@ import com.jaspersoft.jrshotfix.service.CompanionDatabase;
 import com.jaspersoft.jrshotfix.service.ServerProbe;
 import com.jaspersoft.jrshotfix.service.ServiceRuntime;
 import com.jaspersoft.jrshotfix.snapshot.SnapshotStore;
-import com.jaspersoft.jrshotfix.state.Ledger;
+import com.jaspersoft.jrshotfix.state.UndoStore;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
@@ -29,7 +29,7 @@ public record HotfixRuntime(
     Home home,
     Settings settings,
     Platform platform,
-    Ledger ledger,
+    UndoStore undo,
     SnapshotStore snapshots,
     Clock clock,
     Sleeper sleeper,
@@ -40,7 +40,7 @@ public record HotfixRuntime(
     Objects.requireNonNull(home, "home");
     Objects.requireNonNull(settings, "settings");
     Objects.requireNonNull(platform, "platform");
-    Objects.requireNonNull(ledger, "ledger");
+    Objects.requireNonNull(undo, "undo");
     Objects.requireNonNull(snapshots, "snapshots");
     Objects.requireNonNull(clock, "clock");
     Objects.requireNonNull(sleeper, "sleeper");

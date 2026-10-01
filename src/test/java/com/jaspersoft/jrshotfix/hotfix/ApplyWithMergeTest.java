@@ -12,8 +12,8 @@ import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
 import com.jaspersoft.jrshotfix.merge.MergeWorkspace.Choice;
 import com.jaspersoft.jrshotfix.merge.MergeWorkspace.OnConflict;
 import com.jaspersoft.jrshotfix.pkg.Packages;
-import com.jaspersoft.jrshotfix.state.LedgerEntry;
 import com.jaspersoft.jrshotfix.state.OwnedFile;
+import com.jaspersoft.jrshotfix.state.UndoRecord;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -74,7 +74,7 @@ class ApplyWithMergeTest {
     assertThat(s.read(Wars.CONTAINER)).contains("jasperdb").doesNotContain("maxTotal");
     assertThat(s.read(Packages.LIB + "foo-1.2.3.jar")).isEqualTo("patched foo");
 
-    LedgerEntry entry = s.f.ledger.find(SiteFixture.HOTFIX_ID).orElseThrow();
+    UndoRecord entry = s.f.undo.read().orElseThrow();
     assertThat(entry.mergeId()).contains(doc.id());
     assertThat(entry.baselines()).containsExactly(Wars.RELEASE_ID);
     assertThat(entry.kept())
@@ -117,7 +117,7 @@ class ApplyWithMergeTest {
 
     assertThat(s.f.run(plan, "r-mine").exitCode()).isZero();
     assertThat(s.read(Wars.SCRIPT)).isEqualTo("console.log('site');\n");
-    LedgerEntry entry = s.f.ledger.find(SiteFixture.HOTFIX_ID).orElseThrow();
+    UndoRecord entry = s.f.undo.read().orElseThrow();
     assertThat(entry.kept())
         .extracting(k -> s.webapp.relativize(k.path()).toString().replace('\\', '/'))
         .contains(Wars.SCRIPT);
@@ -139,8 +139,7 @@ class ApplyWithMergeTest {
     Path zip = s.hotfix();
     assertThat(s.f.run(s.f.plans.planApply(args(zip, ready(s, zip))), "r-apply").exitCode())
         .isZero();
-    Plan rollback =
-        s.f.plans.planRollback(new HotfixPlans.RollbackArgs(SiteFixture.HOTFIX_ID, false));
+    Plan rollback = s.f.plans.planRollback();
     assertThat(s.f.run(rollback, "r-rollback").exitCode()).isZero();
     for (Map.Entry<String, String> e : before.entrySet()) {
       assertThat(s.read(e.getKey())).as(e.getKey()).isEqualTo(e.getValue());

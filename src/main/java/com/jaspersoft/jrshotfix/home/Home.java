@@ -16,6 +16,12 @@ public record Home(Path root) {
     return root.resolve("settings.json");
   }
 
+  /** What the latest apply did and the files it replaced, until the next run (0.6 design). */
+  public Path undo() {
+    return root.resolve("undo");
+  }
+
+  /** The 0.1 to 0.5 registry of hotfixes, read once to convert a home written by those. */
   public Path ledgerFile() {
     return root.resolve("ledger.json");
   }
@@ -45,6 +51,7 @@ public record Home(Path root) {
     return runDir(runId).resolve("notes.txt");
   }
 
+  /** Where 0.1 to 0.5 kept every run's snapshots; 0.6 keeps a run's snapshot in its run dir. */
   public Path snapshots() {
     return root.resolve("snapshots");
   }

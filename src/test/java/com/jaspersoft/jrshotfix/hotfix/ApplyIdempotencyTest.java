@@ -9,7 +9,6 @@ import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.engine.StepResult;
 import com.jaspersoft.jrshotfix.event.EventSink;
 import com.jaspersoft.jrshotfix.platform.ServiceController;
-import com.jaspersoft.jrshotfix.state.HotfixState;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,8 +22,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Every step of the apply plan executed a second time after a complete first execution (what a
- * resume after a crash does) leaves the installation, the snapshots, the run directory, the ledger
- * and the service exactly as one execution did; the same holds for every compensation.
+ * resume after a crash does) leaves the installation, the undo, the run directory, the service and
+ * the service exactly as one execution did; the same holds for every compensation.
  */
 class ApplyIdempotencyTest {
 
@@ -52,11 +51,11 @@ class ApplyIdempotencyTest {
   private static Map<String, String> state(HotfixFixture f, String runId) throws IOException {
     Map<String, String> m = new TreeMap<>();
     m.putAll(tree(f, "install", f.paths.installDir()));
-    m.putAll(tree(f, "snapshots", f.home.snapshots()));
+    m.putAll(tree(f, "undo", f.home.undo()));
     m.putAll(tree(f, "run", f.home.runDir(runId)));
     m.put("service", f.platform.controller.state().name());
     m.put("calls", f.platform.controller.calls().toString());
-    m.put("ledger", f.ledger.all().toString());
+    m.put("undo.json", f.undo.read().toString());
     return m;
   }
 
@@ -106,7 +105,7 @@ class ApplyIdempotencyTest {
       throws IOException {
     Plan plan = f.plan();
     Context ctx = f.ctx(runId);
-    runUpTo(plan, ctx, "record-installed");
+    runUpTo(plan, ctx, "promote-undo");
     Step step = HotfixFixture.step(plan, stepId);
     compensateOk(step, ctx);
     Map<String, String> once = state(f, runId);
@@ -249,21 +248,22 @@ class ApplyIdempotencyTest {
   }
 
   @Test
-  void should_converge_when_record_installed_executes_twice() throws IOException {
+  void should_converge_when_promote_undo_executes_twice() throws IOException {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
-      assertReexecutionConverges(f, "r-rec", "record-installed");
-      assertThat(f.ledger.find(HotfixFixture.ID).orElseThrow().state())
-          .isEqualTo(HotfixState.INSTALLED);
+      assertReexecutionConverges(f, "r-rec", "promote-undo");
+      assertThat(f.undo.read().orElseThrow().runId()).isEqualTo("r-rec");
+      assertThat(f.home.undo().resolve("manifest.json")).isRegularFile();
       assertThat(f.home.stagingDir("r-rec")).doesNotExist();
     }
   }
 
   @Test
-  void should_converge_when_record_installed_compensates_twice() throws IOException {
+  void should_converge_when_promote_undo_compensates_twice() throws IOException {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
-      assertCompensationConverges(f, "r-rec-c", "record-installed");
-      assertThat(f.ledger.find(HotfixFixture.ID).orElseThrow().state())
-          .isEqualTo(HotfixState.ROLLED_BACK);
+      assertCompensationConverges(f, "r-rec-c", "promote-undo");
+      assertThat(f.undo.read()).isEmpty();
+      assertThat(f.home.runDir("r-rec-c").resolve("snapshot").resolve("manifest.json"))
+          .isRegularFile();
     }
   }
 

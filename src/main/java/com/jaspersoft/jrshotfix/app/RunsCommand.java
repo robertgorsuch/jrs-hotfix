@@ -160,10 +160,9 @@ final class RunsCommand extends GroupCommand {
       name = "prune",
       mixinStandardHelpOptions = true,
       description =
-          "Remove ended runs, snapshots and unused merges older than the cut-off, and hotfix"
-              + " baselines older than the newest two; the snapshot of an installed hotfix,"
-              + " anything of a pending run and, without --include-failed, anything of a failed"
-              + " run are kept.",
+          "Remove ended runs and unused merges older than the cut-off, and hotfix baselines"
+              + " older than the newest two; the undo of the latest apply, anything of a pending"
+              + " run and, without --include-failed, anything of a failed run are kept.",
       footer = {"", "Example:", "  jrs-hotfix runs prune --older-than 30"})
   static final class Prune extends AppCommand {
     @Option(
@@ -186,7 +185,7 @@ final class RunsCommand extends GroupCommand {
             err(), ExitCodes.USAGE, "--older-than must not be negative", Optional.empty());
       }
       Bootstrap boot = open();
-      // refused while any run is pending: a pending rollback's chain needs other runs' snapshots
+      // refused while any run is pending: its recovery needs its own run directory
       return executor(boot).mutate("prune", () -> prune(boot));
     }
 
@@ -194,8 +193,6 @@ final class RunsCommand extends GroupCommand {
       RunService.PruneResult r = new RunService(boot).prune(Duration.ofDays(days), includeFailed);
       PrintWriter out = out();
       out.println("runs removed        " + list(r.runsRemoved()));
-      out.println("snapshots removed   " + list(r.snapshotsRemoved()));
-      out.println("ledger entries removed  " + list(r.ledgerEntriesRemoved()));
       out.println("baselines removed   " + list(r.baselinesRemoved()));
       out.println("merges removed      " + list(r.mergesRemoved()));
       out.flush();

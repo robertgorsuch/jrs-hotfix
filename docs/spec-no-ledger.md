@@ -1,6 +1,6 @@
 # jrs-hotfix 0.6: no ledger, one undo
 
-Status: decided 2026-10-01, for 0.6.0. Changes `docs/spec.md` (the 0.1 design; cited as "spec
+Status: decided 2026-10-01; implemented for 0.6.0. Changes `docs/spec.md` (the 0.1 design; cited as "spec
 3", "spec 4.2") and `docs/spec-customized-servers.md` where they read the ledger. Two rulings of
 the maintainer, 2026-10-01, are its starting point:
 
@@ -175,8 +175,8 @@ latest-only ruling.
 | `forget <id>` | removed: nothing to forget |
 | `rollback <id> [--cascade]` | `rollback`: the latest apply, no argument; `--cascade` removed |
 | `list` | the build and the undo (section 5) |
-| menu entry 6, "Record a hotfix applied by hand" | removed; the entries after it move up |
-| menu "Roll back a hotfix" with the cascade question | "Undo the latest hotfix (`<id>`)", shown only while `undo/` exists |
+| menu entry 6, "Record a hotfix applied by hand" | removed; the entries after it move up, so recovery is entry 6 and settings entry 7 |
+| menu "Roll back a hotfix" with the cascade question | "Undo the latest hotfix", which runs `rollback`: the plan names the hotfix, and with nothing to undo it says so |
 
 A script that runs `record` or `forget`, or passes an id or `--cascade` to `rollback`, gets
 exit 1 (unknown command, option or parameter) and must drop it. The release notes say so, as 0.4.0's did. The exit codes and their meanings
@@ -190,13 +190,19 @@ lock:
 1. The newest entry that is `INSTALLED`, has origin `TOOL`, and has a snapshot that exists and
    verifies becomes `undo/`: `undo.json` from the entry, and the snapshot directory moved into
    place. Nothing becomes `undo/` when there is no such entry.
-2. The other directories under `snapshots/` are deleted, except those of pending runs and of
-   runs that ended with exit 4, which move to their run's `runs/<runId>/snapshot/`.
+2. The other directories under `snapshots/` are deleted, except those of runs that ended
+   with exit 4, which move into their run's directory, `runs/<runId>/<step>/`.
 3. `ledger.json` is renamed `ledger.json.0.5`. It is kept for support and never read again.
 
-The conversion is idempotent and its steps are journal lines, so a crash part-way is finished
-by the next command. A read-only command (`list`, `verify`, `settings show`) on an unconverted
-home reads the ledger as 0.5 would, to show the undo, and writes nothing.
+The conversion is idempotent (each step checks what is already done), so a crash part-way is
+finished by the next command. A read-only command (`list`, `verify`, `settings show`) on an
+unconverted home reads the ledger as 0.5 would, to show the undo, and writes nothing.
+
+A pending run blocks the conversion as it blocks every mutating command (exit 8). An apply that
+0.5 started and a crash interrupted before its last step resumes or rolls back with 0.6, which
+finds its snapshot where 0.5 put it. One that had reached its last step (`record-installed`,
+which 0.6 does not have), or a rollback that 0.5 started (its stored arguments name a hotfix and
+a chain), is refused by 0.6 and must be finished with 0.5.
 
 ## 8. What is given up
 

@@ -29,9 +29,9 @@ import java.util.Optional;
  * staging straight out of the package, and the swap itself. Invariants: every step re-checks the
  * state on disk before it acts, so re-execution after a crash converges; the snapshot is verified
  * as it is created, and an existing snapshot for the same run and step is reused rather than
- * rewritten, and the ledger entry's {@code snapshotRef} is what records it; staging runs before the
- * service stop, so the outage is only the swap; the swap restores from the run's snapshot when
- * compensated.
+ * rewritten; it lives in the run's directory until the last step makes it the undo; staging runs
+ * before the service stop, so the outage is only the swap; the swap restores from the run's
+ * snapshot when compensated.
  */
 final class ApplyPhaseSteps {
 

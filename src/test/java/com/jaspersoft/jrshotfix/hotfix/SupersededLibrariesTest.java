@@ -16,7 +16,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * The field case of 2026-09-30: a hotfix brings a newer version of a library the hotfix before it
- * brought, and names the older one in no list. The older one is the vendor's, known to the ledger,
+ * brought, and names the older one in no list. The older one is the vendor's, known to the undo,
  * and is deleted as superseded; a library the site added never is.
  */
 class SupersededLibrariesTest {
@@ -48,9 +48,8 @@ class SupersededLibrariesTest {
   }
 
   @Test
-  void
-      should_delete_the_older_version_the_ledger_knows_and_leave_the_sites_when_no_list_names_them()
-          throws Exception {
+  void should_delete_the_older_version_the_undo_knows_and_leave_the_sites_when_no_list_names_them()
+      throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       Path first = hotfix("first.zip", "20260428_1437", "widget-2.25.3.jar");
       assertThat(
@@ -81,7 +80,7 @@ class SupersededLibrariesTest {
       assertThat(f.target(OLDER)).doesNotExist();
       assertThat(f.target(NEWER)).exists();
       assertThat(f.target(SITES)).exists();
-      assertThat(f.ledger.find("JRSHF-10.0.0-20260730-0457").orElseThrow().files())
+      assertThat(f.undo.read().orElseThrow().files())
           .anySatisfy(
               o -> {
                 assertThat(o.path()).isEqualTo(f.target(OLDER));
@@ -89,8 +88,7 @@ class SupersededLibrariesTest {
               });
 
       // the rollback puts the superseded library back
-      Plan rollback =
-          f.plans.planRollback(new HotfixPlans.RollbackArgs("JRSHF-10.0.0-20260730-0457", false));
+      Plan rollback = f.plans.planRollback();
       assertThat(f.run(rollback, "r-back").exitCode()).isZero();
       assertThat(Files.readString(f.target(OLDER))).isEqualTo("widget widget-2.25.3.jar");
       assertThat(f.target(NEWER)).doesNotExist();
@@ -161,32 +159,35 @@ class SupersededLibrariesTest {
                       .contains("log4j-jakarta-web-2.25.3.jar is a web fragment named log4j")
                       .contains("the package brings log4j-jakarta-web-2.25.4.jar")
                       .contains("Tomcat refuses to deploy")
-                      .contains("jrs-hotfix record"));
+                      .contains("`jrs-hotfix baseline add`"));
       Plan plan = f.plans.planApply(new HotfixPlans.ApplyArgs(pkg, true));
       assertThat(plan.summary().warnings())
           .anySatisfy(w -> assertThat(w).contains("will be refused").contains("web fragment"));
       assertThat(f.run(plan, "r-refused").exitCode()).isEqualTo(2);
       assertThat(f.target(older)).exists();
 
-      // once the earlier hotfix is known (here: a ledger entry owning the jar), it is deleted
-      f.ledger.recordInstalled(
-          new com.jaspersoft.jrshotfix.state.LedgerEntry(
-              "JRSHF-10.0.0-20260428-1437",
-              "10.0.0",
-              "PRO",
-              "20260428_1437",
-              "the earlier hotfix",
-              com.jaspersoft.jrshotfix.state.HotfixState.INSTALLED,
-              com.jaspersoft.jrshotfix.state.Origin.RECORDED,
-              HotfixPlans.RECORDED_RUN_ID,
-              java.util.Optional.empty(),
-              java.time.Instant.parse("2026-04-28T14:37:00Z"),
-              java.util.List.of(
-                  new com.jaspersoft.jrshotfix.state.OwnedFile(
-                      f.target(older),
-                      "add",
-                      java.util.Optional.empty(),
-                      java.util.Optional.of("x")))));
+      // once the earlier hotfix is known (here: the undo of the apply that brought the jar), it
+      // is deleted
+      com.jaspersoft.jrshotfix.platform.Durability.writeAtomically(
+          f.home.undo().resolve(com.jaspersoft.jrshotfix.state.UndoStore.RECORD),
+          com.jaspersoft.jrshotfix.json.Json.writePretty(
+              new com.jaspersoft.jrshotfix.state.UndoRecord(
+                  "JRSHF-10.0.0-20260428-1437",
+                  "10.0.0",
+                  "PRO",
+                  "20260428_1437",
+                  "the earlier hotfix",
+                  "r-earlier",
+                  java.time.Instant.parse("2026-04-28T14:37:00Z"),
+                  java.util.List.of(
+                      new com.jaspersoft.jrshotfix.state.OwnedFile(
+                          f.target(older),
+                          "add",
+                          java.util.Optional.empty(),
+                          java.util.Optional.of("x"))),
+                  java.util.List.of(),
+                  java.util.Optional.empty(),
+                  java.util.List.of())));
       assertThat(f.plans.verify(pkg).problems()).isEmpty();
       Plan again = f.plans.planApply(new HotfixPlans.ApplyArgs(pkg, true));
       assertThat(contents(again).superseded()).containsExactly(older);
@@ -209,7 +210,7 @@ class SupersededLibrariesTest {
               n ->
                   assertThat(n)
                       .contains("widget-2.25.3.jar (the package brings widget-2.25.4.jar)")
-                      .contains("neither the ledger nor a baseline knows it")
+                      .contains("neither the latest apply nor a baseline knows it")
                       .contains("nothing is deleted"));
       assertThat(c.entries().stream().filter(e -> e.action() == Action.DELETE)).isEmpty();
     }

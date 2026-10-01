@@ -64,32 +64,66 @@ class CommandsTest {
     assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
         .isEqualTo("patched foo");
     assertThat(f.run("list")).isEqualTo(0);
-    assertThat(f.out()).contains("INSTALLED");
+    assertThat(f.out()).contains("can be undone:  JRSHF-10.0.0-20260730-0457");
+    // the apply's snapshot is the undo now, not a leftover of its run
+    assertThat(f.home.undo().resolve("undo.json")).isRegularFile();
+    try (var runs = Files.list(f.home.runs())) {
+      assertThat(runs.filter(r -> Files.exists(r.resolve("snapshot")))).isEmpty();
+    }
     assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(2);
-    assertThat(f.run("rollback", "JRSHF-10.0.0-20260730-0457", "--yes")).isEqualTo(0);
+    assertThat(f.run("rollback", "--yes")).isEqualTo(0);
     assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
         .isEqualTo("old foo");
+    // used up, and the rollback kept neither its own snapshot nor the undo it used
+    assertThat(f.home.undo()).doesNotExist();
+    try (var runs = Files.list(f.home.runs())) {
+      assertThat(runs.flatMap(CommandsTest::children).map(p -> p.getFileName().toString()))
+          .noneMatch(n -> n.equals("undone") || n.startsWith("pre-rollback-"));
+    }
+    assertThat(f.run("list")).isEqualTo(0);
+    assertThat(f.out()).contains("can be undone:  nothing");
+    assertThat(f.run("rollback", "--yes")).isEqualTo(2);
+    assertThat(f.err()).contains("nothing to undo");
+  }
+
+  private static void copyTree(Path from, Path to) throws IOException {
+    try (java.util.stream.Stream<Path> all = Files.walk(from)) {
+      for (Path p : all.toList()) {
+        Path target = to.resolve(from.relativize(p).toString());
+        if (Files.isDirectory(p)) {
+          Files.createDirectories(target);
+        } else {
+          Files.copy(p, target);
+        }
+      }
+    }
+  }
+
+  private static java.util.stream.Stream<Path> children(Path dir) {
+    try (java.util.stream.Stream<Path> listed = Files.list(dir)) {
+      return listed.toList().stream();
+    } catch (IOException e) {
+      throw new java.io.UncheckedIOException(e);
+    }
   }
 
   @Test
-  void should_forget_a_hotfix_the_webapp_no_longer_holds() throws Exception {
+  void should_apply_again_after_a_redeploy_with_nothing_to_forget() throws Exception {
     Fixture f = fixture();
     assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
     // the operator redeploys the webapp from the WAR: the files are the old ones again
     Files.writeString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar"), "old foo");
-    // --non-interactive without --yes: a confirmation is needed
-    assertThat(f.run("forget", "JRSHF-10.0.0-20260730-0457")).isEqualTo(2);
-    assertThat(f.err()).contains("needs a confirmation");
-    assertThat(f.run("forget", "JRSHF-10.0.0-20260730-0457", "--yes")).isEqualTo(0);
-    assertThat(f.out())
-        .contains("forgot JRSHF-10.0.0-20260730-0457")
-        .contains("nothing was changed");
-    assertThat(f.run("list")).isEqualTo(0);
-    assertThat(f.out()).doesNotContain("JRSHF-10.0.0-20260730-0457");
-    assertThat(f.run("forget", "JRSHF-10.0.0-20260730-0457", "--yes")).isEqualTo(2);
-    assertThat(f.err()).contains("unknown hotfix");
-    // the package applies again
-    assertThat(f.run("apply", f.pkg.toString(), "--plan")).isEqualTo(0);
+    // the earlier undo would put back files the server no longer has: refused, naming them
+    assertThat(f.run("rollback", "--yes")).isEqualTo(2);
+    assertThat(f.out()).contains("changed since").contains("foo-1.2.3.jar");
+
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
+    assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
+        .isEqualTo("patched foo");
+    // the new apply is the one to undo
+    assertThat(f.run("rollback", "--yes")).isEqualTo(0);
+    assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
+        .isEqualTo("old foo");
   }
 
   @Test
@@ -137,7 +171,7 @@ class CommandsTest {
         .contains(HotfixPlans.AUDIT_CHECKSUM_CONFIRMED + " skipped with --yes")
         .contains("StepSucceeded [atomic-swap]");
     assertThat(f.run("runs", "show", runId)).isEqualTo(0);
-    assertThat(f.out()).contains("SUCCEEDED").contains("record-installed");
+    assertThat(f.out()).contains("SUCCEEDED").contains("promote-undo");
   }
 
   @Test
@@ -178,17 +212,20 @@ class CommandsTest {
   }
 
   @Test
-  void
-      should_resume_a_rollback_run_that_ended_after_its_last_step_when_the_ledger_already_says_rolled_back()
-          throws Exception {
+  void should_resume_a_rollback_run_that_ended_after_its_last_step_when_the_undo_is_used_up()
+      throws Exception {
     Fixture f = fixture();
     assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
-    assertThat(f.run("rollback", HotfixFixture.ID, "--yes")).isEqualTo(0);
+    Path usedUp = tmp.resolve("used-up-undo");
+    copyTree(f.home.undo(), usedUp);
+    assertThat(f.run("rollback", "--yes")).isEqualTo(0);
     assertThat(f.run("runs", "list")).isEqualTo(0);
     String row =
         f.out().lines().filter(l -> l.contains("hotfix.rollback")).findFirst().orElseThrow();
     String runId = row.substring(0, row.indexOf(' '));
-    // the process died after the last step: every step SUCCEEDED, but no run end was recorded
+    // the process died after the last step: every step SUCCEEDED, the undo it used up is still in
+    // the run (it goes when the run ends), and no run end was recorded
+    copyTree(usedUp, f.home.runDir(runId).resolve("undone"));
     Path runJson = f.home.runDir(runId).resolve("run.json");
     ObjectNode run = (ObjectNode) Json.mapper().readTree(Files.readString(runJson));
     run.remove(List.of("endedAt", "terminalState", "exitCode"));
@@ -222,10 +259,9 @@ class CommandsTest {
   }
 
   /** The mutating commands outside the engine, each with the arguments that would otherwise run. */
-  private static List<List<String>> gatedCommands(Fixture f) {
+  private static List<List<String>> gatedCommands() {
     return List.of(
         List.of("runs", "prune", "--older-than", "0", "--yes"),
-        List.of("record", f.pkg.toString()),
         List.of("settings", "set", "service.stopTimeoutSeconds", "42"),
         List.of("settings", "detect", "--yes"));
   }
@@ -234,11 +270,11 @@ class CommandsTest {
   void should_exit_9_for_every_mutating_command_when_the_lock_is_held() throws Exception {
     Fixture f = fixture();
     try (RunLock held = new RunLock(f.home, "other", Instant.now())) {
-      for (List<String> command : gatedCommands(f)) {
+      for (List<String> command : gatedCommands()) {
         assertThat(f.run(command.toArray(String[]::new))).as(command.toString()).isEqualTo(9);
       }
     }
-    assertThat(f.hf.ledger.all()).isEmpty();
+    assertThat(f.hf.undo.read()).isEmpty();
     assertThat(SettingsStore.load(f.home).orElseThrow().stopTimeoutSeconds()).isNotEqualTo(42);
   }
 
@@ -247,11 +283,11 @@ class CommandsTest {
     Fixture f = fixture();
     new FileJournal(f.home, Clock.systemUTC())
         .recordRunStart("stuck", "hotfix.apply", Optional.of("p"), Instant.now());
-    for (List<String> command : gatedCommands(f)) {
+    for (List<String> command : gatedCommands()) {
       assertThat(f.run(command.toArray(String[]::new))).as(command.toString()).isEqualTo(8);
       assertThat(f.err()).contains("runs resume stuck");
     }
-    assertThat(f.hf.ledger.all()).isEmpty();
+    assertThat(f.hf.undo.read()).isEmpty();
     assertThat(SettingsStore.load(f.home).orElseThrow().stopTimeoutSeconds()).isNotEqualTo(42);
   }
 
@@ -273,17 +309,7 @@ class CommandsTest {
           .containsAll(before)
           .contains("stuck");
     }
-    assertThat(f.hf.snapshots.list()).isNotEmpty();
-  }
-
-  @Test
-  void should_recheck_a_rollback_against_the_ledger_as_it_is_now_not_the_stored_chain() {
-    String stored =
-        HotfixPlans.rollbackArgsJson(new HotfixPlans.RollbackArgs("A", true, List.of("B", "A")));
-
-    assertThat(HotfixPlans.rollbackArgs(PlanExecutor.freshArgs(HotfixPlans.ROLLBACK, stored)))
-        .isEqualTo(new HotfixPlans.RollbackArgs("A", true));
-    assertThat(PlanExecutor.freshArgs(HotfixPlans.APPLY, "{\"x\":1}")).isEqualTo("{\"x\":1}");
+    assertThat(f.hf.undo.read()).isPresent();
   }
 
   @Test
@@ -301,7 +327,6 @@ class CommandsTest {
     Path other = Packages.zip(tmp.resolve("dl/other.zip"), Map.of("a.txt", new byte[] {1}));
     assertThat(f.run("apply", other.toString(), "--yes")).isEqualTo(6);
     assertThat(f.run("verify", other.toString())).isEqualTo(6);
-    assertThat(f.run("record", other.toString())).isEqualTo(6);
     assertThat(f.err()).doesNotContain("\tat ");
   }
 
@@ -381,7 +406,7 @@ class CommandsTest {
     // no --home, no JRS_HOTFIX_HOME, no ./jrs-hotfix and no installation the scan can see
     assertThat(f.hf.platform.scanInstallDirs().candidates()).isEmpty();
     assertThat(f.runExactly(List.of("list", "--non-interactive"))).isEqualTo(0);
-    assertThat(f.out()).contains("no hotfixes recorded");
+    assertThat(f.out()).contains("can be undone:  nothing");
   }
 
   @Test
@@ -394,7 +419,7 @@ class CommandsTest {
     assertThat(f.run("list")).isEqualTo(0);
     assertThat(f.out())
         .contains("on this server: 10.0.0 PRO, build 20260121_2317")
-        .contains("no hotfixes recorded");
+        .contains("can be undone:  nothing");
     assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
     assertThat(f.run("list")).isEqualTo(0);
     assertThat(f.out())
@@ -416,7 +441,7 @@ class CommandsTest {
     Fixture f = fixture();
     assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
     assertThat(f.run("runs", "prune", "--older-than", "0")).isEqualTo(0);
-    assertThat(f.run("rollback", "JRSHF-10.0.0-20260730-0457", "--yes")).isEqualTo(0);
+    assertThat(f.run("rollback", "--yes")).isEqualTo(0);
   }
 
   private Fixture fixture() throws IOException {

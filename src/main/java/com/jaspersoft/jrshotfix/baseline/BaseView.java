@@ -242,7 +242,7 @@ public final class BaseView {
     return hotfix;
   }
 
-  /** The ids this view is made of, for a report and for the ledger. */
+  /** The ids this view is made of, for a report and for the undo record. */
   public List<String> ids() {
     List<String> ids = new ArrayList<>();
     ids.add(release.id());

@@ -37,7 +37,7 @@ final class ApplySteps {
   static final String SNAPSHOT = "snapshot";
   static final String STAGE_FILES = "stage-files";
   static final String ATOMIC_SWAP = "atomic-swap";
-  static final String RECORD_INSTALLED = "record-installed";
+  static final String PROMOTE_UNDO = "promote-undo";
 
   static final String AUDIT_CHECKSUM_CONFIRMED = "hotfix.checksum-confirmed";
   static final String AUDIT_APPLIED = "hotfix.applied";
@@ -82,9 +82,9 @@ final class ApplySteps {
         "correct baseUrl, then run again; nothing was changed");
   }
 
-  /** Where the snapshot of the apply run {@code runId} lives. */
+  /** Where the apply run {@code runId} takes its snapshot; promoted to {@code undo/} at the end. */
   static Path snapshotDir(Home home, String runId) {
-    return home.snapshots().resolve(runId).resolve(SNAPSHOT);
+    return home.runDir(runId).resolve(SNAPSHOT);
   }
 
   /**
@@ -137,11 +137,11 @@ final class ApplySteps {
 
   /**
    * Step 1: the package fits this installation and the host can take it. Release and edition must
-   * match the webapp, the hotfix must not be installed already (by the ledger, by the build the
-   * webapp states, or by every file being in place as the plan found them, which would be an outage
-   * that changes nothing), the webapp must not be older than the ledger says, the directories
-   * written to must be writable, the home's volume must hold staging and the snapshot, the replaced
-   * files' owners must be restorable, and the service must be identifiable.
+   * match the webapp, the build the webapp states must be older than the package's (when it states
+   * none, not every file may be in place as the plan found them, which would be an outage that
+   * changes nothing), the directories written to must be writable, the home's volume must hold
+   * staging and the snapshot, the replaced files' owners must be restorable, and the service must
+   * be identifiable.
    */
   static final class Preflight extends ReadOnlyStep {
     Preflight(HotfixRuntime rt, ApplyInput in) {

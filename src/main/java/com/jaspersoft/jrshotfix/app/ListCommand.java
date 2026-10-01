@@ -1,49 +1,50 @@
 package com.jaspersoft.jrshotfix.app;
 
 import com.jaspersoft.jrshotfix.home.InstalledBuild;
-import com.jaspersoft.jrshotfix.state.LedgerEntry;
+import com.jaspersoft.jrshotfix.state.UndoRecord;
 import java.io.PrintWriter;
-import java.util.List;
-import java.util.Locale;
+import java.util.Optional;
 import picocli.CommandLine.Command;
 
 /**
- * {@code jrs-hotfix list}: what the webapp says it is, release, edition and build, then the ledger,
- * installed and rolled back alike. The build is the hotfix level of the files on disk, so a build
- * no entry has means a hotfix applied outside this tool. Invariant: read-only.
+ * {@code jrs-hotfix list}: what the webapp says it is, release, edition and build, then the hotfix
+ * {@code rollback} would undo (0.6 design, section 5). The packages are cumulative, so the build is
+ * the hotfix level of the files on disk, whoever applied it. Invariant: read-only.
  */
 @Command(
     name = "list",
     mixinStandardHelpOptions = true,
-    description = "List the hotfixes this tool installed or recorded.",
+    description = "Show the build this server states and the hotfix rollback would undo.",
     footer = {"", "Example:", "  jrs-hotfix list"})
 final class ListCommand extends AppCommand {
 
   @Override
   public Integer call() {
     Bootstrap boot = open();
-    List<LedgerEntry> entries = boot.plans().list();
+    Optional<UndoRecord> undo = boot.plans().undo();
     PrintWriter out = out();
-    boot.settings()
-        .ifPresent(s -> out.println("on this server: " + InstalledBuild.describe(s.webappDir())));
-    if (entries.isEmpty()) {
-      out.println("no hotfixes recorded");
-      out.flush();
-      return ExitCodes.SUCCESS;
+    Optional<String> stated = Optional.empty();
+    if (boot.settings().isPresent()) {
+      out.println("on this server: " + InstalledBuild.describe(boot.settings().get().webappDir()));
+      stated =
+          InstalledBuild.ofWebapp(boot.settings().get().webappDir()).map(InstalledBuild::build);
     }
-    TextTable table = table();
-    table.row("ID", "STATE", "ORIGIN", "RELEASE", "BUILD", "INSTALLED", "RUN");
-    for (LedgerEntry e : entries) {
-      table.row(
-          e.id(),
-          e.state().name(),
-          e.origin().name().toLowerCase(Locale.ROOT),
-          e.release() + " " + e.edition(),
-          e.build(),
-          e.installedAt().toString(),
-          e.runId());
+    if (undo.isEmpty()) {
+      out.println("can be undone:  nothing");
+    } else {
+      UndoRecord u = undo.get();
+      out.println(
+          "can be undone:  " + u.id() + ", applied " + u.appliedAt() + " by run " + u.runId());
+      if (stated.isPresent() && !stated.get().equals(u.build())) {
+        out.println(
+            "  the webapp now states build "
+                + stated.get()
+                + ", not "
+                + u.build()
+                + ": the server has changed since that apply, and `rollback` would check every file"
+                + " before it starts");
+      }
     }
-    table.printTo(out);
     out.flush();
     return ExitCodes.SUCCESS;
   }

@@ -17,7 +17,7 @@ import com.jaspersoft.jrshotfix.platform.Platform;
 import com.jaspersoft.jrshotfix.platform.ServiceConfig;
 import com.jaspersoft.jrshotfix.snapshot.SnapshotStore;
 import com.jaspersoft.jrshotfix.state.FileJournal;
-import com.jaspersoft.jrshotfix.state.Ledger;
+import com.jaspersoft.jrshotfix.state.UndoStore;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
@@ -44,7 +44,7 @@ public final class HotfixFixture implements AutoCloseable {
   public final Home home;
   public final Settings settings;
   public final FakePlatform platform;
-  public final Ledger ledger;
+  public final UndoStore undo;
   public final SnapshotStore snapshots;
   public final HotfixRuntime runtime;
   public final HotfixPlans plans;
@@ -69,14 +69,14 @@ public final class HotfixFixture implements AutoCloseable {
             URI.create("http://localhost:8080/jasperserver-pro"));
     this.platform = new FakePlatform(Platform.OsFamily.LINUX, home.root());
     platform.realFiles = true;
-    this.ledger = new Ledger(home);
+    this.undo = new UndoStore(home);
     this.snapshots = new SnapshotStore(home, platform.files());
     this.runtime =
         new HotfixRuntime(
             home,
             settings,
             platform,
-            ledger,
+            undo,
             snapshots,
             Clock.systemUTC(),
             Sleeper.none(),

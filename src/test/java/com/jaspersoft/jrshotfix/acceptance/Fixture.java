@@ -162,14 +162,14 @@ final class Fixture implements AutoCloseable {
     return ids.get(0);
   }
 
-  /** The row of {@code list} output for {@code id}; fails the test when there is none. */
-  String listRow(String id) throws IOException, InterruptedException {
+  /** The line of {@code list} output that says what {@code rollback} would undo. */
+  String undoable() throws IOException, InterruptedException {
     Cli.Result list = cli.run("list").assertExit(0);
     return list.stdout()
         .lines()
-        .filter(l -> l.startsWith(id + " "))
+        .filter(l -> l.startsWith("can be undone:"))
         .findFirst()
-        .orElseThrow(() -> new AssertionError("no row for " + id + " in:\n" + list.stdout()));
+        .orElseThrow(() -> new AssertionError("no undo line in:\n" + list.stdout()));
   }
 
   /** Stops the stand-in Tomcat (so nothing outlives the test) and the stub server. */

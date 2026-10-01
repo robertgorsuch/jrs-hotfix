@@ -132,9 +132,9 @@ class WarCommandsTest {
     // the hotfix's baseline is in the home, so the next hotfix on the output is compared with it
     assertThat(f.run("baseline", "list")).isEqualTo(0);
     assertThat(f.out()).contains(SiteFixture.HOTFIX_ID);
-    // a WAR is not the server's inventory: nothing in the ledger
+    // a WAR has no server to put back: nothing to undo
     assertThat(f.run("list")).isEqualTo(0);
-    assertThat(f.out()).contains("no hotfixes recorded");
+    assertThat(f.out()).contains("can be undone:  nothing");
     // the output is never overwritten
     assertThat(
             f.run(

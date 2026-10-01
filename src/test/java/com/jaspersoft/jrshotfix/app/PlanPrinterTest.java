@@ -86,7 +86,7 @@ class PlanPrinterTest {
   void should_count_what_a_rollback_puts_back_when_printing_a_rollback_plan() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       f.run(f.plan(), "r1");
-      Plan plan = f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false));
+      Plan plan = f.plans.planRollback();
       String text = printed(f, plan);
       assertThat(text).contains("5 files: 2 restored, 1 removed, 2 put back");
     }
@@ -102,10 +102,7 @@ class PlanPrinterTest {
       Files.delete(f.target(HotfixFixture.BAR));
       Files.delete(f.target(HotfixFixture.FOO_OLDER));
       String text = printed(f, f.plan());
-      assertThat(text)
-          .contains("this plan will be refused")
-          .contains("is already on this server")
-          .contains("jrs-hotfix record");
+      assertThat(text).contains("this plan will be refused").contains("is already on this server");
     }
   }
 

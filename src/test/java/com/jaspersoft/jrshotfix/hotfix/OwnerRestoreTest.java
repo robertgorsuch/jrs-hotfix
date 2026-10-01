@@ -52,7 +52,7 @@ class OwnerRestoreTest {
   void should_refuse_a_rollback_when_its_files_owner_cannot_be_restored() throws IOException {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       assertThat(f.run(f.plan(), "r-owner-apply")).isInstanceOf(RunOutcome.Succeeded.class);
-      Plan rollback = f.plans.planRollback(new HotfixPlans.RollbackArgs(HotfixFixture.ID, false));
+      Plan rollback = f.plans.planRollback();
       f.platform.ownerRestorable = false;
 
       CheckResult restore =

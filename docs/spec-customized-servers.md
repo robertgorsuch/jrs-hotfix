@@ -6,6 +6,11 @@ numbers there are cited as "spec 4.1". Source of the requirements: the hotfix fl
 (vanilla check, three-way collisions, merge by file kind, library cleanup, deployed or
 zipped WAR) compared with jrs-hotfix at 56c242f.
 
+> **0.6.0:** where this design reads or writes "the ledger", 0.6 has the undo record of the
+> latest apply (`undo/undo.json`): what it merged and kept, and the vendor's files it knows for
+> superseded libraries. `record` is gone; `baseline add` is the remedy it was beside. See
+> `docs/spec-no-ledger.md`.
+
 **Phase 1 (section 11) landed in v0.1.0**, on 2026-09-29, after the tool met the real package
 and two real servers: the installed build is read and shown (section 1), the four
 installer-written properties files are merged (4.4), the JSP cache is cleared (5a), and a
