@@ -1,6 +1,6 @@
 # jrs-hotfix 0.7: customizations wherever a hotfix goes
 
-Status: draft for review, 2026-10-01. Extends `docs/spec-customized-servers.md` (the 0.2
+Status: decided 2026-10-01, for 0.7.0; two facts are still to be measured (open points). Extends `docs/spec-customized-servers.md` (the 0.2
 design, cited as "0.2 design 4.2") and `docs/spec-no-ledger.md` (the 0.6 design). Source:
 issues #30 to #34, and the maintainer's ruling of 2026-10-01:
 
@@ -100,9 +100,12 @@ reads that WAR). There is no Tomcat, and jrs-hotfix never runs buildomatic.
 - **Deploying is the operator's.** The plan ends with a note naming the buildomatic command
   that deploys the patched WAR, which jrs-hotfix never runs, as it never runs a readme's
   manual steps.
-- **#30 without a distribution** stays `apply --war <in.war> --out <out.war>`, now with the
-  installation files of the package written beside the output into a directory given with
-  `--install-out <dir>`, for a buildomatic kept elsewhere (open point 3).
+- **#30 without a distribution** stays `apply --war <in.war> --out <out.war>`, and takes
+  `--install-out <dir>` for a buildomatic kept elsewhere. That directory is the installation
+  area of the run: an installation tree (`buildomatic/`, `samples/`) is patched in place,
+  with the same merge as on a build host and with an undo of its own in the home; an empty or
+  absent directory receives the package's installation files as they are. Without the option
+  the installation files are left out and counted, as in 0.6.
 
 ### 2.2 Webapp to WAR (#31)
 
@@ -113,11 +116,14 @@ context.xml`, the `*-jdbc.xml` files and the installer-written properties with t
 values, merged with the package's as on a server. That is what "keep the `META-INF`
 configuration" means.
 
-An environment that deploys one generic WAR with its own database configuration usually gives
-Tomcat that configuration outside the WAR (`conf/Catalina/localhost/<webapp>.xml` overrides
-the WAR's `META-INF/context.xml`), so the site's copy inside does no harm. Whether a
-`--generic` output, with the vendor's copies of those files instead, is wanted too is open
-point 4.
+For an environment that deploys one generic WAR with its own database configuration,
+`--generic` writes the vendor's copies instead of the site's: `META-INF/context.xml`, the
+`META-INF/*-jdbc.xml` files and the installer-written properties of 0.2 design 4.4 come from
+the release baseline and the package, as if no installer had run. Every other customization
+is kept or merged as without the option. `--generic` needs a release baseline (exit 2
+without one, naming `baseline add`), and the plan lists the files it takes from the vendor.
+It applies to the WAR targets only (`--war`), never to a server, whose own configuration
+those files are.
 
 ## 3. Compare (#33, #34)
 
@@ -142,9 +148,11 @@ jrs-hotfix compare <base> <mine> <theirs>        what each changed from base, an
   or both differently, which is merged by its class or listed as a conflict, exactly as a
   merge workspace decides. `--out <dir>` writes the merged files, with conflict markers where
   a conflict is, and a report beside them; `merge show`'s side-by-side is `--show`.
-- **Exit codes**: 0 when the comparison ran, whatever it found; 1 for usage; 2 when an input
-  cannot be read; 6 when an input is not a JasperReports Server webapp or package. A
-  difference is a finding, not a failure (open point 5).
+- **Exit codes**: 0 when the inputs are the same, **7 when they differ**, a warning rather
+  than a failure: the comparison ran and its report is the result. 1 for usage; 2 when an
+  input cannot be read; 6 when an input is not a JasperReports Server webapp or package. A
+  three-way comparison with conflicts is 7 too; the report counts them. Exit 7 is new, and
+  only `compare` uses it.
 
 `compare` is what a site uses to find its customizations between two environments, or to see
 before an upgrade what its changes meet. The hotfix commands keep their own, narrower forms
@@ -157,9 +165,9 @@ before an upgrade what its changes meet. The hotfix commands keep their own, nar
 | `baseline add <war \| dir \| package.zip>` | also `<distribution.zip \| distribution dir>`, which records both areas |
 | `scan`, `verify`, `merge prepare` | cover the installation area too, when a baseline has it |
 | `--war <file.war>` | also `--war <dir>` (#31) |
-| `apply --war <in> --out <out.war>` | also `--install-out <dir>` (#30, open point 3) |
+| `apply --war <in> --out <out.war>` | also `--install-out <dir>` (#30) and `--generic` (#31) |
 | `settings detect` | also finds a distribution root, service kind `none` (#32) |
-| (none) | `compare <a> <b> [<c>] [--out <dir>] [--show <path>]` (#33, #34) |
+| (none) | `compare <a> <b> [<c>] [--out <dir>] [--show <path>]` (#33, #34); exit 0 same, 7 different |
 
 Nothing is removed or renamed; every 0.6 command line keeps working.
 
@@ -194,21 +202,27 @@ Nothing is removed or renamed; every 0.6 command line keeps working.
 | 3 | `--war <dir>` (#31) | Small: the WAR target already works from an unpacked copy |
 | 4 | `compare` (#33, #34) | Read-only; it reuses phases 1 to 3's readers |
 
-Each phase is a release (0.7.0 to 0.7.3) or the four are one 0.7.0 (open point 6).
+The four phases are one release, 0.7.0 (decided 2026-10-01); each is its own pull request,
+merged into `main` in this order.
+
+## Decided 2026-10-01
+
+1. **#30 without a distribution:** `apply --war ... --install-out <dir>` is wanted (section
+   2.1).
+2. **#31:** a `--generic` output, with the vendor's `META-INF` and installer-written files,
+   is wanted beside the default that keeps the site's (section 2.2).
+3. **`compare`'s exit code** is a warning when the inputs differ: exit 7, distinct from
+   success (0) and failure (2) (section 3). Reading of the ruling "as warn": a code a script
+   can test, not a failure.
+4. **One release**, 0.7.0, with the four phases as its pull requests (section 7).
 
 ## Open points
 
-1. **The installation's installer-written and generated files**, measured on a real 10.0.0
-   distribution after `js-install` has run: which files buildomatic writes from
-   `default_master.properties`, and whether any shipped file holds site values the way the
-   webapp's four properties files do (0.2 design 4.4).
+These are facts to measure on a real JasperReports Server 10.0.0 distribution before phase 1
+and phase 2 are built, not choices:
+
+1. **The installation's installer-written and generated files**, after `js-install` has run:
+   which files buildomatic writes from `default_master.properties`, and whether any shipped
+   file holds site values the way the webapp's four properties files do (0.2 design 4.4).
 2. **That buildomatic deploys the distribution's own `jasperserver-pro.war`**, and from which
-   path, measured on the same distribution. If it unpacks the WAR somewhere first, that copy
-   is the target instead.
-3. **#30 without a distribution:** whether `--install-out <dir>` is wanted, or whether a build
-   host is always a full distribution, in which case #30 is section 2.1 alone.
-4. **#31's `--generic`:** whether an output WAR with the vendor's `META-INF/context.xml` and
-   installer-written files, instead of the site's, is wanted.
-5. **`compare`'s exit code** when inputs differ: 0 as above, or a distinct code for scripts
-   that test for equality.
-6. **One release or four.**
+   path. If it unpacks the WAR somewhere first, that copy is the target instead.
