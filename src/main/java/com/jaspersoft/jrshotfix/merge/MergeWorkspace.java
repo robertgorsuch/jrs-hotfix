@@ -12,13 +12,17 @@ import com.jaspersoft.jrshotfix.merge.MergeDoc.State;
 import com.jaspersoft.jrshotfix.pkg.PackageContents;
 import com.jaspersoft.jrshotfix.pkg.PackagePaths;
 import com.jaspersoft.jrshotfix.pkg.PackageStager;
-import com.jaspersoft.jrshotfix.pkg.PropertiesMerge;
 import com.jaspersoft.jrshotfix.platform.Durability;
 import com.jaspersoft.jrshotfix.platform.FileOps;
 import com.jaspersoft.jrshotfix.platform.Lists;
 import com.jaspersoft.jrshotfix.platform.Sums;
 import com.jaspersoft.jrshotfix.platform.Trees;
 import com.jaspersoft.jrshotfix.scan.Scan;
+import com.jaspersoft.jrshotfix.text.Conflict;
+import com.jaspersoft.jrshotfix.text.Diff3;
+import com.jaspersoft.jrshotfix.text.PropertiesMerge;
+import com.jaspersoft.jrshotfix.text.Text;
+import com.jaspersoft.jrshotfix.text.XmlChecks;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -519,7 +523,7 @@ public final class MergeWorkspace {
     }
     byte[] bytes = Files.readAllBytes(source);
     List<String> findings = new ArrayList<>();
-    if (PropertiesMerge.hasMarkers(Text.of(bytes).lines())) {
+    if (Conflict.hasMarkers(Text.of(bytes).lines())) {
       findings.add("a conflict marker is left in it");
     } else if (FileClass.valueOf(record.fileClass()) == FileClass.X) {
       findings.addAll(

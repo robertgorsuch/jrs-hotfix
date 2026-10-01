@@ -2,11 +2,11 @@ package com.jaspersoft.jrshotfix.app;
 
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
-import com.jaspersoft.jrshotfix.merge.Diff;
 import com.jaspersoft.jrshotfix.merge.MergeDoc;
 import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
-import com.jaspersoft.jrshotfix.merge.Text;
 import com.jaspersoft.jrshotfix.platform.UserPaths;
+import com.jaspersoft.jrshotfix.text.Diff;
+import com.jaspersoft.jrshotfix.text.Text;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.file.Files;

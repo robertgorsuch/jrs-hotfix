@@ -10,7 +10,7 @@ import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
 import com.jaspersoft.jrshotfix.merge.MergeWorkspace.Choice;
 import com.jaspersoft.jrshotfix.merge.MergeWorkspace.OnConflict;
 import com.jaspersoft.jrshotfix.pkg.Packages;
-import com.jaspersoft.jrshotfix.pkg.PropertiesMerge;
+import com.jaspersoft.jrshotfix.text.PropertiesMerge;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;

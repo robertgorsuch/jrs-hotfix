@@ -1,6 +1,7 @@
 package com.jaspersoft.jrshotfix.pkg;
 
 import com.jaspersoft.jrshotfix.platform.Sums;
+import com.jaspersoft.jrshotfix.text.PropertiesMerge;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -113,9 +114,9 @@ public final class SiteSettings {
 
   static Optional<Merged> merge(byte[] mine, byte[] theirs) {
     String vendor = new String(theirs, StandardCharsets.ISO_8859_1);
-    PropertiesMerge.Result result =
+    PropertiesMerge.Merged result =
         PropertiesMerge.merge(lines(new String(mine, StandardCharsets.ISO_8859_1)), lines(vendor));
-    if (!result.changed()) {
+    if (result.kept().isEmpty() && result.carried().isEmpty()) {
       return Optional.empty();
     }
     String eol = vendor.contains("\r\n") ? "\r\n" : "\n";

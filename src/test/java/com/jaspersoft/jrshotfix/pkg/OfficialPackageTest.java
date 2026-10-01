@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
+import com.jaspersoft.jrshotfix.text.PropertiesMerge;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
