@@ -79,7 +79,7 @@ public final class Recovery {
       return new RunOutcome.PrecheckFailed(
           firstRolledBack(journal),
           "run " + runId + " already began rolling back; resume is not available",
-          "run `jrs-hotfix runs rollback " + runId + "`");
+          "run `jrs-hotfix runs undo " + runId + "`");
     }
     int start = resumeIndex(plan, journal);
     if (start < plan.steps().size()) {
@@ -94,7 +94,7 @@ public final class Recovery {
         return new RunOutcome.PrecheckFailed(
             step.id(),
             "precheck of interrupted step " + step.id() + " failed: " + fail.message(),
-            ("only rollback is available: run `jrs-hotfix runs rollback "
+            ("only undoing it is available: run `jrs-hotfix runs undo "
                     + runId
                     + "`. "
                     + fail.remediation())

@@ -144,7 +144,7 @@ class RecoveryTest {
     assertThat(outcome).isInstanceOf(RunOutcome.PrecheckFailed.class);
     RunOutcome.PrecheckFailed pf = (RunOutcome.PrecheckFailed) outcome;
     assertThat(pf.stepId()).isEqualTo("s2");
-    assertThat(pf.remediation()).contains("runs rollback").contains("stop tomcat");
+    assertThat(pf.remediation()).contains("runs undo").contains("stop tomcat");
     assertThat(pf.exitCode()).isEqualTo(2);
     assertThat(fx.trace).isEmpty();
     assertThat(fx.store.run(RUN).orElseThrow().pending()).isTrue();
@@ -163,7 +163,7 @@ class RecoveryTest {
     RunOutcome outcome = recovery.resume(plan, RUN, fx.context(RUN), RunOptions.DEFAULT);
 
     assertThat(outcome).isInstanceOf(RunOutcome.PrecheckFailed.class);
-    assertThat(((RunOutcome.PrecheckFailed) outcome).remediation()).contains("runs rollback");
+    assertThat(((RunOutcome.PrecheckFailed) outcome).remediation()).contains("runs undo");
     assertThat(fx.trace).isEmpty();
   }
 

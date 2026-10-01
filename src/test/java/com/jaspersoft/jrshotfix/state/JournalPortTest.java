@@ -59,7 +59,7 @@ class JournalPortTest {
     assertThat(result.sink().events())
         .filteredOn(e -> e instanceof Event.RunFailed)
         .extracting(e -> ((Event.RunFailed) e).nextAction())
-        .anySatisfy(next -> assertThat(next).contains("runs resume").contains("runs rollback"));
+        .anySatisfy(next -> assertThat(next).contains("runs resume").contains("runs undo"));
   }
 
   /**

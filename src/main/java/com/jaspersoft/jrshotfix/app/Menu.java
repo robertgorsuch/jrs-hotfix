@@ -103,7 +103,7 @@ final class Menu {
       out.println();
       out.println("! An earlier job was interrupted and must be finished or undone first:");
       for (String id : pending) {
-        out.println("    jrs-hotfix runs resume " + id + "     (or runs rollback " + id + ")");
+        out.println("    jrs-hotfix runs resume " + id + "     (or runs undo " + id + ")");
       }
       out.println("  Choose 6 below to do this.");
     }
@@ -192,7 +192,7 @@ final class Menu {
     out.println("  2) Undo job " + id);
     switch (Prompter.line(out, "Choose [1-2]: ").orElse("")) {
       case "1" -> execute("runs", "resume", id);
-      case "2" -> execute("runs", "rollback", id);
+      case "2" -> execute("runs", "undo", id);
       default -> {
         // back to the menu
       }

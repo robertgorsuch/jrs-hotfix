@@ -169,6 +169,11 @@ class WarCommandsTest {
     assertThat(f.out())
         .contains("customized: 3 changed, 0 added, 0 removed")
         .containsPattern("CHANGED +X +" + Wars.CONTEXT);
+    // verify reads the site's files from the WAR as scan does, and says where the hotfix meets them
+    f.run("verify", hotfix().toString(), "--war", in.toString());
+    assertThat(f.out())
+        .contains("against this site")
+        .containsPattern(Wars.WEB_XML + " +X +collision");
 
     // web.xml collides: prepare, resolve with the hotfix's copy, apply with the merge
     assertThat(

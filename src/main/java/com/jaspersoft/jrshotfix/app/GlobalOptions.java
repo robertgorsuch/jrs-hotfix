@@ -27,12 +27,14 @@ public final class GlobalOptions {
   @Option(
       names = "--yes",
       scope = ScopeType.INHERIT,
-      description = "Answer yes to confirmations without asking; implies --non-interactive.")
+      description = "Answer yes to confirmations without asking, for scripted runs.")
   boolean yes;
 
   @Option(
       names = "--non-interactive",
       scope = ScopeType.INHERIT,
+      // hidden since 0.6: without a terminal nothing prompts anyway, and --yes implies it
+      hidden = true,
       description =
           "Never prompt; exit 2 where a confirmation is needed. Does not confirm anything: pair"
               + " it with --yes to run unattended.")

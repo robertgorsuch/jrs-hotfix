@@ -13,20 +13,22 @@ import picocli.CommandLine.Parameters;
 
 /**
  * {@code jrs-hotfix runs}: the run history, recovery of an interrupted run, and retention.
- * Invariants: {@code list} and {@code show} are read-only; {@code resume} and {@code rollback} act
- * only on a pending run and only after its rebuilt plan matches what was stored; {@code prune}
- * never removes a pending run or the snapshot of an installed hotfix, and keeps a failed run and
- * its snapshot unless {@code --include-failed} is given.
+ * Invariants: {@code list} and {@code show} are read-only; {@code resume} and {@code undo} act only
+ * on a pending run and only after its rebuilt plan matches what was stored ({@code rollback} is the
+ * hidden name {@code undo} had before 0.6); {@code prune} never removes a pending run or the undo
+ * of the latest apply, and keeps a failed run and its snapshot unless {@code --include-failed} is
+ * given.
  */
 @Command(
     name = "runs",
     mixinStandardHelpOptions = true,
-    description = "Show runs, recover an interrupted run, prune old runs and snapshots.",
+    description = "Show runs, finish or undo an interrupted run, prune old runs.",
     subcommands = {
       RunsCommand.ListRuns.class,
       RunsCommand.Show.class,
       RunsCommand.Resume.class,
-      RunsCommand.Rollback.class,
+      RunsCommand.Undo.class,
+      RunsCommand.RollbackAlias.class,
       RunsCommand.Prune.class
     })
 final class RunsCommand extends GroupCommand {
@@ -139,13 +141,33 @@ final class RunsCommand extends GroupCommand {
     }
   }
 
-  /** {@code runs rollback <id>}. */
+  /** {@code runs undo <id>}. */
   @Command(
-      name = "rollback",
+      name = "undo",
       mixinStandardHelpOptions = true,
       description = "Undo an interrupted run: compensate every step it completed, newest first.",
+      footer = {"", "Example:", "  jrs-hotfix runs undo <id>"})
+  static final class Undo extends AppCommand {
+    @Parameters(index = "0", paramLabel = "<id>", description = "The pending run id.")
+    String runId;
+
+    @Override
+    public Integer call() {
+      return executor(open()).recover(runId, false);
+    }
+  }
+
+  /**
+   * {@code runs rollback <id>}: the name of {@link Undo} before 0.6, kept hidden so that a script
+   * written for 0.5 still works; {@code jrs-hotfix rollback} undoes a hotfix, this undoes a run.
+   */
+  @Command(
+      name = "rollback",
+      hidden = true,
+      mixinStandardHelpOptions = true,
+      description = "The name of `runs undo` before 0.6.",
       footer = {"", "Example:", "  jrs-hotfix runs rollback <id>"})
-  static final class Rollback extends AppCommand {
+  static final class RollbackAlias extends AppCommand {
     @Parameters(index = "0", paramLabel = "<id>", description = "The pending run id.")
     String runId;
 

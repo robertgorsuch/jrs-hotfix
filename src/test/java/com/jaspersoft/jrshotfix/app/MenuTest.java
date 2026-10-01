@@ -143,7 +143,7 @@ class MenuTest {
     m.run();
     assertThat(text())
         .contains("interrupted")
-        .contains("jrs-hotfix runs resume stuck     (or runs rollback stuck)")
+        .contains("jrs-hotfix runs resume stuck     (or runs undo stuck)")
         .contains("finish or undo the interrupted job first (entry 6)");
     // choosing 1 while pending printed a refusal and did not run apply; 6 lists the runs first
     assertThat(ran).hasSize(2);

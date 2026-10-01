@@ -24,24 +24,24 @@ jrs-hotfix                                   menu at a terminal; usage otherwise
 jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--keep-superseded] [--plan] [--yes]
 jrs-hotfix apply <package.zip> --war <in.war> --out <out.war> [--merge <mergeId>]
 jrs-hotfix rollback [--plan] [--yes]
-jrs-hotfix verify <package.zip>
-jrs-hotfix scan [--package <package.zip>] [--war <file.war>]
+jrs-hotfix verify <package.zip> [--war <file.war>]
+jrs-hotfix scan [--war <file.war>]
 jrs-hotfix baseline [list | add <war | dir | package.zip> | remove <id>]
-jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war>] | status [<mergeId>]
+jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war>] | list | status <mergeId>
                   | show <mergeId> <path>
                   | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
                   | discard <mergeId>]
 jrs-hotfix list
-jrs-hotfix runs [list | show <id> | resume <id> | rollback <id> | prune --older-than <days> [--include-failed]]
+jrs-hotfix runs [list | show <id> | resume <id> | undo <id> | prune --older-than <days> [--include-failed]]
 jrs-hotfix settings [show | set <key> <value> | detect]
 jrs-hotfix --docs | --version | --help
 ```
 
 Global options: `--home <dir>` picks the home directory (default: detected).
-`--yes` answers every confirmation without asking; it implies `--non-interactive`.
+`--yes` answers every confirmation without asking.
 `--plan` prints the plan for `apply` or `rollback` and stops; nothing is changed.
-`--non-interactive` never prompts and fails closed (exit 2) where a confirmation
-would otherwise be needed.
+Without a terminal nothing prompts, and a confirmation that `--yes` did not give
+fails closed (exit 2).
 
 ## What apply does
 
@@ -96,7 +96,7 @@ Give jrs-hotfix the vendor's own files and it keeps what this site changed:
 jrs-hotfix baseline add <jasperserver-pro.war>   the WAR the server was installed from
 jrs-hotfix baseline add <package.zip>            a hotfix applied before there was a baseline
 jrs-hotfix scan                                  vanilla, or customized: what differs
-jrs-hotfix scan --package <package.zip>          where the site and a hotfix changed the same file
+jrs-hotfix verify <package.zip>                  also where the site and a hotfix changed the same file
 ```
 
 With a baseline, `apply` compares every file the package ships under the
@@ -172,7 +172,7 @@ printed in the plan preview, printed again after the run finishes, and saved to
 
 A run whose journal has no terminal state blocks every mutating command with
 exit 8 until `jrs-hotfix runs resume <id>` finishes it or
-`jrs-hotfix runs rollback <id>` undoes it; the menu's entry 6 offers both first.
+`jrs-hotfix runs undo <id>` undoes it; the menu's entry 6 offers both first.
 A run's snapshot lives in its run directory while the run lasts (see Files
 below): an apply's becomes the undo, any other is deleted when the run ends. A
 run that failed with exit 4 keeps its snapshot until `runs prune
@@ -181,12 +181,12 @@ run that failed with exit 4 keeps its snapshot until `runs prune
 the stored plan's steps, so you can see exactly where it stopped.
 
 After Ctrl-C, run `jrs-hotfix runs list`; a run left pending is finished with
-`runs resume` or undone with `runs rollback`.
+`runs resume` or undone with `runs undo`.
 
 A run interrupted while the service was down, at an installation outside the
 default paths, is found again through the home jrs-hotfix remembers it used
 last; if that is gone too, pass `--home <installDir>/jrs-hotfix` (or set
-`JRS_HOTFIX_HOME`) to `runs resume` or `runs rollback`.
+`JRS_HOTFIX_HOME`) to `runs resume` or `runs undo`.
 
 ## Files
 

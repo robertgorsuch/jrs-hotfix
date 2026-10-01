@@ -37,8 +37,8 @@ import java.util.function.IntSupplier;
  * The one path every mutating command takes from a {@link Plan} to a process exit code. Invariants:
  * a held run lock is exit 9 and is checked first, so a run another process is executing is never
  * mistaken for one that needs recovery; a pending run blocks every new run with exit 8 and names
- * the exact {@code runs resume} and {@code runs rollback} commands; {@code --plan} prints the plan
- * and touches nothing; nothing runs without {@code --yes} or an explicit yes at the terminal, and a
+ * the exact {@code runs resume} and {@code runs undo} commands; {@code --plan} prints the plan and
+ * touches nothing; nothing runs without {@code --yes} or an explicit yes at the terminal, and a
  * non-interactive caller without {@code --yes} exits 2; the plan is rebuilt from its arguments
  * after the answer and a changed fingerprint is exit 2 naming the changed inputs; Ctrl-C cancels
  * through the run's single {@link CancellationToken} and waits up to 30 s for the step in flight;
@@ -324,7 +324,7 @@ final class PlanExecutor {
     err.println(
         "  run `jrs-hotfix runs resume "
             + first
-            + "` to continue it, or `jrs-hotfix runs rollback "
+            + "` to continue it, or `jrs-hotfix runs undo "
             + first
             + "` to undo it");
     err.flush();

@@ -45,7 +45,7 @@ final class MergePlans {
                     new HotfixException(
                         HotfixException.PRECHECK,
                         "unknown merge " + id,
-                        "run `jrs-hotfix merge status` for the merges in this home"));
+                        "run `jrs-hotfix merge list` for the merges in this home"));
     if (!doc.blocking().isEmpty()) {
       throw blocked(doc);
     }
