@@ -88,54 +88,6 @@ public final class OfficialPackage {
 
   private OfficialPackage() {}
 
-  /** What {@code hotfix record} stores about a package applied by hand. */
-  public record Described(String id, String title, String release, String edition, String build) {}
-
-  /**
-   * The identity the package's outer readme gives it, without reading the payload: the same id,
-   * title, release, edition and build {@link #read} derives, so a hotfix recorded by hand and one
-   * applied through jrs-hotfix share an id and cannot both be in the ledger.
-   */
-  public static Described describe(Path zip) throws IOException {
-    try {
-      return describeChecked(zip);
-    } catch (IllegalArgumentException e) {
-      throw unusable(e.getMessage(), Optional.of(e));
-    }
-  }
-
-  private static Described describeChecked(Path zip) throws IOException {
-    Shape shape =
-        shape(zip)
-            .orElseThrow(
-                () ->
-                    new HotfixException(
-                        HotfixException.PRECHECK,
-                        zip + " is not a readable hotfix package",
-                        "point jrs-hotfix at the hotfix ZIP as it was downloaded"));
-    if (shape.readme().isEmpty() || !shape.payload()) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          zip + NEITHER_SHAPE_SHORT,
-          "point jrs-hotfix at the hotfix ZIP as support published it");
-    }
-    try (InputStream in = Files.newInputStream(zip);
-        ZipInputStream outer = new ZipInputStream(in)) {
-      ZipEntry entry;
-      while ((entry = outer.getNextEntry()) != null) {
-        if (!entry.isDirectory() && shape.kind(entry.getName().replace('\\', '/')) == Kind.README) {
-          Header header = Header.parse(readLines(outer));
-          return new Described(
-              header.id(), header.title(), header.release(), header.edition(), header.build());
-        }
-      }
-    }
-    throw new HotfixException(
-        HotfixException.PRECHECK,
-        "no readme.txt in " + zip,
-        "point jrs-hotfix at the hotfix ZIP as it was downloaded, not at an unpacked copy");
-  }
-
   /** True when {@code zip} is an official package. */
   public static boolean looksOfficial(Path zip) {
     return shape(zip).map(Shape::official).orElse(false);

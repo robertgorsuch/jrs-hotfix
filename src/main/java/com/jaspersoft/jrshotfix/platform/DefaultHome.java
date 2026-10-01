@@ -3,19 +3,15 @@ package com.jaspersoft.jrshotfix.platform;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 
 /**
- * The single answer to "where is {@code $JRS_HOTFIX_HOME} when nobody said" (spec §5.1). One class,
- * because the decision is made twice in a process: once by the logging bootstrap, before any logger
- * exists, and once by the running {@link Platform}; when the two disagreed, logs and state landed
- * in different homes. Invariants: the writability test is a create-and-delete probe, not {@code
- * Files.isWritable}, which lies about Windows ACLs; a per-user home is only ever chosen when the
- * system home does not exist, so an operator who merely lacks the rights to an existing system home
- * is told rather than quietly given a second state store and a second run lock; nothing here logs
- * or loads a class that owns a logger, so the bootstrap can call it first.
+ * The single answer to "where is {@code $JRS_HOTFIX_HOME} when nobody said" (spec §5.1), given the
+ * {@link Platform}'s system base. Invariants: the writability test is a create-and-delete probe,
+ * not {@code Files.isWritable}, which lies about Windows ACLs; a per-user home is only ever chosen
+ * when the system home does not exist, so an operator who merely lacks the rights to an existing
+ * system home is told rather than quietly given a second state store and a second run lock; nothing
+ * here logs or loads a class that owns a logger, so the bootstrap can call it first.
  */
 public final class DefaultHome {
 
@@ -24,8 +20,6 @@ public final class DefaultHome {
 
   /** Name of the per-user home under the operator's home directory. */
   public static final String PER_USER_DIR = ".jrs-hotfix";
-
-  private static final String PROGRAM_DATA = "ProgramData";
 
   private DefaultHome() {}
 
@@ -40,19 +34,6 @@ public final class DefaultHome {
       Objects.requireNonNull(home, "home");
       Objects.requireNonNull(systemHome, "systemHome");
     }
-  }
-
-  /** The system base for this OS: {@code %ProgramData%} on Windows, {@code /var/lib} elsewhere. */
-  public static Path systemBase(Map<String, String> env) {
-    Objects.requireNonNull(env, "env");
-    boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-    return windows
-        ? Path.of(env.getOrDefault(PROGRAM_DATA, "C:\\ProgramData"))
-        : Path.of("/var/lib");
-  }
-
-  public static Choice choose(Map<String, String> env) {
-    return choose(systemBase(env));
   }
 
   /** Applies the rules above to one system base; never throws and never creates the home. */

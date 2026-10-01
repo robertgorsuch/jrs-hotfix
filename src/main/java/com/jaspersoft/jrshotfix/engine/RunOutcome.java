@@ -6,13 +6,12 @@ import java.util.List;
 /**
  * How a run ended, as the Runner reports it to the CLI (spec §6.3, §18). Invariant: {@link
  * #exitCode()} is the process exit code for the outcome: 0 success, 3 rolled back cleanly, 4
- * rollback incomplete, 2 when nothing was mutated (precheck failure, fingerprint mismatch, or a
- * fatal failure before any mutation), 5 cancelled. Lists are immutable copies.
+ * rollback incomplete, 2 when nothing was mutated (a precheck failure, or a fatal failure before
+ * any mutation), 5 cancelled. Lists are immutable copies.
  */
 public sealed interface RunOutcome
     permits RunOutcome.Succeeded,
         RunOutcome.RolledBack,
-        RunOutcome.FingerprintMismatch,
         RunOutcome.PrecheckFailed,
         RunOutcome.Failed,
         RunOutcome.Cancelled {
@@ -25,7 +24,6 @@ public sealed interface RunOutcome
       case Failed f -> f.rollbackIncomplete() ? 4 : 2;
       case Cancelled c -> 5;
       case PrecheckFailed p -> 2;
-      case FingerprintMismatch m -> 2;
     };
   }
 
@@ -46,11 +44,4 @@ public sealed interface RunOutcome
 
   /** A precheck failed before any mutation; nothing was changed. */
   record PrecheckFailed(String stepId, String message, String remediation) implements RunOutcome {}
-
-  /** The recomputed fingerprint differs from the plan's; nothing was changed. */
-  record FingerprintMismatch(List<String> changedKeys) implements RunOutcome {
-    public FingerprintMismatch {
-      changedKeys = List.copyOf(changedKeys);
-    }
-  }
 }

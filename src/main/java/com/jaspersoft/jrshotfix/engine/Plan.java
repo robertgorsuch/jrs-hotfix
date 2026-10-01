@@ -1,8 +1,6 @@
 package com.jaspersoft.jrshotfix.engine;
 
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -30,16 +28,6 @@ public record Plan(
         lastPhase = s.phase();
       }
     }
-  }
-
-  /** Steps in order, grouped by phase in first-appearance order. */
-  public Map<String, List<Step>> byPhase() {
-    Map<String, List<Step>> m = new LinkedHashMap<>();
-    for (Step s : steps) {
-      m.computeIfAbsent(s.phase(), k -> new java.util.ArrayList<>()).add(s);
-    }
-    m.replaceAll((k, v) -> List.copyOf(v));
-    return Map.copyOf(m).isEmpty() ? Map.of() : java.util.Collections.unmodifiableMap(m);
   }
 
   public boolean mutating() {

@@ -21,7 +21,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -192,21 +191,6 @@ public final class WarFile {
     return problems;
   }
 
-  /** The number of file entries of {@code war}. */
-  public static int entries(Path war) throws IOException {
-    int count = 0;
-    try (InputStream i = Files.newInputStream(war);
-        ZipInputStream zip = new ZipInputStream(i)) {
-      ZipEntry entry;
-      while ((entry = zip.getNextEntry()) != null) {
-        if (!entry.isDirectory()) {
-          count++;
-        }
-      }
-    }
-    return count;
-  }
-
   /** The names of the file entries of {@code war}, as webapp paths. */
   public static Set<String> paths(Path war) throws IOException {
     Set<String> out = new java.util.LinkedHashSet<>();
@@ -233,11 +217,6 @@ public final class WarFile {
   /** The output's temporary name while it is written and checked. */
   public static Path temporary(Path out) {
     return out.resolveSibling(out.getFileName() + ".jrs-hotfix.tmp");
-  }
-
-  /** A function from a webapp path to the entry name it has in a WAR: the same string. */
-  public static Function<String, String> identity() {
-    return Function.identity();
   }
 
   public static HotfixException notAWebapp(Path war, String why) {

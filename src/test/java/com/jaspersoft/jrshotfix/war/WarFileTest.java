@@ -14,7 +14,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.zip.ZipEntry;
@@ -116,9 +115,8 @@ public class WarFileTest {
             p -> assertThat(p).contains(Wars.CONTEXT + " should be absent"),
             p -> assertThat(p).contains("entries, expected " + (count + 1)));
     assertThat(WarFile.paths(out)).contains(Wars.WEB_XML).doesNotContain(Wars.LOGO);
-    assertThat(WarFile.entries(out)).isEqualTo(count);
+    assertThat(WarFile.paths(out)).hasSize(count);
     assertThat(WarFile.temporary(out).getFileName().toString())
         .isEqualTo("fixed.war.jrs-hotfix.tmp");
-    assertThat(List.of(WarFile.identity().apply("a/b"))).containsExactly("a/b");
   }
 }

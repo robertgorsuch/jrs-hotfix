@@ -11,7 +11,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
@@ -37,7 +36,7 @@ class RunnerTest {
   }
 
   private RunOutcome run(Plan plan) {
-    return fx.runner.run(plan, fx.context(RUN), EngineFixture.fingerprint(), RunOptions.DEFAULT);
+    return fx.runner.run(plan, fx.context(RUN), RunOptions.DEFAULT);
   }
 
   private List<String> journal() {
@@ -144,9 +143,7 @@ class RunnerTest {
             fx.step("s3", "apply")
                 .executeReturns(StepResult.failed(StepFailure.recoverable("boom", "retry"))));
 
-    RunOutcome outcome =
-        fx.runner.run(
-            plan, fx.context(RUN), EngineFixture.fingerprint(), RunOptions.withRollbackAll());
+    RunOutcome outcome = fx.runner.run(plan, fx.context(RUN), RunOptions.withRollbackAll());
 
     assertThat(outcome).isEqualTo(new RunOutcome.RolledBack("prepare", "boom"));
     assertThat(fx.trace)
@@ -295,22 +292,6 @@ class RunnerTest {
 
     assertThat(outcome).isEqualTo(new RunOutcome.Cancelled("timeout"));
     assertThat(fx.trace).containsExactly("exec:s1", "comp:s1");
-  }
-
-  @Test
-  void should_return_fingerprint_mismatch_and_write_nothing_when_inputs_changed() {
-    Plan plan = EngineFixture.plan("p1", fx.step("s1", "apply"));
-    PlanFingerprint recomputed =
-        PlanFingerprint.of(Map.of("server", "srv-1", "bundle", "sha256:changed"));
-
-    RunOutcome outcome = fx.runner.run(plan, fx.context(RUN), recomputed, RunOptions.DEFAULT);
-
-    assertThat(outcome).isEqualTo(new RunOutcome.FingerprintMismatch(List.of("bundle")));
-    assertThat(outcome.exitCode()).isEqualTo(2);
-    assertThat(fx.trace).isEmpty();
-    assertThat(fx.sink.events()).isEmpty();
-    assertThat(fx.store.run(RUN)).isEmpty();
-    assertThat(fx.store.transitions(RUN)).isEmpty();
   }
 
   @Test
@@ -565,8 +546,7 @@ class RunnerTest {
                               "retry with " + secret));
                     }));
 
-    RunOutcome outcome =
-        runner.run(plan, fx.context(RUN), EngineFixture.fingerprint(), RunOptions.DEFAULT);
+    RunOutcome outcome = runner.run(plan, fx.context(RUN), RunOptions.DEFAULT);
 
     assertThat(outcome).isInstanceOf(RunOutcome.RolledBack.class);
     assertThat(fx.sink.events()).isNotEmpty();
@@ -602,7 +582,7 @@ class RunnerTest {
                 .retry(policy)
                 .executeReturns(StepResult.failed(StepFailure.retryable("503", "wait"))));
 
-    RunOutcome outcome = runner.run(plan, ctx, EngineFixture.fingerprint(), RunOptions.DEFAULT);
+    RunOutcome outcome = runner.run(plan, ctx, RunOptions.DEFAULT);
 
     assertThat(outcome).isInstanceOf(RunOutcome.Cancelled.class);
     assertThat(outcome.exitCode()).isEqualTo(5);
@@ -643,7 +623,7 @@ class RunnerTest {
                                     Optional.of(Duration.ofSeconds(3))))
                             : StepResult.ok()));
 
-    RunOutcome outcome = runner.run(plan, ctx, EngineFixture.fingerprint(), RunOptions.DEFAULT);
+    RunOutcome outcome = runner.run(plan, ctx, RunOptions.DEFAULT);
 
     assertThat(outcome).isInstanceOf(RunOutcome.Succeeded.class);
     Duration total = slept.stream().reduce(Duration.ZERO, Duration::plus);

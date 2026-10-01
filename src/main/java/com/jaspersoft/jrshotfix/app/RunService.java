@@ -165,12 +165,7 @@ final class RunService {
     }
   }
 
-  /** Stores the plan, then runs it. The runner takes the run lock. */
-  RunOutcome run(Runner runner, Plan plan, Context ctx, String operation, String argsJson) {
-    return run(runner, plan, ctx, operation, argsJson, List.of());
-  }
-
-  /** As {@link #run(Runner, Plan, Context, String, String)}, writing {@code audit} to the log. */
+  /** Stores the plan, then runs it, writing {@code audit} to the log. The runner takes the lock. */
   RunOutcome run(
       Runner runner,
       Plan plan,
@@ -185,7 +180,7 @@ final class RunService {
         ctx.runId(),
         operation + " " + argsJson,
         audit,
-        () -> runner.run(plan, ctx, plan.fingerprint(), RunOptions.DEFAULT));
+        () -> runner.run(plan, ctx, RunOptions.DEFAULT));
   }
 
   RunOutcome resume(Runner runner, Plan plan, String runId, Context ctx) {

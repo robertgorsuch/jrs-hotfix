@@ -29,11 +29,6 @@ public final class Json {
     return COMPACT;
   }
 
-  /** Same configuration with {@code INDENT_OUTPUT} enabled, for files humans read. */
-  public static ObjectMapper pretty() {
-    return PRETTY;
-  }
-
   public static String write(Object value) {
     try {
       return COMPACT.writeValueAsString(value);

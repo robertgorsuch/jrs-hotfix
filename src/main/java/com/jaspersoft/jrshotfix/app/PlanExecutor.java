@@ -356,7 +356,6 @@ final class PlanExecutor {
             Runtime.getRuntime()::halt);
     Thread hook = new Thread(guard::onShutdown, "jrs-hotfix-shutdown");
     Runtime.getRuntime().addShutdownHook(hook);
-    RunState.markStarted();
     worker.start();
     try {
       worker.join();

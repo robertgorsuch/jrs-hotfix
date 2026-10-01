@@ -62,27 +62,15 @@ public final class ServiceSteps {
   private ServiceSteps() {}
 
   public static Step stop(ServiceRuntime rt, String phase, String id) {
-    return stop(ServiceRuntime.Source.fixed(rt), phase, id);
+    return new StopService(rt, phase, id);
   }
 
   public static Step start(ServiceRuntime rt, String phase, String id) {
-    return start(ServiceRuntime.Source.fixed(rt), phase, id);
+    return new StartService(rt, phase, id);
   }
 
   public static Step waitForServer(ServiceRuntime rt, String phase, String id) {
-    return waitForServer(ServiceRuntime.Source.fixed(rt), phase, id);
-  }
-
-  public static Step stop(ServiceRuntime.Source source, String phase, String id) {
-    return new StopService(source, phase, id);
-  }
-
-  public static Step start(ServiceRuntime.Source source, String phase, String id) {
-    return new StartService(source, phase, id);
-  }
-
-  public static Step waitForServer(ServiceRuntime.Source source, String phase, String id) {
-    return new WaitForServer(source, phase, id);
+    return new WaitForServer(rt, phase, id);
   }
 
   /** Precheck shared by stop and start: the service must be identifiable and its state known. */
@@ -216,12 +204,12 @@ public final class ServiceSteps {
 
   /** Stops the service; compensation starts it only if this run tried to stop it. */
   private static final class StopService implements Step {
-    private final ServiceRuntime.Source source;
+    private final ServiceRuntime rt;
     private final String phase;
     private final String id;
 
-    StopService(ServiceRuntime.Source source, String phase, String id) {
-      this.source = Objects.requireNonNull(source, "source");
+    StopService(ServiceRuntime rt, String phase, String id) {
+      this.rt = Objects.requireNonNull(rt, "rt");
       this.phase = Objects.requireNonNull(phase, "phase");
       this.id = Objects.requireNonNull(id, "id");
     }
@@ -251,21 +239,16 @@ public final class ServiceSteps {
 
     @Override
     public String detail() {
-      // A plan built before any context exists (the vendor strategy) cannot read the configured
-      // timeout yet; it names the key instead.
-      return source instanceof ServiceRuntime.Fixed fixed
-          ? "timeout " + fixed.runtime().serviceTimeout().toSeconds() + "s"
-          : "timeout service.stopTimeoutSeconds";
+      return "timeout " + rt.serviceTimeout().toSeconds() + "s";
     }
 
     @Override
     public CheckResult precheck(Context ctx) {
-      return controllerCheck(source.at(ctx));
+      return controllerCheck(rt);
     }
 
     @Override
     public StepResult execute(Context ctx, EventSink out) {
-      ServiceRuntime rt = source.at(ctx);
       ServiceController.State before;
       try {
         before = rt.controller().state();
@@ -292,7 +275,7 @@ public final class ServiceSteps {
 
     @Override
     public CheckResult postcheck(Context ctx) {
-      ServiceController.State s = source.at(ctx).controller().state();
+      ServiceController.State s = rt.controller().state();
       return s == ServiceController.State.STOPPED
           ? CheckResult.pass()
           : CheckResult.fail("service state is " + s + " after stop", "stop the service by hand");
@@ -300,7 +283,6 @@ public final class ServiceSteps {
 
     @Override
     public StepResult compensate(Context ctx, EventSink out) {
-      ServiceRuntime rt = source.at(ctx);
       if (!Files.isRegularFile(marker(ctx))) {
         log(
             rt,
@@ -360,12 +342,12 @@ public final class ServiceSteps {
 
   /** Starts the service; compensation stops it again. */
   private static final class StartService implements Step {
-    private final ServiceRuntime.Source source;
+    private final ServiceRuntime rt;
     private final String phase;
     private final String id;
 
-    StartService(ServiceRuntime.Source source, String phase, String id) {
-      this.source = Objects.requireNonNull(source, "source");
+    StartService(ServiceRuntime rt, String phase, String id) {
+      this.rt = Objects.requireNonNull(rt, "rt");
       this.phase = Objects.requireNonNull(phase, "phase");
       this.id = Objects.requireNonNull(id, "id");
     }
@@ -392,17 +374,17 @@ public final class ServiceSteps {
 
     @Override
     public CheckResult precheck(Context ctx) {
-      return controllerCheck(source.at(ctx));
+      return controllerCheck(rt);
     }
 
     @Override
     public StepResult execute(Context ctx, EventSink out) {
-      return start(source.at(ctx), ctx.cancel()::isCancelled);
+      return start(rt, ctx.cancel()::isCancelled);
     }
 
     @Override
     public CheckResult postcheck(Context ctx) {
-      ServiceController.State s = source.at(ctx).controller().state();
+      ServiceController.State s = rt.controller().state();
       return s == ServiceController.State.RUNNING
           ? CheckResult.pass()
           : CheckResult.fail("service state is " + s + " after start", "check the Tomcat log");
@@ -410,7 +392,7 @@ public final class ServiceSteps {
 
     @Override
     public StepResult compensate(Context ctx, EventSink out) {
-      return stop(source.at(ctx), ctx.cancel()::isCancelled);
+      return stop(rt, ctx.cancel()::isCancelled);
     }
   }
 
@@ -423,12 +405,12 @@ public final class ServiceSteps {
    * is asked again after the backoff. Cancellation is noticed while a request waits.
    */
   private static final class WaitForServer implements Step {
-    private final ServiceRuntime.Source source;
+    private final ServiceRuntime rt;
     private final String phase;
     private final String id;
 
-    WaitForServer(ServiceRuntime.Source source, String phase, String id) {
-      this.source = Objects.requireNonNull(source, "source");
+    WaitForServer(ServiceRuntime rt, String phase, String id) {
+      this.rt = Objects.requireNonNull(rt, "rt");
       this.phase = Objects.requireNonNull(phase, "phase");
       this.id = Objects.requireNonNull(id, "id");
     }
@@ -465,7 +447,6 @@ public final class ServiceSteps {
 
     @Override
     public StepResult execute(Context ctx, EventSink out) {
-      ServiceRuntime rt = source.at(ctx);
       RetryPolicy policy = RetryPolicy.HTTP_DEFAULT;
       Duration waited = Duration.ZERO;
       int attempt = 1;

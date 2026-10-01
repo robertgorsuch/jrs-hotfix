@@ -5,8 +5,8 @@ import java.util.Optional;
 
 /**
  * The process environment as the commands see it. Invariant: production code always reads {@link
- * System#getenv()}; the override exists so unit tests can supply {@code JRS_HOTFIX_PASSPHRASE} or
- * {@code JRS_PASSWORD} without touching the real environment, and it is never set outside tests.
+ * System#getenv()}; the override exists so unit tests can supply variables (such as {@code
+ * COLUMNS}) without touching the real environment, and it is never set outside tests.
  */
 final class Env {
 

@@ -18,19 +18,19 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
- * Executes a {@link Plan} step by step under the run lock (spec §6.3-§6.6). Invariants: a plan
- * whose recomputed fingerprint differs is refused before anything is touched; every step state
- * change is journalled to {@code step_transitions} in its own transaction <em>before</em> the
- * matching event is emitted, so the journal is always at least as advanced as what observers saw;
- * {@code Retryable} failures are retried per the step's {@link RetryPolicy} and become {@code
- * Recoverable} when exhausted; {@code Recoverable} failures compensate the failing step itself when
- * it is mutating and its {@code execute} ran (a precheck failure never ran, so it is not
- * compensated), then every succeeded mutating step in reverse back to the failing step's phase
- * boundary (or the whole plan with {@code rollbackAll}); {@code Fatal} failures never compensate;
- * cancellation compensates the in-flight step and then every succeeded mutating step; irreversible
- * steps are skipped during compensation; the run row always receives a terminal state and exit code
- * before the Runner returns. Steps that throw are treated as {@code Recoverable} with the exception
- * as the cause. Every event, including those steps emit themselves, passes the redactor before any
+ * Executes a {@link Plan} step by step under the run lock (spec §6.3-§6.6). Invariants: the caller
+ * has already refused a plan whose inputs changed (PlanExecutor); every step state change is
+ * journalled to {@code step_transitions} in its own transaction <em>before</em> the matching event
+ * is emitted, so the journal is always at least as advanced as what observers saw; {@code
+ * Retryable} failures are retried per the step's {@link RetryPolicy} and become {@code Recoverable}
+ * when exhausted; {@code Recoverable} failures compensate the failing step itself when it is
+ * mutating and its {@code execute} ran (a precheck failure never ran, so it is not compensated),
+ * then every succeeded mutating step in reverse back to the failing step's phase boundary (or the
+ * whole plan with {@code rollbackAll}); {@code Fatal} failures never compensate; cancellation
+ * compensates the in-flight step and then every succeeded mutating step; irreversible steps are
+ * skipped during compensation; the run row always receives a terminal state and exit code before
+ * the Runner returns. Steps that throw are treated as {@code Recoverable} with the exception as the
+ * cause. Every event, including those steps emit themselves, passes the redactor before any
  * subscriber sees it, so redaction is an engine guarantee rather than a per-sink convention. A
  * journal write that fails ends the run with a {@code Failed} outcome and a {@code RunFailed} event
  * naming {@code runs resume} and {@code runs rollback}, never with an escaping exception;
@@ -68,10 +68,7 @@ public final class Runner {
   }
 
   /** Runs a fresh plan; {@code ctx.runId()} names the run. */
-  public RunOutcome run(Plan plan, Context ctx, PlanFingerprint recomputed, RunOptions opts) {
-    if (!plan.fingerprint().matches(recomputed)) {
-      return new RunOutcome.FingerprintMismatch(plan.fingerprint().changedKeys(recomputed));
-    }
+  public RunOutcome run(Plan plan, Context ctx, RunOptions opts) {
     try (RunLock unusedLock = new RunLock(ctx.home(), ctx.runId(), clock.instant())) {
       try {
         store.recordRunStart(
