@@ -92,7 +92,7 @@ public class PlatformDetectionTest {
       Files.createDirectories(parent.resolve(name));
     }
 
-    assertThat(AbstractPlatform.glob(parent, "jasperreports-server*"))
+    assertThat(OsPlatform.glob(parent, "jasperreports-server*"))
         .extracting(p -> p.getFileName().toString())
         .containsExactly(
             "jasperreports-server-10.0.0",
@@ -118,7 +118,8 @@ public class PlatformDetectionTest {
         new TomcatProcessFinder.TomcatProcess(
             77, "", Optional.empty(), Optional.empty(), Optional.empty());
     Platform windows =
-        new WindowsPlatform(
+        new OsPlatform(
+            Platform.OsFamily.WINDOWS,
             Platform.Arch.X86_64,
             new FakeProcessRunner(),
             new DefaultFileOps(),
@@ -139,7 +140,8 @@ public class PlatformDetectionTest {
   }
 
   private static Platform scanning(Path install) {
-    return new WindowsPlatform(
+    return new OsPlatform(
+        Platform.OsFamily.WINDOWS,
         Platform.Arch.X86_64,
         new FakeProcessRunner(),
         new DefaultFileOps(),

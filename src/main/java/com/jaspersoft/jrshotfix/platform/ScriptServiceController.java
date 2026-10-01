@@ -3,6 +3,8 @@ package com.jaspersoft.jrshotfix.platform;
 import static java.util.Objects.requireNonNull;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -84,7 +86,7 @@ public final class ScriptServiceController extends PollingServiceController {
         pollInterval,
         forceStopAfter,
         terminator,
-        StalePidFile.LIVE_PROCESSES);
+        pid -> ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false));
   }
 
   ScriptServiceController(
@@ -131,7 +133,8 @@ public final class ScriptServiceController extends PollingServiceController {
    */
   @Override
   public State state() {
-    return TomcatState.of(processes, Optional.of(watchedDir), ServerXml.portsUnder(watchedDir));
+    return RunningTomcats.state(
+        processes, Optional.of(watchedDir), ServerXml.portsUnder(watchedDir));
   }
 
   @Override
@@ -227,7 +230,7 @@ public final class ScriptServiceController extends PollingServiceController {
    */
   private void removeStalePidFile() {
     try {
-      StalePidFile.removeIfStale(tomcatDirs(), alive)
+      removeIfStale(tomcatDirs(), alive)
           .ifPresent(
               n ->
                   Diag.warn(
@@ -240,6 +243,47 @@ public final class ScriptServiceController extends PollingServiceController {
     } catch (IOException e) {
       Diag.warn("cannot remove a stale pid file under {}: {}", watchedDir, e.getMessage());
     }
+  }
+
+  /** A {@code temp/catalina.pid} as read: the pid it names, or empty when it holds no number. */
+  record PidFile(Path file, Optional<Long> pid) {}
+
+  /** The pid file under the first of {@code tomcatDirs} that has one, read. */
+  static Optional<PidFile> findPidFile(List<Path> tomcatDirs) {
+    for (Path dir : tomcatDirs) {
+      Path file = dir.resolve("temp").resolve("catalina.pid");
+      if (!Files.isRegularFile(file)) {
+        continue;
+      }
+      Optional<Long> pid;
+      try {
+        String text = Files.readString(file, StandardCharsets.UTF_8).strip();
+        int end = 0;
+        while (end < text.length() && Character.isDigit(text.charAt(end))) {
+          end++;
+        }
+        pid = end == 0 ? Optional.empty() : Optional.of(Long.parseLong(text.substring(0, end)));
+      } catch (IOException | NumberFormatException e) {
+        pid = Optional.empty();
+      }
+      return Optional.of(new PidFile(file, pid));
+    }
+    return Optional.empty();
+  }
+
+  /**
+   * Deletes the pid file {@link #findPidFile} finds when it is stale, and answers which file went.
+   * A file is stale exactly when its pid is not a live process; one holding no number is stale too,
+   * because Tomcat refuses over it just the same. A file naming a live process is never deleted.
+   */
+  static Optional<PidFile> removeIfStale(List<Path> tomcatDirs, LongPredicate alive)
+      throws IOException {
+    Optional<PidFile> stale =
+        findPidFile(tomcatDirs).filter(f -> f.pid().map(p -> !alive.test(p)).orElse(true));
+    if (stale.isPresent()) {
+      Files.deleteIfExists(stale.get().file());
+    }
+    return stale;
   }
 
   List<String> command(String operation) {

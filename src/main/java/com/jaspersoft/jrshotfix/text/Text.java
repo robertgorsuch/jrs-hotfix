@@ -1,4 +1,4 @@
-package com.jaspersoft.jrshotfix.merge;
+package com.jaspersoft.jrshotfix.text;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;

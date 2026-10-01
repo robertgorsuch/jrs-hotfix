@@ -10,7 +10,6 @@ import com.jaspersoft.jrshotfix.pkg.OfficialPackage;
 import com.jaspersoft.jrshotfix.pkg.PackageContents;
 import com.jaspersoft.jrshotfix.pkg.PackagePaths;
 import com.jaspersoft.jrshotfix.pkg.Packages;
-import com.jaspersoft.jrshotfix.platform.PlatformDetectionTest;
 import com.jaspersoft.jrshotfix.platform.Sums;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -143,8 +142,7 @@ class BaselineStoreTest {
       throws Exception {
     PackagePaths paths = Packages.install(tmp.resolve("jrs"));
     Path zip = hotfix(tmp.resolve("dl/hotfix.zip"));
-    PackageContents contents =
-        OfficialPackage.read(zip, paths, "jasperserver-pro", PlatformDetectionTest.files());
+    PackageContents contents = OfficialPackage.read(zip, paths, "jasperserver-pro");
     BaselineStore store = store();
     BaselineManifest m = store.addHotfix(zip, contents, "jasperserver-pro");
 

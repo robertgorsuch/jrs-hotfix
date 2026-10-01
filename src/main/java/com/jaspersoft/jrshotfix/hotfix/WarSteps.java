@@ -2,7 +2,6 @@ package com.jaspersoft.jrshotfix.hotfix;
 
 import com.jaspersoft.jrshotfix.engine.CheckResult;
 import com.jaspersoft.jrshotfix.engine.Context;
-import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.engine.StepResult;
 import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
@@ -68,7 +67,7 @@ final class WarSteps {
   }
 
   /** Step 1: the WAR fits the package, the output is free, there is room. Mutates nothing. */
-  static final class Preflight extends ApplySteps.ReadOnly {
+  static final class Preflight extends ApplySteps.ReadOnlyStep {
     private final Target target;
 
     Preflight(HotfixRuntime rt, ApplyInput in, Target target) {
@@ -139,14 +138,11 @@ final class WarSteps {
    * Step 3: stream the input WAR to the temporary output, without the entries the package replaces
    * or deletes, then append the staged files. Compensation removes the temporary file.
    */
-  static final class Assemble implements Step {
-    private final HotfixRuntime rt;
-    private final ApplyInput in;
+  static final class Assemble extends HotfixStep<ApplyInput> {
     private final Target target;
 
     Assemble(HotfixRuntime rt, ApplyInput in, Target target) {
-      this.rt = rt;
-      this.in = in;
+      super(rt, in);
       this.target = target;
     }
 
@@ -209,27 +205,17 @@ final class WarSteps {
         }
       }
       if (skipped > 0) {
-        out.emit(
-            new Event.Log(
-                rt.clock().instant(),
-                ctx.runId(),
-                Optional.of(id()),
-                phase(),
-                Event.Log.Level.INFO,
-                skipped
-                    + " file(s) of the installation tree (js-install.zip) are not part of a WAR"
-                    + " and were left out"));
+        log(
+            ctx,
+            out,
+            Event.Log.Level.INFO,
+            skipped
+                + " file(s) of the installation tree (js-install.zip) are not part of a WAR"
+                + " and were left out");
       }
       try {
         int count = WarFile.assemble(target.war(), target.temporary(), dropped, staged);
-        out.emit(
-            new Event.Log(
-                rt.clock().instant(),
-                ctx.runId(),
-                Optional.of(id()),
-                phase(),
-                Event.Log.Level.INFO,
-                count + " entries written to " + target.temporary()));
+        log(ctx, out, Event.Log.Level.INFO, count + " entries written to " + target.temporary());
         return StepResult.ok();
       } catch (IOException | UncheckedIOException e) {
         return Failures.recoverable(
@@ -251,7 +237,7 @@ final class WarSteps {
   }
 
   /** Step 4: reopen the temporary output and check every entry the plan wrote or dropped. */
-  static final class Check extends ApplySteps.ReadOnly {
+  static final class Check extends ApplySteps.ReadOnlyStep {
     private final Target target;
 
     Check(HotfixRuntime rt, ApplyInput in, Target target) {
@@ -328,14 +314,11 @@ final class WarSteps {
    * Step 5: give the output its name and keep the package's files as the hotfix's baseline.
    * Compensation removes the output.
    */
-  static final class WriteOut implements Step {
-    private final HotfixRuntime rt;
-    private final ApplyInput in;
+  static final class WriteOut extends HotfixStep<ApplyInput> {
     private final Target target;
 
     WriteOut(HotfixRuntime rt, ApplyInput in, Target target) {
-      this.rt = rt;
-      this.in = in;
+      super(rt, in);
       this.target = target;
     }
 
@@ -376,14 +359,7 @@ final class WarSteps {
         }
         rt.baselines().addHotfix(in.packageFile(), in.contents(), target.webappName());
         Trees.deleteRecursively(in.stagingDir(ctx));
-        out.emit(
-            new Event.Log(
-                rt.clock().instant(),
-                ctx.runId(),
-                Optional.of(id()),
-                phase(),
-                Event.Log.Level.INFO,
-                "audit hotfix.war-written: " + in.contents().id() + " into " + target.out()));
+        audit(ctx, out, "hotfix.war-written", in.contents().id() + " into " + target.out());
         return StepResult.ok();
       } catch (IOException | UncheckedIOException e) {
         return Failures.recoverable(

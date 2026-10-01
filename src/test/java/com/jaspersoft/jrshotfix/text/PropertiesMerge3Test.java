@@ -1,9 +1,9 @@
-package com.jaspersoft.jrshotfix.pkg;
+package com.jaspersoft.jrshotfix.text;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.jaspersoft.jrshotfix.pkg.PropertiesMerge.Merged;
-import com.jaspersoft.jrshotfix.pkg.PropertiesMerge.Style;
+import com.jaspersoft.jrshotfix.text.PropertiesMerge.Merged;
+import com.jaspersoft.jrshotfix.text.PropertiesMerge.Style;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -69,14 +69,14 @@ class PropertiesMerge3Test {
     assertThat(m.lines())
         .containsExactly(
             "x=0",
-            PropertiesMerge.MARK_MINE,
+            Conflict.MARK_MINE,
             "a=2",
-            PropertiesMerge.MARK_BASE,
+            Conflict.MARK_BASE,
             "a=1",
-            PropertiesMerge.MARK_SEPARATOR,
+            Conflict.MARK_SEPARATOR,
             "a=3",
-            PropertiesMerge.MARK_THEIRS);
-    assertThat(PropertiesMerge.hasMarkers(m.lines())).isTrue();
+            Conflict.MARK_THEIRS);
+    assertThat(Conflict.hasMarkers(m.lines())).isTrue();
   }
 
   @Test
@@ -85,12 +85,12 @@ class PropertiesMerge3Test {
     assertThat(m.conflicts()).containsExactly("a");
     assertThat(m.lines())
         .containsExactly(
-            PropertiesMerge.MARK_MINE,
-            PropertiesMerge.MARK_BASE,
+            Conflict.MARK_MINE,
+            Conflict.MARK_BASE,
             "a=1",
-            PropertiesMerge.MARK_SEPARATOR,
+            Conflict.MARK_SEPARATOR,
             "a=3",
-            PropertiesMerge.MARK_THEIRS);
+            Conflict.MARK_THEIRS);
   }
 
   @Test
@@ -108,12 +108,12 @@ class PropertiesMerge3Test {
         .containsExactly(
             "b=1",
             "",
-            PropertiesMerge.MARK_MINE,
+            Conflict.MARK_MINE,
             "a=2",
-            PropertiesMerge.MARK_BASE,
+            Conflict.MARK_BASE,
             "a=1",
-            PropertiesMerge.MARK_SEPARATOR,
-            PropertiesMerge.MARK_THEIRS);
+            Conflict.MARK_SEPARATOR,
+            Conflict.MARK_THEIRS);
   }
 
   @Test
@@ -136,7 +136,7 @@ class PropertiesMerge3Test {
             PropertiesMerge.CARRIED_HEADING,
             "# jrs-hotfix: the hotfix removes this key; kept as this server has it:",
             "kept=2");
-    assertThat(PropertiesMerge.hasMarkers(m.lines())).isFalse();
+    assertThat(Conflict.hasMarkers(m.lines())).isFalse();
     assertThat(m.kept()).containsExactly("a");
     assertThat(m.removed()).containsExactly("gone");
     assertThat(m.carried()).containsExactly("kept");

@@ -1,4 +1,4 @@
-package com.jaspersoft.jrshotfix.merge;
+package com.jaspersoft.jrshotfix.text;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

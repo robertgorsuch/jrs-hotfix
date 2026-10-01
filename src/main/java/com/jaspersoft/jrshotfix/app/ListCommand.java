@@ -31,7 +31,7 @@ final class ListCommand extends AppCommand {
       out.flush();
       return ExitCodes.SUCCESS;
     }
-    TextTable table = new TextTable(Terminal.width(Env.vars()));
+    TextTable table = table();
     table.row("ID", "STATE", "ORIGIN", "RELEASE", "BUILD", "INSTALLED", "RUN");
     for (LedgerEntry e : entries) {
       table.row(
@@ -43,9 +43,7 @@ final class ListCommand extends AppCommand {
           e.installedAt().toString(),
           e.runId());
     }
-    for (String line : table.lines()) {
-      out.println(line);
-    }
+    table.printTo(out);
     out.flush();
     return ExitCodes.SUCCESS;
   }

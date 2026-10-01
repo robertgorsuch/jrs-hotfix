@@ -30,10 +30,10 @@ import java.util.regex.Pattern;
  * [::]:0}, so the localised state text is never read; a {@code java.exe} or {@code javaw.exe} whose
  * command line this account cannot read (another account's process, without elevation) is returned
  * as {@link TomcatProcess#opaque()} with the ports it listens on, which are readable without
- * elevation, so {@link TomcatState} can tell an unrelated Java service from a Tomcat on the watched
- * ports; an unreadable {@code tomcatN.exe} is left out of {@link #find()}, because service wrappers
- * belong to the service kinds, which do not use this scan, and kept as opaque only by {@link
- * #findWithServiceWrappers()}, for reports (issue #147); Tomcat recognition is {@link
+ * elevation, so {@link RunningTomcats#state} can tell an unrelated Java service from a Tomcat on
+ * the watched ports; an unreadable {@code tomcatN.exe} is left out of {@link #find()}, because
+ * service wrappers belong to the service kinds, which do not use this scan, and kept as opaque only
+ * by {@link #findWithServiceWrappers()}, for reports (issue #147); Tomcat recognition is {@link
  * TomcatProcesses#describe}; this JVM is never listed.
  */
 final class WindowsTomcatProcesses implements TomcatProcessFinder {

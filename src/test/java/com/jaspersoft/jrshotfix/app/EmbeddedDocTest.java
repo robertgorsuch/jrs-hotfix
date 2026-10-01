@@ -40,7 +40,8 @@ class EmbeddedDocTest {
     StringWriter out = new StringWriter();
     StringWriter err = new StringWriter();
     int code =
-        Main.commandLine(new PrintWriter(out, true), new PrintWriter(err, true)).execute("--docs");
+        Main.commandLine(new PrintWriter(out, true), new PrintWriter(err, true), Bootstrap.DEFAULT)
+            .execute("--docs");
     assertThat(code).isZero();
     assertThat(out.toString()).contains("# jrs-hotfix").contains("## Settings");
     assertThat(err.toString()).isEmpty();
@@ -51,7 +52,10 @@ class EmbeddedDocTest {
     Path home = tmp.resolve("no-such-home");
     StringWriter out = new StringWriter();
     int code =
-        Main.commandLine(new PrintWriter(out, true), new PrintWriter(new StringWriter(), true))
+        Main.commandLine(
+                new PrintWriter(out, true),
+                new PrintWriter(new StringWriter(), true),
+                Bootstrap.DEFAULT)
             .execute("--docs", "--home", home.toString());
     assertThat(code).isZero();
     assertThat(Files.exists(home)).isFalse();

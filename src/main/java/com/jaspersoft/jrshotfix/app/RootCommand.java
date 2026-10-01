@@ -9,14 +9,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.Callable;
 import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.IVersionProvider;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 /**
  * The {@code jrs-hotfix} command. Invariants: without a subcommand, an operator at a terminal (and
@@ -42,29 +39,27 @@ import picocli.CommandLine.Spec;
       RunsCommand.class,
       SettingsCommand.class
     })
-final class RootCommand implements Callable<Integer> {
+final class RootCommand extends AppCommand {
 
-  @Spec CommandSpec spec;
-
+  /**
+   * The global options, which picocli inherits into every subcommand ({@link AppCommand#global}).
+   */
   @Mixin GlobalOptions global;
 
   @Option(names = "--docs", description = "Print the documentation page.")
   boolean docs;
 
-  /** Set by {@link Main}'s factory, so the menu's commands open the same way this one would. */
-  Bootstrap.Opener opener = Bootstrap.DEFAULT;
-
   @Override
   public Integer call() {
     if (docs) {
-      spec.commandLine().getOut().print(EmbeddedDoc.text());
-      spec.commandLine().getOut().flush();
+      out().print(EmbeddedDoc.text());
+      out().flush();
       return ExitCodes.SUCCESS;
     }
     if (!global.nonInteractive() && Terminal.present()) {
-      return menu(spec.commandLine().getOut(), this::runCommand).run();
+      return menu(out(), this::runCommand).run();
     }
-    spec.commandLine().usage(spec.commandLine().getErr());
+    spec.commandLine().usage(err());
     return ExitCodes.USAGE;
   }
 
@@ -86,8 +81,7 @@ final class RootCommand implements Callable<Integer> {
   }
 
   private int runCommand(String[] args) {
-    return Main.commandLine(spec.commandLine().getOut(), spec.commandLine().getErr(), opener)
-        .execute(args);
+    return Main.commandLine(out(), err(), opener).execute(args);
   }
 
   /** The global options given with a bare {@code jrs-hotfix}, passed on to every menu command. */

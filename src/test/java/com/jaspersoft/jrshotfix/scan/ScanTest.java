@@ -143,7 +143,7 @@ class ScanTest {
       outer.put("js-install.zip", Packages.zipBytes(installFiles, null));
     }
     Path zip = Packages.zip(tmp.resolve("dl/p" + payload.hashCode() + ".zip"), outer);
-    return OfficialPackage.read(zip, paths, "jasperserver-pro", files);
+    return OfficialPackage.read(zip, paths, "jasperserver-pro");
   }
 
   private Scan.Verdict verdict(PackageContents c, String path) {

@@ -65,7 +65,9 @@ class HelpExamplesTest {
 
   private static CommandLine commandLine() {
     return Main.commandLine(
-        new PrintWriter(new StringWriter()), new PrintWriter(new StringWriter()));
+        new PrintWriter(new StringWriter()),
+        new PrintWriter(new StringWriter()),
+        Bootstrap.DEFAULT);
   }
 
   private static List<CommandLine> all() {

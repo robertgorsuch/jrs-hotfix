@@ -2,14 +2,13 @@ package com.jaspersoft.jrshotfix.hotfix;
 
 import com.jaspersoft.jrshotfix.engine.CheckResult;
 import com.jaspersoft.jrshotfix.engine.Context;
-import com.jaspersoft.jrshotfix.engine.RetryPolicy;
 import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.engine.StepResult;
-import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
 import com.jaspersoft.jrshotfix.pkg.FileTarget;
 import com.jaspersoft.jrshotfix.pkg.PackagePaths;
 import com.jaspersoft.jrshotfix.platform.FileOps;
+import com.jaspersoft.jrshotfix.service.ServiceSteps;
 import com.jaspersoft.jrshotfix.snapshot.Snapshot;
 import com.jaspersoft.jrshotfix.state.HotfixState;
 import com.jaspersoft.jrshotfix.state.Ledger;
@@ -29,9 +28,9 @@ import java.util.Optional;
  * snapshots the current files first so that its own compensation can put the hotfix back; hashes
  * are verified before the restore (the snapshot) and after it (every file against the ledger's
  * before-hash); a file the hotfix added is removed and a file it deleted comes back from the
- * snapshot; the installing run's snapshot must exist, and {@link CheckedStop} refuses before the
- * outage when any snapshot of the chain is missing; {@code RecordRolledBack} flips the ledger entry
- * and its compensation flips it back.
+ * snapshot; the installing run's snapshot must exist, and the first {@link #stop} refuses before
+ * the outage when any snapshot of the chain is missing; {@code RecordRolledBack} flips the ledger
+ * entry and its compensation flips it back.
  */
 final class RollbackSteps {
 
@@ -73,97 +72,36 @@ final class RollbackSteps {
   }
 
   /**
-   * The stop step of a rollback, refusing before the outage when a snapshot the rollback restores
-   * is missing or damaged, or when the service runs but {@code baseUrl} does not answer. Everything
-   * but the precheck is the wrapped stop step's.
+   * The stop step of a rollback. The first stop starts the outage, so it also refuses when a
+   * snapshot the rollback restores is missing or damaged (before the controller check), or when the
+   * service runs but {@code baseUrl} does not answer (after it).
    */
-  static final class CheckedStop implements Step {
-    private final HotfixRuntime rt;
-    private final Step stop;
-    private final List<RestoreSnapshot> restores;
-
-    CheckedStop(HotfixRuntime rt, Step stop, List<RestoreSnapshot> restores) {
-      this.rt = Objects.requireNonNull(rt, "rt");
-      this.stop = Objects.requireNonNull(stop, "stop");
-      this.restores = List.copyOf(restores);
+  static Step stop(HotfixRuntime rt, Input in, boolean first, List<RestoreSnapshot> restores) {
+    String id = ServiceSteps.STOP + in.suffix();
+    if (!first) {
+      return ServiceSteps.stop(rt, in.phase(), id);
     }
-
-    @Override
-    public String id() {
-      return stop.id();
-    }
-
-    @Override
-    public String title() {
-      return stop.title();
-    }
-
-    @Override
-    public String phase() {
-      return stop.phase();
-    }
-
-    @Override
-    public String detail() {
-      return stop.detail();
-    }
-
-    @Override
-    public boolean rollbackAllOnFailure() {
-      return stop.rollbackAllOnFailure();
-    }
-
-    @Override
-    public boolean irreversible() {
-      return stop.irreversible();
-    }
-
-    @Override
-    public boolean mutating() {
-      return stop.mutating();
-    }
-
-    @Override
-    public RetryPolicy retryPolicy() {
-      return stop.retryPolicy();
-    }
-
-    @Override
-    public CheckResult precheck(Context ctx) {
-      for (RestoreSnapshot restore : restores) {
-        CheckResult snapshot = restore.snapshotCheck();
-        if (snapshot instanceof CheckResult.Fail) {
-          return snapshot;
-        }
-      }
-      CheckResult check = stop.precheck(ctx);
-      return check instanceof CheckResult.Fail ? check : ApplySteps.baseUrlCheck(rt);
-    }
-
-    @Override
-    public StepResult execute(Context ctx, EventSink out) {
-      return stop.execute(ctx, out);
-    }
-
-    @Override
-    public CheckResult postcheck(Context ctx) {
-      return stop.postcheck(ctx);
-    }
-
-    @Override
-    public StepResult compensate(Context ctx, EventSink out) {
-      return stop.compensate(ctx, out);
-    }
+    List<RestoreSnapshot> all = List.copyOf(restores);
+    return ServiceSteps.stop(
+        rt,
+        in.phase(),
+        id,
+        () -> {
+          for (RestoreSnapshot restore : all) {
+            CheckResult snapshot = restore.snapshotCheck();
+            if (snapshot instanceof CheckResult.Fail) {
+              return snapshot;
+            }
+          }
+          return CheckResult.pass();
+        },
+        () -> ApplySteps.baseUrlCheck(rt));
   }
 
   /** Restores every file from the installation snapshot and deletes what the hotfix added. */
-  static final class RestoreSnapshot implements Step {
-    private final HotfixRuntime rt;
-    private final Input in;
-
+  static final class RestoreSnapshot extends HotfixStep<Input> {
     RestoreSnapshot(HotfixRuntime rt, Input in) {
-      this.rt = rt;
-      this.in = in;
+      super(rt, in);
     }
 
     @Override
@@ -220,12 +158,11 @@ final class RollbackSteps {
         return snapshot;
       }
       FileOps files = rt.files();
-      List<String> problems = new ArrayList<>();
-      for (Path p : in.touched()) {
-        if (Files.isRegularFile(p) && files.isLocked(p)) {
-          problems.add(p + " is locked" + files.lockHolder(p).map(h -> " by " + h).orElse(""));
-        }
-      }
+      List<String> problems =
+          ApplySteps.locked(
+              files,
+              in.touched(),
+              (p, holder) -> p + " is locked" + holder.map(h -> " by " + h).orElse(""));
       // #157: the restore writes every file anew, so its owner must be assignable back
       OwnerRestore.problem(files, in.touched()).ifPresent(problems::add);
       if (!problems.isEmpty()) {
@@ -234,11 +171,7 @@ final class RollbackSteps {
             "end the process holding the files, or run jrs-hotfix as an account that may restore"
                 + " their owners");
       }
-      // review 3.3: a blind scan is a warning, not a pass
-      return files
-          .lockInspectionLimit()
-          .map(limit -> CheckResult.warn("no locked file found, but " + limit))
-          .orElseGet(CheckResult::pass);
+      return ApplySteps.noLockFound(files);
     }
 
     @Override
@@ -325,19 +258,14 @@ final class RollbackSteps {
     }
 
     private List<Path> backups() {
-      return List.of(
-          rt.home().snapshots().resolve(in.hotfix().runId()).resolve(ApplySteps.SNAPSHOT));
+      return List.of(ApplySteps.snapshotDir(rt.home(), in.hotfix().runId()));
     }
   }
 
   /** Marks the hotfix as rolled back; compensation marks it installed again. */
-  static final class RecordRolledBack implements Step {
-    private final HotfixRuntime rt;
-    private final Input in;
-
+  static final class RecordRolledBack extends HotfixStep<Input> {
     RecordRolledBack(HotfixRuntime rt, Input in) {
-      this.rt = rt;
-      this.in = in;
+      super(rt, in);
     }
 
     @Override
@@ -386,17 +314,6 @@ final class RollbackSteps {
         ledger.updateState(in.id(), HotfixState.INSTALLED);
       }
       return StepResult.ok();
-    }
-
-    private void audit(Context ctx, EventSink out, String kind, String text) {
-      out.emit(
-          new Event.Log(
-              rt.clock().instant(),
-              ctx.runId(),
-              Optional.of(id()),
-              phase(),
-              Event.Log.Level.INFO,
-              "audit " + kind + ": " + text));
     }
   }
 }

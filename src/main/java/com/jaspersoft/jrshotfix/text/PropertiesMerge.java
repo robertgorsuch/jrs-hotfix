@@ -1,4 +1,4 @@
-package com.jaspersoft.jrshotfix.pkg;
+package com.jaspersoft.jrshotfix.text;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -36,25 +36,11 @@ public final class PropertiesMerge {
   private PropertiesMerge() {}
 
   /**
-   * The merged file and what was done: {@code kept} are the keys both have with different values,
-   * where the server's stayed; {@code carried} are the keys only the server has.
+   * The two-way merge: {@code kept} are the keys both have with different values, where the
+   * server's stayed; {@code carried} are the keys only the server has; nothing is removed.
    */
-  public record Result(List<String> lines, List<String> kept, List<String> carried) {
-    public Result {
-      lines = List.copyOf(lines);
-      kept = List.copyOf(kept);
-      carried = List.copyOf(carried);
-    }
-
-    /** False when the result is theirs, line for line. */
-    public boolean changed() {
-      return !kept.isEmpty() || !carried.isEmpty();
-    }
-  }
-
-  public static Result merge(List<String> mine, List<String> theirs) {
-    Merged m = merge3(List.of(), mine, theirs, Style.MINE_SILENT);
-    return new Result(m.lines(), m.kept(), m.carried());
+  public static Merged merge(List<String> mine, List<String> theirs) {
+    return merge3(List.of(), mine, theirs, Style.MINE_SILENT);
   }
 
   /** How a key both the site and the vendor changed is settled. */
@@ -68,13 +54,6 @@ public final class PropertiesMerge {
     /** Neither stands: both are written between conflict markers for the operator. */
     MARKERS
   }
-
-  /** The first line of a conflict block; the three sides follow, each under its own marker. */
-  public static final String MARK_MINE = "<<<<<<< mine (on the server)";
-
-  public static final String MARK_BASE = "||||||| base (the vendor's file before this hotfix)";
-  public static final String MARK_SEPARATOR = "=======";
-  public static final String MARK_THEIRS = ">>>>>>> theirs (the hotfix)";
 
   /**
    * A three-way merge and what was done, by key name only (a value may be a secret): {@code kept}
@@ -140,7 +119,7 @@ public final class PropertiesMerge {
               lines.add("# jrs-hotfix: this server had removed this key; the hotfix's value:");
               lines.addAll(item.lines());
             }
-            case MARKERS -> conflict(lines, List.of(), before.lines(), item.lines());
+            case MARKERS -> lines.addAll(Conflict.block(List.of(), before.lines(), item.lines()));
           }
         }
         continue;
@@ -172,8 +151,9 @@ public final class PropertiesMerge {
             lines.addAll(item.lines());
           }
           case MARKERS ->
-              conflict(
-                  lines, here.lines(), before == null ? List.of() : before.lines(), item.lines());
+              lines.addAll(
+                  Conflict.block(
+                      here.lines(), before == null ? List.of() : before.lines(), item.lines()));
         }
       }
     }
@@ -202,7 +182,7 @@ public final class PropertiesMerge {
             notes.add("# jrs-hotfix: removed by the hotfix; this server had:");
             e.lines().forEach(l -> notes.add("# " + l));
           }
-          case MARKERS -> conflict(notes, e.lines(), before.lines(), List.of());
+          case MARKERS -> notes.addAll(Conflict.block(e.lines(), before.lines(), List.of()));
         }
       }
     }
@@ -220,28 +200,6 @@ public final class PropertiesMerge {
       lines.addAll(notes);
     }
     return new Merged(lines, kept, carried, removed, conflicts);
-  }
-
-  /** True when {@code lines} still hold a conflict marker of {@link Style#MARKERS}. */
-  public static boolean hasMarkers(List<String> lines) {
-    return lines.stream()
-        .anyMatch(
-            l ->
-                l.startsWith("<<<<<<< ")
-                    || l.startsWith("||||||| ")
-                    || l.equals(MARK_SEPARATOR)
-                    || l.startsWith(">>>>>>> "));
-  }
-
-  private static void conflict(
-      List<String> out, List<String> mine, List<String> base, List<String> theirs) {
-    out.add(MARK_MINE);
-    out.addAll(mine);
-    out.add(MARK_BASE);
-    out.addAll(base);
-    out.add(MARK_SEPARATOR);
-    out.addAll(theirs);
-    out.add(MARK_THEIRS);
   }
 
   /** The site's value where the vendor's key stands: the vendor's key and separator kept. */

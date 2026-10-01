@@ -2,11 +2,11 @@ package com.jaspersoft.jrshotfix.hotfix;
 
 import com.jaspersoft.jrshotfix.engine.CheckResult;
 import com.jaspersoft.jrshotfix.engine.Context;
-import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.engine.StepResult;
-import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
+import com.jaspersoft.jrshotfix.home.Home;
 import com.jaspersoft.jrshotfix.platform.DiskSpace;
+import com.jaspersoft.jrshotfix.platform.FileOps;
 import com.jaspersoft.jrshotfix.platform.ServiceController;
 import com.jaspersoft.jrshotfix.service.ServiceSteps;
 import java.io.IOException;
@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.BiFunction;
 
 /**
  * The ids, phases and read-only steps of the apply plan. Invariants: verify-phase steps do all
@@ -81,14 +82,41 @@ final class ApplySteps {
         "correct baseUrl, then run again; nothing was changed");
   }
 
-  /** Read-only base for the verify phase. */
-  abstract static class ReadOnly implements Step {
-    final HotfixRuntime rt;
-    final ApplyInput in;
+  /** Where the snapshot of the apply run {@code runId} lives. */
+  static Path snapshotDir(Home home, String runId) {
+    return home.snapshots().resolve(runId).resolve(SNAPSHOT);
+  }
 
-    ReadOnly(HotfixRuntime rt, ApplyInput in) {
-      this.rt = rt;
-      this.in = in;
+  /**
+   * The regular files among {@code paths} that are locked, each as {@code describe} puts it given
+   * the path and the lock's holder, when one is known.
+   */
+  static List<String> locked(
+      FileOps files, List<Path> paths, BiFunction<Path, Optional<String>, String> describe) {
+    List<String> locked = new ArrayList<>();
+    for (Path p : paths) {
+      if (Files.isRegularFile(p) && files.isLocked(p)) {
+        locked.add(describe.apply(p, files.lockHolder(p)));
+      }
+    }
+    return locked;
+  }
+
+  /**
+   * What a lock scan that found nothing passes with: no holder found is not the same as no holder
+   * when the scan is blind, so a limited scan is a warning (review 3.3).
+   */
+  static CheckResult noLockFound(FileOps files) {
+    return files
+        .lockInspectionLimit()
+        .map(limit -> CheckResult.warn("no locked file found, but " + limit))
+        .orElseGet(CheckResult::pass);
+  }
+
+  /** A step that only checks: all its work is in {@code precheck}, and it mutates nothing. */
+  abstract static class ReadOnlyStep extends HotfixStep<ApplyInput> {
+    ReadOnlyStep(HotfixRuntime rt, ApplyInput in) {
+      super(rt, in);
     }
 
     @Override
@@ -105,12 +133,6 @@ final class ApplySteps {
     public StepResult compensate(Context ctx, EventSink out) {
       return StepResult.ok();
     }
-
-    void log(Context ctx, EventSink out, Event.Log.Level level, String message) {
-      out.emit(
-          new Event.Log(
-              rt.clock().instant(), ctx.runId(), Optional.of(id()), phase(), level, message));
-    }
   }
 
   /**
@@ -121,7 +143,7 @@ final class ApplySteps {
    * written to must be writable, the home's volume must hold staging and the snapshot, the replaced
    * files' owners must be restorable, and the service must be identifiable.
    */
-  static final class Preflight extends ReadOnly {
+  static final class Preflight extends ReadOnlyStep {
     Preflight(HotfixRuntime rt, ApplyInput in) {
       super(rt, in);
     }

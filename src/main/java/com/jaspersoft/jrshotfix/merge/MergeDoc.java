@@ -109,6 +109,50 @@ public record MergeDoc(
       note = note == null ? "" : note;
     }
 
+    /** A file the package ships, as the merge was prepared: nobody has resolved it yet. */
+    static Item proposed(
+        String path,
+        String fileClass,
+        String verdict,
+        State state,
+        Optional<String> base,
+        Optional<String> mine,
+        String theirs,
+        Optional<String> merged,
+        List<String> checks,
+        String note) {
+      return new Item(
+          path,
+          fileClass,
+          verdict,
+          state,
+          base,
+          mine,
+          Optional.of(theirs),
+          merged,
+          Optional.empty(),
+          Optional.empty(),
+          checks,
+          note);
+    }
+
+    /** A file of the site's that the package does not ship and that stays as it is. */
+    static Item kept(String path, String fileClass, String verdict, String mine, String note) {
+      return new Item(
+          path,
+          fileClass,
+          verdict,
+          State.KEPT,
+          Optional.empty(),
+          Optional.of(mine),
+          Optional.empty(),
+          Optional.empty(),
+          Optional.empty(),
+          Optional.empty(),
+          List.of(),
+          note);
+    }
+
     /** The hash the file has once the package is applied; empty when it is then absent. */
     public Optional<String> lands() {
       if (state.merged()) {

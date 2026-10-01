@@ -39,13 +39,13 @@ public final class Platforms {
     Platform.OsFamily os = osFamily(osName).orElseThrow();
     Platform.Arch arch = arch(osArch);
     ProcessRunner runner = new DefaultProcessRunner();
-    return switch (os) {
-      case WINDOWS -> {
-        TomcatProcessFinder tomcats = new WindowsTomcatProcesses(runner);
-        yield new WindowsPlatform(arch, runner, new WindowsFileOps(tomcats), prompt, tomcats);
-      }
-      case LINUX -> new LinuxPlatform(arch, runner, new LinuxFileOps(), prompt);
-    };
+    TomcatProcessFinder tomcats = tomcatFinder(os, runner);
+    FileOps files =
+        switch (os) {
+          case WINDOWS -> new WindowsFileOps(tomcats);
+          case LINUX -> new LinuxFileOps();
+        };
+    return new OsPlatform(os, arch, runner, files, prompt, tomcats);
   }
 
   /**
@@ -59,9 +59,14 @@ public final class Platforms {
       FileOps files,
       OperatorPrompt prompt) {
     requireNonNull(os, "os");
+    return new OsPlatform(os, arch, runner, files, prompt, tomcatFinder(os, runner));
+  }
+
+  /** The process scan for {@code os}; on Windows its file operations share it (issue #38). */
+  private static TomcatProcessFinder tomcatFinder(Platform.OsFamily os, ProcessRunner runner) {
     return switch (os) {
-      case WINDOWS -> new WindowsPlatform(arch, runner, files, prompt);
-      case LINUX -> new LinuxPlatform(arch, runner, files, prompt);
+      case WINDOWS -> new WindowsTomcatProcesses(runner);
+      case LINUX -> TomcatProcesses.INSTANCE;
     };
   }
 

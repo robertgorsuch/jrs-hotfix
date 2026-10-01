@@ -1,6 +1,5 @@
-package com.jaspersoft.jrshotfix.merge;
+package com.jaspersoft.jrshotfix.text;
 
-import com.jaspersoft.jrshotfix.pkg.PropertiesMerge;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -58,13 +57,7 @@ public final class Diff3 {
         out.addAll(ours);
       } else {
         conflicts++;
-        out.add(PropertiesMerge.MARK_MINE);
-        out.addAll(ours);
-        out.add(PropertiesMerge.MARK_BASE);
-        out.addAll(was);
-        out.add(PropertiesMerge.MARK_SEPARATOR);
-        out.addAll(vendors);
-        out.add(PropertiesMerge.MARK_THEIRS);
+        out.addAll(Conflict.block(ours, was, vendors));
       }
       b = next;
       m = mineEnd;

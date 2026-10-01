@@ -1,6 +1,8 @@
 package com.jaspersoft.jrshotfix.pkg;
 
 import com.jaspersoft.jrshotfix.platform.Sums;
+import com.jaspersoft.jrshotfix.text.PropertiesMerge;
+import com.jaspersoft.jrshotfix.text.Text;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -48,23 +50,31 @@ public final class SiteSettings {
 
   /** True when {@code packagePath} is a site-written XML file under a webapp, never replaced. */
   public static boolean keptAsItIs(String packagePath) {
-    return underWebapp(packagePath).filter(p -> SITE_XML.matcher(p).matches()).isPresent();
+    return underWebapp(packagePath).filter(SiteSettings::keptAsItIsInWebapp).isPresent();
   }
 
-  /** The lower-cased path under the webapp; empty for a path outside one. */
+  /** As {@link #keptAsItIs}, for {@code webappPath} relative to the webapp. */
+  public static boolean keptAsItIsInWebapp(String webappPath) {
+    return SITE_XML.matcher(webappPath.toLowerCase(Locale.ROOT)).matches();
+  }
+
+  /** The path under the webapp; empty for a path outside one. */
   private static Optional<String> underWebapp(String packagePath) {
     if (!packagePath.startsWith(PackagePaths.WEBAPPS_PREFIX)) {
       return Optional.empty();
     }
     int webapp = packagePath.indexOf('/', PackagePaths.WEBAPPS_PREFIX.length());
-    return webapp > 0
-        ? Optional.of(packagePath.substring(webapp + 1).toLowerCase(Locale.ROOT))
-        : Optional.empty();
+    return webapp > 0 ? Optional.of(packagePath.substring(webapp + 1)) : Optional.empty();
   }
 
   /** True when {@code packagePath} is one of these files under a webapp. */
   public static boolean holdsSiteValues(String packagePath) {
-    return underWebapp(packagePath).filter(FILES::contains).isPresent();
+    return underWebapp(packagePath).filter(SiteSettings::holdsSiteValuesInWebapp).isPresent();
+  }
+
+  /** As {@link #holdsSiteValues}, for {@code webappPath} relative to the webapp. */
+  public static boolean holdsSiteValuesInWebapp(String webappPath) {
+    return FILES.contains(webappPath.toLowerCase(Locale.ROOT));
   }
 
   /**
@@ -112,23 +122,26 @@ public final class SiteSettings {
   }
 
   static Optional<Merged> merge(byte[] mine, byte[] theirs) {
-    String vendor = new String(theirs, StandardCharsets.ISO_8859_1);
-    PropertiesMerge.Result result =
-        PropertiesMerge.merge(lines(new String(mine, StandardCharsets.ISO_8859_1)), lines(vendor));
-    if (!result.changed()) {
+    PropertiesMerge.Merged result = PropertiesMerge.merge(lines(mine), lines(theirs));
+    if (result.kept().isEmpty() && result.carried().isEmpty()) {
       return Optional.empty();
     }
-    String eol = vendor.contains("\r\n") ? "\r\n" : "\n";
-    String text = String.join(eol, result.lines()) + (vendor.endsWith("\n") ? eol : "");
+    byte[] bytes = Text.of(theirs).bytes(result.lines());
     return Optional.of(
         new Merged(
-            text,
-            Sums.of(text.getBytes(StandardCharsets.ISO_8859_1)).sha256(),
+            new String(bytes, StandardCharsets.ISO_8859_1),
+            Sums.of(bytes).sha256(),
             result.kept(),
             result.carried()));
   }
 
-  private static List<String> lines(String text) {
+  /**
+   * The lines of a settings file, one character per byte, ended by LF or CR LF. Unlike {@link
+   * Text#of}, a CR at the very end with no LF after it stays in the last line: it is part of the
+   * value there, as it always was.
+   */
+  static List<String> lines(byte[] bytes) {
+    String text = new String(bytes, StandardCharsets.ISO_8859_1);
     List<String> lines = new ArrayList<>(Arrays.asList(text.split("\r?\n", -1)));
     // the text after the last line end is a line only when there is some
     if (lines.get(lines.size() - 1).isEmpty()) {

@@ -290,16 +290,9 @@ final class RunService {
    * Removes what is older than {@code olderThan}: the directories of ended runs; snapshots, except
    * those of pending runs, of failed runs and of hotfixes the ledger has installed; rolled-back
    * ledger entries whose snapshot is gone; merges no installed hotfix was applied with; and,
-   * whatever their age, the hotfix baselines older than the newest two.
-   */
-  PruneResult prune(Duration olderThan) {
-    return prune(olderThan, false);
-  }
-
-  /**
-   * As {@link #prune(Duration)}; a run that ended {@link TerminalState#FAILED} (exit 4, its
-   * rollback incomplete) keeps its directory and its snapshot, which its message told the operator
-   * to restore from, unless {@code includeFailed}.
+   * whatever their age, the hotfix baselines older than the newest two. A run that ended {@link
+   * TerminalState#FAILED} (exit 4, its rollback incomplete) keeps its directory and its snapshot,
+   * which its message told the operator to restore from, unless {@code includeFailed}.
    */
   PruneResult prune(Duration olderThan, boolean includeFailed) {
     Instant cutoff = boot.clock().instant().minus(olderThan);

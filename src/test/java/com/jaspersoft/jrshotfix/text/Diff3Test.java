@@ -1,8 +1,7 @@
-package com.jaspersoft.jrshotfix.merge;
+package com.jaspersoft.jrshotfix.text;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.jaspersoft.jrshotfix.pkg.PropertiesMerge;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -56,15 +55,15 @@ class Diff3Test {
     assertThat(r.lines())
         .containsExactly(
             "a",
-            PropertiesMerge.MARK_MINE,
+            Conflict.MARK_MINE,
             "mine",
-            PropertiesMerge.MARK_BASE,
+            Conflict.MARK_BASE,
             "b",
-            PropertiesMerge.MARK_SEPARATOR,
+            Conflict.MARK_SEPARATOR,
             "theirs",
-            PropertiesMerge.MARK_THEIRS,
+            Conflict.MARK_THEIRS,
             "c");
-    assertThat(PropertiesMerge.hasMarkers(r.lines())).isTrue();
+    assertThat(Conflict.hasMarkers(r.lines())).isTrue();
   }
 
   @Test

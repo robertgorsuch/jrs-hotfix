@@ -1,5 +1,6 @@
 package com.jaspersoft.jrshotfix.app;
 
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -41,6 +42,11 @@ final class TextTable {
     List<String> flat = new ArrayList<>();
     linesByRow().forEach(flat::addAll);
     return flat;
+  }
+
+  /** Prints {@link #lines()} to {@code out}, one per line, without flushing. */
+  void printTo(PrintWriter out) {
+    lines().forEach(out::println);
   }
 
   /** The rendered lines of each row, in order: one line, or several when the last column wraps. */

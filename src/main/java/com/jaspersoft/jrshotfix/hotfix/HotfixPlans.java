@@ -224,6 +224,62 @@ public final class HotfixPlans {
     if (args.war().isPresent()) {
       return planApplyWar(args);
     }
+    Prepared p = prepareApply(args, "changed", List.of());
+    ApplyInput in = p.in();
+    List<String> warnings = p.warnings();
+    Scan.externalAuthWarning(in.contents(), rt.settings().webappDir()).ifPresent(warnings::add);
+    warnings.add(
+        "the service is stopped for the swap; this node only, other cluster nodes are not touched");
+
+    List<Step> steps = new ArrayList<>();
+    steps.add(new ApplySteps.Preflight(rt, in));
+    steps.add(new ApplyPhaseSteps.TakeSnapshot(rt, in));
+    steps.add(new ApplyPhaseSteps.StageFiles(rt, in));
+    steps.add(ServiceSteps.stop(rt, ApplySteps.APPLY, ServiceSteps.STOP));
+    steps.add(new ApplyPhaseSteps.AtomicSwap(rt, in));
+    steps.add(new JspCacheStep(rt, ApplySteps.APPLY, JspCacheStep.ID));
+    steps.add(ServiceSteps.start(rt, ApplySteps.APPLY, ServiceSteps.START));
+    steps.add(ServiceSteps.waitForServer(rt, ApplySteps.APPLY, ServiceSteps.WAIT));
+    steps.add(new RecordSteps.RecordInstalled(rt, in));
+
+    Path snapshotDir = ApplySteps.snapshotDir(rt.home(), "{runId}");
+    Map<String, String> rollbackPoints = new LinkedHashMap<>();
+    rollbackPoints.put(ApplySteps.VERIFY, "nothing mutated");
+    rollbackPoints.put(ApplySteps.BACKUP, "snapshot written, server untouched");
+    rollbackPoints.put(ApplySteps.APPLY, "restore " + snapshotDir + ", restart service");
+    rollbackPoints.put(
+        ApplySteps.RECORD,
+        "restore " + snapshotDir + ", restart service, ledger entry marked rolled back");
+    PlanSummary summary =
+        new PlanSummary(
+            APPLY,
+            in.contents().id() + " " + in.contents().title(),
+            in.touched(),
+            List.of(),
+            true,
+            List.of(snapshotDir),
+            rollbackPoints,
+            "official-package",
+            warnings,
+            p.changes());
+    return new Plan(
+        "hotfix-apply-" + RunIds.next(rt.clock()), steps, summary, PlanFingerprint.of(p.inputs()));
+  }
+
+  /**
+   * What an apply into the server and one into a WAR share: the input, the plan summary's warnings
+   * and changes so far, and the fingerprint inputs so far. Each list and map is the caller's to add
+   * to.
+   */
+  private record Prepared(
+      ApplyInput in, List<String> warnings, List<String> changes, Map<String, String> inputs) {}
+
+  /**
+   * Reads the package with the merge {@code args} names and resolves its targets. The warnings
+   * start with what preflight will refuse, since the preview runs no step: the applicability
+   * problems, then {@code refusals}, each said to be refused "before anything is {@code mutation}".
+   */
+  private Prepared prepareApply(ApplyArgs args, String mutation, List<String> refusals) {
     Path file = args.packageFile().toAbsolutePath().normalize();
     MergePlans merges = new MergePlans(rt);
     Optional<MergeDoc> merge = args.mergeId().map(merges::forApply);
@@ -232,10 +288,14 @@ public final class HotfixPlans {
     merge.ifPresent(m -> merges.check(m, contents));
     List<FileTarget> targets = FileTarget.resolve(contents, rt.paths(), rt.files());
     ApplyInput in = new ApplyInput(file, contents, rt.paths(), targets, merge);
+
     List<String> warnings = new ArrayList<>();
-    // the preview runs no step, so what preflight will refuse is said here, first
+    String refused = "this plan will be refused before anything is " + mutation + ": ";
     for (String problem : applicability(rt, contents, targets)) {
-      warnings.add("this plan will be refused before anything is changed: " + problem);
+      warnings.add(refused + problem);
+    }
+    for (String problem : refusals) {
+      warnings.add(refused + problem);
     }
     warnings.addAll(buildWarnings(rt, contents));
     warnings.add(
@@ -248,44 +308,9 @@ public final class HotfixPlans {
     for (PackageContents.Note note : contents.notes()) {
       warnings.add((note.quoted() ? QUOTE_PREFIX : NOTE_PREFIX) + note.text());
     }
-    Scan.externalAuthWarning(contents, rt.settings().webappDir()).ifPresent(warnings::add);
-    warnings.add(
-        "the service is stopped for the swap; this node only, other cluster nodes are not touched");
     List<String> changes = new ArrayList<>(applyChanges(targets));
     changes.addAll(supersededChanges(contents));
     merge.ifPresent(m -> changes.addAll(MergePlans.changes(m)));
-
-    List<Step> steps = new ArrayList<>();
-    steps.add(new ApplySteps.Preflight(rt, in));
-    steps.add(new BackupSteps.TakeSnapshot(rt, in));
-    steps.add(new ApplyPhaseSteps.StageFiles(rt, in));
-    steps.add(ServiceSteps.stop(rt, ApplySteps.APPLY, ServiceSteps.STOP));
-    steps.add(new ApplyPhaseSteps.AtomicSwap(rt, in));
-    steps.add(new JspCacheStep(rt, ApplySteps.APPLY, JspCacheStep.ID));
-    steps.add(ServiceSteps.start(rt, ApplySteps.APPLY, ServiceSteps.START));
-    steps.add(ServiceSteps.waitForServer(rt, ApplySteps.APPLY, ServiceSteps.WAIT));
-    steps.add(new RecordSteps.RecordInstalled(rt, in));
-
-    Path snapshotDir = rt.home().snapshots().resolve("{runId}").resolve(ApplySteps.SNAPSHOT);
-    Map<String, String> rollbackPoints = new LinkedHashMap<>();
-    rollbackPoints.put(ApplySteps.VERIFY, "nothing mutated");
-    rollbackPoints.put(ApplySteps.BACKUP, "snapshot written, server untouched");
-    rollbackPoints.put(ApplySteps.APPLY, "restore " + snapshotDir + ", restart service");
-    rollbackPoints.put(
-        ApplySteps.RECORD,
-        "restore " + snapshotDir + ", restart service, ledger entry marked rolled back");
-    PlanSummary summary =
-        new PlanSummary(
-            APPLY,
-            contents.id() + " " + contents.title(),
-            in.touched(),
-            List.of(),
-            true,
-            List.of(snapshotDir),
-            rollbackPoints,
-            "official-package",
-            warnings,
-            changes);
 
     Map<String, String> inputs = new LinkedHashMap<>();
     inputs.put("package", contents.sha256());
@@ -304,8 +329,7 @@ public final class HotfixPlans {
           MERGE_DOC_INPUT,
           FileTarget.hashOf(rt.files(), rt.merges().docFile(merge.get().id())).orElse("absent"));
     }
-    return new Plan(
-        "hotfix-apply-" + RunIds.next(rt.clock()), steps, summary, PlanFingerprint.of(inputs));
+    return new Prepared(in, warnings, changes, inputs);
   }
 
   /**
@@ -315,37 +339,17 @@ public final class HotfixPlans {
    * WAR is never modified, and there is no service, no snapshot and no rollback.
    */
   private Plan planApplyWar(ApplyArgs args) {
-    Path file = args.packageFile().toAbsolutePath().normalize();
     WarSteps.Target target =
         new WarSteps.Target(
             args.war().orElseThrow(), args.out().orElseThrow(), rt.settings().webappName());
-    MergePlans merges = new MergePlans(rt);
-    Optional<MergeDoc> merge = args.mergeId().map(merges::forApply);
-    PackageContents contents =
-        readPackage(file, merge.map(merges::decisions).orElse(SiteDecisions.NONE), args);
-    merge.ifPresent(m -> merges.check(m, contents));
-    List<FileTarget> targets = FileTarget.resolve(contents, rt.paths(), rt.files());
-    ApplyInput in = new ApplyInput(file, contents, rt.paths(), targets, merge);
-    List<String> warnings = new ArrayList<>();
-    for (String problem : applicability(rt, contents, targets)) {
-      warnings.add("this plan will be refused before anything is written: " + problem);
-    }
-    if (Files.exists(target.out())) {
-      warnings.add(
-          "this plan will be refused before anything is written: " + target.out() + " exists");
-    }
-    warnings.addAll(buildWarnings(rt, contents));
-    warnings.add(
-        "package "
-            + file.getFileName()
-            + " (sha256 "
-            + contents.sha256()
-            + "); compare it with the checksum on the support portal"
-            + (args.checksumConfirmed() ? " (confirmed)" : ""));
-    for (PackageContents.Note note : contents.notes()) {
-      warnings.add((note.quoted() ? QUOTE_PREFIX : NOTE_PREFIX) + note.text());
-    }
-    long outside = targets.stream().filter(t -> target.pathOf(t).isEmpty()).count();
+    Prepared p =
+        prepareApply(
+            args,
+            "written",
+            Files.exists(target.out()) ? List.of(target.out() + " exists") : List.of());
+    ApplyInput in = p.in();
+    List<String> warnings = p.warnings();
+    long outside = in.targets().stream().filter(t -> target.pathOf(t).isEmpty()).count();
     if (outside > 0) {
       warnings.add(
           outside
@@ -358,9 +362,6 @@ public final class HotfixPlans {
             + " is read, "
             + target.out().getFileName()
             + " is written; the package's files go into the home as the hotfix's baseline");
-    List<String> changes = new ArrayList<>(applyChanges(targets));
-    changes.addAll(supersededChanges(contents));
-    merge.ifPresent(m -> changes.addAll(MergePlans.changes(m)));
 
     List<Step> steps = new ArrayList<>();
     steps.add(new WarSteps.Preflight(rt, in, target));
@@ -377,7 +378,7 @@ public final class HotfixPlans {
     PlanSummary summary =
         new PlanSummary(
             APPLY_WAR,
-            contents.id() + " into " + target.out().getFileName(),
+            in.contents().id() + " into " + target.out().getFileName(),
             in.touched(),
             List.of(),
             false,
@@ -385,26 +386,11 @@ public final class HotfixPlans {
             rollbackPoints,
             "official-package",
             warnings,
-            changes);
+            p.changes());
 
-    Map<String, String> inputs = new LinkedHashMap<>();
-    inputs.put("package", contents.sha256());
-    inputs.put("settings", rt.settings().fingerprintInput());
-    inputs.put("installed", JrsVersion.ofWebapp(rt.settings().webappDir()).orElse("unknown"));
+    Map<String, String> inputs = p.inputs();
     inputs.put("war", FileTarget.hashOf(rt.files(), target.war()).orElse("absent"));
     inputs.put("out", target.out().toString());
-    for (FileTarget t : targets) {
-      inputs.put("target:" + t.packagePath(), t.before().orElse("absent"));
-      if (t.entry().merged()) {
-        inputs.put("merged:" + t.packagePath(), t.after().orElse("absent"));
-      }
-    }
-    if (merge.isPresent()) {
-      inputs.put(MERGE_INPUT, merge.get().id());
-      inputs.put(
-          MERGE_DOC_INPUT,
-          FileTarget.hashOf(rt.files(), rt.merges().docFile(merge.get().id())).orElse("absent"));
-    }
     return new Plan(
         "hotfix-apply-war-" + RunIds.next(rt.clock()), steps, summary, PlanFingerprint.of(inputs));
   }
@@ -464,7 +450,7 @@ public final class HotfixPlans {
         new OfficialPackage.Superseded(vendorFiles(rt)::contains, !keep);
     try {
       return OfficialPackage.read(
-          file, rt.paths(), rt.settings().webappName(), rt.files(), decisions, superseded);
+          file, rt.paths(), rt.settings().webappName(), decisions, superseded);
     } catch (IOException | UncheckedIOException e) {
       throw new HotfixException(
           HotfixException.PRECHECK,
@@ -673,24 +659,9 @@ public final class HotfixPlans {
     } else {
       chain = args.chain();
       for (String id : chain) {
-        if (ledger.find(id).isEmpty()) {
-          throw new HotfixException(
-              HotfixException.PRECHECK,
-              id + " is no longer in the ledger",
-              "the run cannot be rebuilt; restore ledger.json from a backup or remove the run"
-                  + " directory by hand");
-        }
+        requireEntry(ledger, id);
       }
-      target =
-          ledger
-              .find(args.hotfixId())
-              .orElseThrow(
-                  () ->
-                      new HotfixException(
-                          HotfixException.PRECHECK,
-                          args.hotfixId() + " is no longer in the ledger",
-                          "the run cannot be rebuilt; restore ledger.json from a backup or remove"
-                              + " the run directory by hand"));
+      target = requireEntry(ledger, args.hotfixId());
     }
     List<RollbackSteps.Input> inputs = new ArrayList<>();
     List<RollbackSteps.RestoreSnapshot> restores = new ArrayList<>();
@@ -712,16 +683,15 @@ public final class HotfixPlans {
     for (int i = 0; i < inputs.size(); i++) {
       RollbackSteps.Input in = inputs.get(i);
       LedgerEntry hotfix = in.hotfix();
-      Step stop = ServiceSteps.stop(rt, in.phase(), ServiceSteps.STOP + in.suffix());
       // the first stop is the start of the outage: every snapshot the chain needs is checked first
-      steps.add(i == 0 ? new RollbackSteps.CheckedStop(rt, stop, restores) : stop);
+      steps.add(RollbackSteps.stop(rt, in, i == 0, restores));
       steps.add(restores.get(i));
       steps.add(new JspCacheStep(rt, in.phase(), JspCacheStep.ID + in.suffix()));
       steps.add(ServiceSteps.start(rt, in.phase(), ServiceSteps.START + in.suffix()));
       steps.add(ServiceSteps.waitForServer(rt, in.phase(), ServiceSteps.WAIT + in.suffix()));
       steps.add(new RollbackSteps.RecordRolledBack(rt, in));
       touched.addAll(in.touched());
-      backups.add(rt.home().snapshots().resolve(hotfix.runId()).resolve(ApplySteps.SNAPSHOT));
+      backups.add(ApplySteps.snapshotDir(rt.home(), hotfix.runId()));
       fingerprint.put("hotfix:" + in.id(), hotfix.runId());
       for (OwnedFile f : hotfix.files()) {
         fingerprint.put(
@@ -757,6 +727,19 @@ public final class HotfixPlans {
             summary,
             PlanFingerprint.of(fingerprint));
     return new ResolvedRollback(plan, new RollbackArgs(args.hotfixId(), args.cascade(), chain));
+  }
+
+  /** The ledger entry of {@code id} for a rollback being rebuilt; refuses (exit 2) a gone one. */
+  private static LedgerEntry requireEntry(Ledger ledger, String id) {
+    return ledger
+        .find(id)
+        .orElseThrow(
+            () ->
+                new HotfixException(
+                    HotfixException.PRECHECK,
+                    id + " is no longer in the ledger",
+                    "the run cannot be rebuilt; restore ledger.json from a backup or remove the run"
+                        + " directory by hand"));
   }
 
   private static void refuseRecorded(LedgerEntry hotfix) {

@@ -44,7 +44,7 @@ class SupersededLibrariesTest {
   }
 
   private static PackageContents contents(Plan plan) {
-    return ((ApplySteps.ReadOnly) HotfixFixture.step(plan, "preflight")).in.contents();
+    return ((ApplySteps.ReadOnlyStep) HotfixFixture.step(plan, "preflight")).in.contents();
   }
 
   @Test
