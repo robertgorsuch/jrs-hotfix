@@ -50,23 +50,31 @@ public final class SiteSettings {
 
   /** True when {@code packagePath} is a site-written XML file under a webapp, never replaced. */
   public static boolean keptAsItIs(String packagePath) {
-    return underWebapp(packagePath).filter(p -> SITE_XML.matcher(p).matches()).isPresent();
+    return underWebapp(packagePath).filter(SiteSettings::keptAsItIsInWebapp).isPresent();
   }
 
-  /** The lower-cased path under the webapp; empty for a path outside one. */
+  /** As {@link #keptAsItIs}, for {@code webappPath} relative to the webapp. */
+  public static boolean keptAsItIsInWebapp(String webappPath) {
+    return SITE_XML.matcher(webappPath.toLowerCase(Locale.ROOT)).matches();
+  }
+
+  /** The path under the webapp; empty for a path outside one. */
   private static Optional<String> underWebapp(String packagePath) {
     if (!packagePath.startsWith(PackagePaths.WEBAPPS_PREFIX)) {
       return Optional.empty();
     }
     int webapp = packagePath.indexOf('/', PackagePaths.WEBAPPS_PREFIX.length());
-    return webapp > 0
-        ? Optional.of(packagePath.substring(webapp + 1).toLowerCase(Locale.ROOT))
-        : Optional.empty();
+    return webapp > 0 ? Optional.of(packagePath.substring(webapp + 1)) : Optional.empty();
   }
 
   /** True when {@code packagePath} is one of these files under a webapp. */
   public static boolean holdsSiteValues(String packagePath) {
-    return underWebapp(packagePath).filter(FILES::contains).isPresent();
+    return underWebapp(packagePath).filter(SiteSettings::holdsSiteValuesInWebapp).isPresent();
+  }
+
+  /** As {@link #holdsSiteValues}, for {@code webappPath} relative to the webapp. */
+  public static boolean holdsSiteValuesInWebapp(String webappPath) {
+    return FILES.contains(webappPath.toLowerCase(Locale.ROOT));
   }
 
   /**

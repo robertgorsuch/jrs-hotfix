@@ -148,10 +148,9 @@ public final class Scan {
 
   /** True when the installer writes {@code path} for one site, by the baseline or by name. */
   public static boolean installer(BaseView view, String path) {
-    String packagePath = PackagePaths.WEBAPPS_PREFIX + "w/" + path;
     return view.installer(path)
-        || SiteSettings.holdsSiteValues(packagePath)
-        || SiteSettings.keptAsItIs(packagePath);
+        || SiteSettings.holdsSiteValuesInWebapp(path)
+        || SiteSettings.keptAsItIsInWebapp(path);
   }
 
   /** True when the file on disk is the vendor's, line ends aside for a text class. */
@@ -166,6 +165,16 @@ public final class Scan {
     } catch (IOException e) {
       throw new UncheckedIOException("cannot hash " + file, e);
     }
+  }
+
+  /** As {@link #same(FileClass, BaseFile, Path, FileOps)}, for a file already hashed. */
+  static boolean same(FileClass cls, BaseFile base, Sums mine) {
+    if (mine.size() == base.size() && mine.sha256().equals(base.sha256())) {
+      return true;
+    }
+    return cls.text()
+        && base.textSha256().isPresent()
+        && mine.textSha256().equals(base.textSha256().get());
   }
 
   /** What a package's copy of one file means for the file on disk. */
@@ -243,14 +252,14 @@ public final class Scan {
     for (PackageContents.VendorFile theirs : contents.vendorFiles()) {
       if (theirs.path().startsWith(prefix)) {
         String path = theirs.path().substring(prefix.length());
-        out.add(judge(view, path, theirs, webappDir.resolve(path), files));
+        out.add(judge(view, path, theirs, webappDir.resolve(path)));
       }
     }
     return List.copyOf(out);
   }
 
   private static PackageItem judge(
-      BaseView view, String path, PackageContents.VendorFile theirs, Path file, FileOps files) {
+      BaseView view, String path, PackageContents.VendorFile theirs, Path file) {
     FileClass cls = FileClass.of(path);
     Optional<BaseFile> base = view.file(path);
     Optional<String> baseHash = base.map(BaseFile::sha256);
@@ -275,7 +284,7 @@ public final class Scan {
     boolean mineIsTheirs =
         mine.sha256().equals(theirs.sha256())
             || (cls.text() && mine.textSha256().equals(theirs.textSha256()));
-    boolean mineIsBase = base.isPresent() && same(cls, base.get(), file, files);
+    boolean mineIsBase = base.isPresent() && same(cls, base.get(), mine);
     Verdict v;
     if (installer(view, path)) {
       v = mineIsTheirs ? Verdict.ALREADY_APPLIED : Verdict.INSTALLER;
