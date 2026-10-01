@@ -221,18 +221,11 @@ public final class MergeWorkspace {
           && !site.knownToTheVendor().test(e.path().substring(prefix.length()))) {
         String path = e.path().substring(prefix.length());
         records.add(
-            new Item(
+            Item.kept(
                 path,
                 FileClass.of(path).name(),
                 "the site's file, matched by a pattern of the readme",
-                State.KEPT,
-                Optional.empty(),
-                Optional.of(site.files().sha256(site.webappDir().resolve(path))),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                List.of(),
+                site.files().sha256(site.webappDir().resolve(path)),
                 "no baseline and no hotfix knows this file, so it is not the vendor's leftover;"
                     + " it is not deleted"));
       }
@@ -253,12 +246,7 @@ public final class MergeWorkspace {
 
   /** True when the three sides of this file are worth keeping in the workspace. */
   private static boolean needsSides(Scan.PackageItem item) {
-    return switch (item.verdict()) {
-      case UNTOUCHED, NEW, VENDOR_ONLY, SITE_ONLY, SITE_REMOVED, ALREADY_APPLIED -> false;
-      case COLLISION -> item.fileClass().mergeable();
-      case REMOVED_COLLISION -> true;
-      case INSTALLER -> true;
-    };
+    return item.needsMerge() || item.verdict() == Scan.Verdict.INSTALLER;
   }
 
   private Item item(
@@ -290,17 +278,15 @@ public final class MergeWorkspace {
             yield propose(id, item, onConflict);
           }
         };
-    return new Item(
+    return Item.proposed(
         item.path(),
         item.fileClass().name(),
         item.verdict().label(),
         p.state(),
         item.base(),
         item.mine(),
-        Optional.of(item.theirs()),
+        item.theirs(),
         p.merged(),
-        Optional.empty(),
-        Optional.empty(),
         p.checks(),
         p.note());
   }
@@ -356,44 +342,13 @@ public final class MergeWorkspace {
           "written by the installer for this server; never replaced. The hotfix's copy is in the"
               + " workspace as `theirs`: carry over by hand what it changed");
     }
-    List<String> lines;
-    State state;
-    String note;
-    if (item.fileClass() == FileClass.P) {
-      PropertiesMerge.Merged m =
-          PropertiesMerge.merge3(
-              baseLines,
-              mineLines,
-              theirText.lines(),
-              installer ? PropertiesMerge.Style.MINE_SILENT : onConflict.style());
-      lines = m.lines();
-      boolean marked = !installer && onConflict.style() == PropertiesMerge.Style.MARKERS;
-      state = marked && !m.conflicts().isEmpty() ? State.CONFLICT : State.AUTO;
-      note =
-          (installer ? "written by the installer for this server: its values stand. " : "")
-              + keys("site values kept", m.kept())
-              + keys("site keys carried over", m.carried())
-              + keys("keys removed on this server", m.removed())
-              + keys(
-                  state == State.CONFLICT
-                      ? "changed by both, to resolve"
-                      : installer ? "" : "changed by both, settled by --on-conflict " + onConflict,
-                  installer ? List.of() : m.conflicts());
-    } else {
-      Diff3.Result r = Diff3.merge(baseLines, mineLines, theirText.lines());
-      lines = r.lines();
-      if (!r.clean()) {
-        state = State.CONFLICT;
-        note = r.conflicts() + " place(s) changed by both, between conflict markers";
-      } else if (item.fileClass() == FileClass.X) {
-        state = State.REVIEW;
-        note = "merged by line without a conflict; an XML configuration file is always confirmed";
-      } else {
-        state = State.AUTO;
-        note = "merged by line without a conflict";
-      }
-    }
-    byte[] bytes = theirText.bytes(lines);
+    Merge merge =
+        item.fileClass() == FileClass.P
+            ? proposeProperties(baseLines, mineLines, theirText.lines(), installer, onConflict)
+            : proposeByLine(baseLines, mineLines, theirText.lines(), item.fileClass());
+    State state = merge.state();
+    String note = merge.note();
+    byte[] bytes = theirText.bytes(merge.lines());
     Path file = side(id, path, MERGED);
     Files.createDirectories(file.getParent());
     Files.write(file, bytes);
@@ -415,6 +370,53 @@ public final class MergeWorkspace {
       return new Proposal(State.PLAIN, Optional.empty(), List.of(), "");
     }
     return new Proposal(state, Optional.of(hash), checks, note.strip());
+  }
+
+  /** The merged lines of one file, the state they leave it in and the note that says why. */
+  private record Merge(List<String> lines, State state, String note) {}
+
+  /** A properties file merged by key; the installer's own values stand without a word. */
+  private static Merge proposeProperties(
+      List<String> base,
+      List<String> mine,
+      List<String> theirs,
+      boolean installer,
+      OnConflict onConflict) {
+    PropertiesMerge.Merged m =
+        PropertiesMerge.merge3(
+            base, mine, theirs, installer ? PropertiesMerge.Style.MINE_SILENT : onConflict.style());
+    boolean marked = !installer && onConflict.style() == PropertiesMerge.Style.MARKERS;
+    State state = marked && !m.conflicts().isEmpty() ? State.CONFLICT : State.AUTO;
+    String note =
+        (installer ? "written by the installer for this server: its values stand. " : "")
+            + keys("site values kept", m.kept())
+            + keys("site keys carried over", m.carried())
+            + keys("keys removed on this server", m.removed())
+            + keys(
+                state == State.CONFLICT
+                    ? "changed by both, to resolve"
+                    : installer ? "" : "changed by both, settled by --on-conflict " + onConflict,
+                installer ? List.of() : m.conflicts());
+    return new Merge(m.lines(), state, note);
+  }
+
+  /** Any other text file merged by line; a clean XML file still waits to be confirmed. */
+  private static Merge proposeByLine(
+      List<String> base, List<String> mine, List<String> theirs, FileClass fileClass) {
+    Diff3.Result r = Diff3.merge(base, mine, theirs);
+    if (!r.clean()) {
+      return new Merge(
+          r.lines(),
+          State.CONFLICT,
+          r.conflicts() + " place(s) changed by both, between conflict markers");
+    }
+    if (fileClass == FileClass.X) {
+      return new Merge(
+          r.lines(),
+          State.REVIEW,
+          "merged by line without a conflict; an XML configuration file is always confirmed");
+    }
+    return new Merge(r.lines(), State.AUTO, "merged by line without a conflict");
   }
 
   private static String keys(String what, List<String> keys) {
