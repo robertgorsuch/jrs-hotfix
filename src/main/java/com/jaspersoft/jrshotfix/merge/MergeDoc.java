@@ -38,7 +38,10 @@ public record MergeDoc(
   public enum State {
     /** The package's copy lands and nothing of the site's is lost. */
     PLAIN,
-    /** The package's copy lands over a script, stylesheet or binary file the site changed. */
+    /**
+     * The package's copy lands over a script, stylesheet or binary file the site changed, unless
+     * the operator resolves it with {@code --mine}.
+     */
     OVERWRITTEN,
     /** The file is not written: only the site changed it, or the installer wrote it. */
     KEPT,
@@ -116,6 +119,17 @@ public record MergeDoc(
 
     Item with(
         State newState, Optional<String> newMerged, String by, Instant at, List<String> findings) {
+      return with(newState, newMerged, by, at, findings, note);
+    }
+
+    /** As {@link #with(State, Optional, String, Instant, List)}, with a new note. */
+    Item with(
+        State newState,
+        Optional<String> newMerged,
+        String by,
+        Instant at,
+        List<String> findings,
+        String newNote) {
       return new Item(
           path,
           fileClass,
@@ -128,7 +142,7 @@ public record MergeDoc(
           Optional.of(by),
           Optional.of(at),
           findings,
-          note);
+          newNote);
     }
   }
 

@@ -114,7 +114,14 @@ class BaseViewTest {
     BaseView.Resolution r = BaseView.resolve(store, webapp, files);
     assertThat(r.view()).isEmpty();
     assertThat(r.present()).isTrue();
-    assertThat(r.problem()).contains("does not fit this installation").contains("17 in 100");
+    assertThat(r.problem())
+        .contains("does not fit this installation")
+        .contains("17 in 100")
+        .contains("other-0.jar absent")
+        .contains("other-12.jar absent")
+        .doesNotContain("other-13.jar")
+        .contains("and 15 more");
+    assertThat(r.remediation()).contains("removed or replaced counts against the fit");
   }
 
   @Test

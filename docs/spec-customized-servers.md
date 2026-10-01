@@ -265,8 +265,8 @@ As built (2026-09-30, `Scan`, `jrs-hotfix scan`):
 | P properties | `*.properties` | by key (4.2) | automatic; keys both changed follow the conflict policy |
 | T text templates | `*.jsp`, `*.jspf`, `*.tag`, `*.tld`, `*.html` outside `scripts/` and `optimized-scripts/` | by line (4.3) | automatic when clean; operator when not |
 | X reviewed XML | `WEB-INF/applicationContext*.xml`, `WEB-INF/web.xml`, `WEB-INF/*-servlet.xml`, `META-INF/context.xml`, other `*.xml` under `WEB-INF` | by line (4.3), then checked (4.3) | operator always confirms, clean or not |
-| G generated | `scripts/**`, `optimized-scripts/**`, `*.js`, `*.js.map`, `*.css` | never merged: theirs wins | nobody; a site change is reported and kept in the snapshot |
-| B binary | `*.jar`, `*.class`, images, fonts, everything else | never merged: theirs wins | nobody; a site change is reported and kept in the snapshot |
+| G generated | `scripts/**`, `optimized-scripts/**`, `*.js`, `*.js.map`, `*.css` | never merged: theirs wins unless the operator resolves it with `--mine` (0.5.0) | the operator may; a site change is reported and kept in the snapshot |
+| B binary | `*.jar`, `*.class`, images, fonts, everything else | never merged: theirs wins unless the operator resolves it with `--mine` (0.5.0) | the operator may; a site change is reported and kept in the snapshot |
 
 Class G is the diagram's "identify JavaScript changes and exclude them". The package
 ships 101 JavaScript files, 35 of them under `scripts/_chunks`: they are build output, a
@@ -776,11 +776,25 @@ Linux laptop's installation (`ctlscript`) the same day, 80 checks green.
   `scan` first (read-only, no outage, every later section needs them), then 4.2 and the
   keep/replace verdicts, then the class X workspace.
 
+## Decided 2026-10-01
+
+- The 95 percent threshold of section 2 stays. It has met two servers, the bundled
+  installer's 10.0.0 on Windows (a service) and on Linux (`ctlscript`), both at 100 in 100
+  against the vendor's WAR; nothing on either argued for another number. What was missing
+  was the reason: a refusal now names the first five differing libraries (`absent` or
+  `differs`) and how many more, so a wrong WAR (dozens differ) can be told from a site that
+  removed or replaced a library or two (which counts against the fit, and the remediation
+  says so).
+- A class G or B file both changed may be resolved with `--mine` (the site's copy stays,
+  listed as kept, with the note that the hotfix's change in that file is not installed) or
+  `--theirs` (confirms the default); `--merged` is refused for those classes, which are
+  never merged. The operator chooses per file, and the choice is in `merge.json` and the
+  ledger as for any other kept file. Without a resolution the package's copy lands, as
+  before. A jar kept this way is the operator's to answer for: the hotfix's jar set is
+  coherent and the kept one is not part of it.
+
 ## Open points
 
 - Whether `merge.onConflict` should ever default to `mine` for installer-written keys
   outside the five files of 4.4. Until decided it does not: the defaults of 4.2 stand.
   (Inside those files the site's value stands, as in 0.1; section 13.)
-- The 95 percent threshold of section 2 is a guess until it has met a second server.
-- Whether a class G or B file both changed should be resolvable with `--mine`. Today the
-  package's copy always wins and the plan lists the file.
