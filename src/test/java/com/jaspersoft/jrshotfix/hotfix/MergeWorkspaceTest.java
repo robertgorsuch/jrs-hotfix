@@ -206,6 +206,28 @@ class MergeWorkspaceTest {
   }
 
   @Test
+  void should_let_the_operator_keep_the_sites_script_but_never_merge_it() throws Exception {
+    SiteFixture s = SiteFixture.create(tmp);
+    s.customizeWithoutCollisions();
+    MergeDoc doc = s.prepare(s.hotfix());
+    // a script both changed is the hotfix's unless the operator keeps the site's; never merged
+    assertThat(s.item(doc, Wars.SCRIPT).state()).isEqualTo(State.OVERWRITTEN);
+    assertThat(s.item(doc, Wars.SCRIPT).note()).contains("unless resolved with --mine");
+    assertThatThrownBy(() -> s.resolve(doc, Wars.SCRIPT, Choice.MERGED))
+        .hasMessageContaining("is a G file, which is never merged");
+    MergeDoc mine = s.resolve(doc, Wars.SCRIPT, Choice.MINE);
+    assertThat(s.item(mine, Wars.SCRIPT).state()).isEqualTo(State.KEPT_MINE);
+    assertThat(s.item(mine, Wars.SCRIPT).note())
+        .contains("kept by the operator")
+        .contains("the hotfix's change in this G file is not installed");
+    assertThat(s.item(mine, Wars.SCRIPT).lands()).isEqualTo(s.item(mine, Wars.SCRIPT).mine());
+    MergeDoc theirs = s.resolve(mine, Wars.SCRIPT, Choice.THEIRS);
+    assertThat(s.item(theirs, Wars.SCRIPT).state()).isEqualTo(State.TOOK_THEIRS);
+    // the script never waits for anyone: only web.xml does in this site
+    assertThat(theirs.blocking()).extracting(MergeDoc.Item::path).containsExactly(Wars.WEB_XML);
+  }
+
+  @Test
   void should_record_the_operators_choice_of_a_side() throws Exception {
     SiteFixture s = SiteFixture.create(tmp);
     s.customizeWithCollisions();

@@ -106,7 +106,8 @@ webapp with the vendor's and the server's:
 - both changed a page or an XML file under `WEB-INF`: merged by line; an XML
   file is always confirmed by you;
 - both changed a script, a stylesheet or a binary file: replaced, and listed
-  in the plan so that you carry the change over by hand.
+  in the plan so that you carry the change over by hand; `merge resolve
+  <mergeId> <path> --mine` keeps the site's copy instead.
 
 A key or a line both changed differently waits for you, and `apply` refuses
 with exit 2 until it is resolved. Nothing on the server is touched meanwhile:

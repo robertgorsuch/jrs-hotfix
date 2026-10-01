@@ -185,7 +185,7 @@ With a baseline that fits, `apply` no longer replaces what the site changed. It 
 | both changed a properties file | merged by key: the vendor's value where only the vendor changed a key, the site's where only the site did |
 | both changed a page (`.jsp`, `.tag`, `.html`) | merged by line |
 | both changed an XML file under `WEB-INF` | merged by line, then checked, and always confirmed by you |
-| both changed a script, a stylesheet or a binary file | the package's copy lands; the plan lists the file so that you carry the change over by hand |
+| both changed a script, a stylesheet or a binary file | the package's copy lands and the plan lists the file, so that you carry the change over by hand; or `merge resolve <mergeId> <path> --mine` keeps the site's copy, and the hotfix's change in that file is skipped |
 | the installer wrote it (see [Settings files](#settings-files-keep-this-servers-values)) | properties keep this server's values; `context.xml` and the `*-jdbc.xml` files stay |
 | the site added it and a pattern of the readme would delete it | it stays: only a file a baseline or an earlier hotfix knows is the vendor's leftover |
 
@@ -197,7 +197,7 @@ While a file waits for you, `apply` refuses with exit 2 and nothing on the serve
 jrs-hotfix merge status <mergeId>                              # every file and its state; exit 0 when none waits
 jrs-hotfix merge show <mergeId> <path>                         # what the site changed, what the hotfix changed
 jrs-hotfix merge resolve <mergeId> <path> --merged [<file>]    # install the merged text
-jrs-hotfix merge resolve <mergeId> <path> --mine | --theirs    # keep the server's file, or take the hotfix's
+jrs-hotfix merge resolve <mergeId> <path> --mine | --theirs    # keep the server's file, or take the hotfix's (also for a script, stylesheet or binary file)
 jrs-hotfix apply <package.zip> --merge <mergeId>
 ```
 

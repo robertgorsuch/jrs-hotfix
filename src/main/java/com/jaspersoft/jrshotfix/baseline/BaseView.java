@@ -17,6 +17,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 /**
  * The vendor's webapp at the level this installation states: the release baseline, overlaid with
@@ -111,33 +112,58 @@ public final class BaseView {
               + " or the vendor's WAR of that build");
     }
     BaseView best = null;
-    double bestFit = -1;
+    Fit bestFit = null;
     for (BaselineManifest candidate : candidates) {
       BaseView view = new BaseView(store, candidate, hotfix);
-      double fit = view.fit(webappDir, files);
-      if (fit > bestFit) {
+      Fit fit = view.fit(webappDir, files);
+      if (bestFit == null || fit.share() > bestFit.share()) {
         best = view;
         bestFit = fit;
       }
     }
-    if (bestFit < FIT) {
+    if (Objects.requireNonNull(bestFit).share() < FIT) {
       return Resolution.none(
           true,
           "baseline "
               + Objects.requireNonNull(best).describe()
               + " does not fit this installation: only "
-              + String.format(Locale.ROOT, "%.0f", bestFit * 100)
-              + " in 100 of its libraries are in WEB-INF/lib unchanged",
+              + String.format(Locale.ROOT, "%.0f", bestFit.share() * 100)
+              + " in 100 of its libraries are in WEB-INF/lib unchanged ("
+              + bestFit.describeDiffering()
+              + ")",
           "add the WAR this server was installed from with `jrs-hotfix baseline add`, or remove"
-              + " the wrong one with `jrs-hotfix baseline remove <id>`");
+              + " the wrong one with `jrs-hotfix baseline remove <id>`; a library the site itself"
+              + " removed or replaced counts against the fit");
     }
     return Resolution.of(Objects.requireNonNull(best));
   }
 
+  /**
+   * How many libraries the fit looks at, how many are on disk unchanged, and the first that are
+   * not.
+   */
+  record Fit(int total, int same, List<String> differing) {
+    static final int NAMED = 5;
+
+    double share() {
+      return total == 0 ? 1 : (double) same / total;
+    }
+
+    /**
+     * The differing libraries, the first few by name with whether each is absent or another file.
+     */
+    String describeDiffering() {
+      int more = differing.size() - NAMED;
+      return differing.stream().limit(NAMED).collect(Collectors.joining(", "))
+          + (more > 0 ? ", and " + more + " more" : "");
+    }
+  }
+
   /** The share of this view's libraries that are on disk with the base's hash. */
-  private double fit(Path webappDir, FileOps files) {
+  private Fit fit(Path webappDir, FileOps files) {
     int total = 0;
     int same = 0;
+    List<String> differing = new ArrayList<>();
     for (String path : paths()) {
       if (!path.startsWith(LIB) || !path.endsWith(".jar")) {
         continue;
@@ -146,16 +172,19 @@ public final class BaseView {
       Path onDisk = webappDir.resolve(path);
       BaseFile base = file(path).orElseThrow();
       try {
-        if (Files.isRegularFile(onDisk)
-            && Files.size(onDisk) == base.size()
+        if (!Files.isRegularFile(onDisk)) {
+          differing.add(path.substring(LIB.length()) + " absent");
+        } else if (Files.size(onDisk) == base.size()
             && files.sha256(onDisk).equals(base.sha256())) {
           same++;
+        } else {
+          differing.add(path.substring(LIB.length()) + " differs");
         }
       } catch (IOException e) {
         throw new UncheckedIOException("cannot hash " + onDisk, e);
       }
     }
-    return total == 0 ? 1 : (double) same / total;
+    return new Fit(total, same, differing);
   }
 
   /** The vendor's file at {@code path}; empty when the vendor has none at this level. */

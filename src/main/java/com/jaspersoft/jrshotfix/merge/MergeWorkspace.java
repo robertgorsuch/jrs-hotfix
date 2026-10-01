@@ -278,7 +278,8 @@ public final class MergeWorkspace {
             if (!item.fileClass().mergeable()) {
               yield plain(
                   State.OVERWRITTEN,
-                  "scripts, stylesheets and binary files are not merged: the hotfix's copy wins");
+                  "scripts, stylesheets and binary files are not merged: the hotfix's copy wins"
+                      + " unless resolved with --mine");
             }
             copySides(id, item, view, site);
             yield propose(id, item, onConflict);
@@ -454,17 +455,38 @@ public final class MergeWorkspace {
             || record.state() == State.RESOLVED
             || record.state() == State.KEPT_MINE
             || record.state() == State.TOOK_THEIRS
-            || record.state() == State.AUTO;
+            || record.state() == State.AUTO
+            || record.state() == State.OVERWRITTEN;
     if (!decidable) {
       throw new HotfixException(
           HotfixException.PRECHECK,
           path + " needs no decision (" + record.state() + ": " + record.note() + ")",
           "run `jrs-hotfix merge status " + id + "` for the files that do");
     }
+    // a script, stylesheet or binary file is never merged (section 4.1): the operator may keep
+    // the site's copy or take the hotfix's, and a merged file is refused
+    boolean neverMerged = !FileClass.valueOf(record.fileClass()).mergeable();
+    if (neverMerged && choice == Choice.MERGED) {
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          path + " is a " + record.fileClass() + " file, which is never merged",
+          "resolve it with --mine (the site's copy stays, the hotfix's change in it is skipped)"
+              + " or --theirs (the hotfix's copy lands)");
+    }
     Item changed =
         switch (choice) {
           case MINE ->
-              record.with(State.KEPT_MINE, Optional.empty(), by, clock.instant(), List.of());
+              neverMerged
+                  ? record.with(
+                      State.KEPT_MINE,
+                      Optional.empty(),
+                      by,
+                      clock.instant(),
+                      List.of(),
+                      "kept by the operator; the hotfix's change in this "
+                          + record.fileClass()
+                          + " file is not installed")
+                  : record.with(State.KEPT_MINE, Optional.empty(), by, clock.instant(), List.of());
           case THEIRS ->
               record.with(State.TOOK_THEIRS, Optional.empty(), by, clock.instant(), List.of());
           case MERGED -> merged(doc, record, mergedFile, by);

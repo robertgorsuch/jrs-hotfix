@@ -339,7 +339,11 @@ final class MergeCommand implements Callable<Integer> {
         description = "Install the merged text: the workspace's merged file, or <file>.")
     String merged;
 
-    @Option(names = "--mine", description = "Keep the server's file as it is.")
+    @Option(
+        names = "--mine",
+        description =
+            "Keep the server's file as it is; for a script, stylesheet or binary file the hotfix's"
+                + " change in it is then not installed.")
     boolean mine;
 
     @Option(names = "--theirs", description = "Take the hotfix's file.")

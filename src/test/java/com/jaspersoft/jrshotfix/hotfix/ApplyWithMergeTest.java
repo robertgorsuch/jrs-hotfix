@@ -102,6 +102,32 @@ class ApplyWithMergeTest {
   }
 
   @Test
+  void should_keep_the_sites_script_when_the_operator_resolved_it_with_mine() throws Exception {
+    SiteFixture s = SiteFixture.create(tmp);
+    s.customizeWithoutCollisions();
+    Path zip = s.hotfix();
+    MergeDoc doc = s.resolve(ready(s, zip), Wars.SCRIPT, Choice.MINE);
+    Plan plan = s.f.plans.planApply(args(zip, doc));
+
+    assertThat(plan.summary().filesTouched()).doesNotContain(s.webapp.resolve(Wars.SCRIPT));
+    assertThat(String.join("\n", plan.summary().changes()))
+        .contains("Kept as the site has it (3)")
+        .contains(Wars.SCRIPT + "  (G)")
+        .doesNotContain("Replaced although the site changed it");
+
+    assertThat(s.f.run(plan, "r-mine").exitCode()).isZero();
+    assertThat(s.read(Wars.SCRIPT)).isEqualTo("console.log('site');\n");
+    LedgerEntry entry = s.f.ledger.find(SiteFixture.HOTFIX_ID).orElseThrow();
+    assertThat(entry.kept())
+        .extracting(k -> s.webapp.relativize(k.path()).toString().replace('\\', '/'))
+        .contains(Wars.SCRIPT);
+    assertThat(entry.kept())
+        .filteredOn(k -> k.path().equals(s.webapp.resolve(Wars.SCRIPT)))
+        .singleElement()
+        .satisfies(k -> assertThat(k.reason()).contains("kept by the operator"));
+  }
+
+  @Test
   void should_bring_the_sites_files_back_byte_for_byte_when_the_hotfix_is_rolled_back()
       throws Exception {
     SiteFixture s = SiteFixture.create(tmp);
