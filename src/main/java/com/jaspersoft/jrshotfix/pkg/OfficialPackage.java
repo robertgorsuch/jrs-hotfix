@@ -576,12 +576,7 @@ public final class OfficialPackage {
         notes.say(sentence + " (the copy is too large to show here; it is in the package)");
         return;
       }
-      String text = new String(theirs.get(), StandardCharsets.ISO_8859_1);
-      List<String> lines = new ArrayList<>(List.of(text.split("\\r?\\n", -1)));
-      if (lines.get(lines.size() - 1).isEmpty()) {
-        lines.remove(lines.size() - 1);
-      }
-      notes.sayAndQuote(sentence + ". The package's copy:", lines);
+      notes.sayAndQuote(sentence + ". The package's copy:", SiteSettings.lines(theirs.get()));
     }
 
     private static String keys(List<String> keys) {

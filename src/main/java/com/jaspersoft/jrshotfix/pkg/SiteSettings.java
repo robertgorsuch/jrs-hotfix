@@ -2,6 +2,7 @@ package com.jaspersoft.jrshotfix.pkg;
 
 import com.jaspersoft.jrshotfix.platform.Sums;
 import com.jaspersoft.jrshotfix.text.PropertiesMerge;
+import com.jaspersoft.jrshotfix.text.Text;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -113,23 +114,26 @@ public final class SiteSettings {
   }
 
   static Optional<Merged> merge(byte[] mine, byte[] theirs) {
-    String vendor = new String(theirs, StandardCharsets.ISO_8859_1);
-    PropertiesMerge.Merged result =
-        PropertiesMerge.merge(lines(new String(mine, StandardCharsets.ISO_8859_1)), lines(vendor));
+    PropertiesMerge.Merged result = PropertiesMerge.merge(lines(mine), lines(theirs));
     if (result.kept().isEmpty() && result.carried().isEmpty()) {
       return Optional.empty();
     }
-    String eol = vendor.contains("\r\n") ? "\r\n" : "\n";
-    String text = String.join(eol, result.lines()) + (vendor.endsWith("\n") ? eol : "");
+    byte[] bytes = Text.of(theirs).bytes(result.lines());
     return Optional.of(
         new Merged(
-            text,
-            Sums.of(text.getBytes(StandardCharsets.ISO_8859_1)).sha256(),
+            new String(bytes, StandardCharsets.ISO_8859_1),
+            Sums.of(bytes).sha256(),
             result.kept(),
             result.carried()));
   }
 
-  private static List<String> lines(String text) {
+  /**
+   * The lines of a settings file, one character per byte, ended by LF or CR LF. Unlike {@link
+   * Text#of}, a CR at the very end with no LF after it stays in the last line: it is part of the
+   * value there, as it always was.
+   */
+  static List<String> lines(byte[] bytes) {
+    String text = new String(bytes, StandardCharsets.ISO_8859_1);
     List<String> lines = new ArrayList<>(Arrays.asList(text.split("\r?\n", -1)));
     // the text after the last line end is a line only when there is some
     if (lines.get(lines.size() - 1).isEmpty()) {
