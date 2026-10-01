@@ -553,7 +553,7 @@ public final class MergeWorkspace {
 
   private static HotfixException unknown(String id) {
     return new HotfixException(
-        HotfixException.PRECHECK, "unknown merge " + id, "run `jrs-hotfix merge status`");
+        HotfixException.PRECHECK, "unknown merge " + id, "run `jrs-hotfix merge list`");
   }
 
   private void save(MergeDoc doc) throws IOException {

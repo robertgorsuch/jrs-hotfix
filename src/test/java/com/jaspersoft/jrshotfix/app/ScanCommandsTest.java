@@ -113,7 +113,7 @@ class ScanCommandsTest {
   }
 
   @Test
-  void should_show_where_the_site_and_a_package_meet_when_given_a_package() throws Exception {
+  void should_verify_where_the_site_and_a_package_meet_when_a_baseline_fits() throws Exception {
     CommandsTest.Fixture f = fixture();
     assertThat(f.run("baseline", "add", war().toString())).isEqualTo(0);
     Path webapp = f.hf.settings.webappDir();
@@ -122,9 +122,10 @@ class ScanCommandsTest {
     Wars.write(webapp, Wars.SCRIPT, "console.log('site');\n");
     String before = Files.readString(webapp.resolve(Wars.SECURITY));
 
-    assertThat(f.run("scan", "--package", hotfix().toString())).isEqualTo(0);
+    // what `scan --package` said before 0.6, `verify` says whenever a baseline fits
+    assertThat(f.run("verify", hotfix().toString())).isEqualTo(0);
     assertThat(f.out())
-        .contains("Against JRSHF-10.0.0-20260730-0457 (4 files under the webapp)")
+        .contains("against this site (4 files under the webapp)")
         .containsPattern(Wars.CONTEXT + " +X +site change only +keep")
         .containsPattern(Wars.SECURITY + " +P +collision +merge")
         .containsPattern(Wars.SCRIPT + " +G +collision +replace \\(the site's change is lost\\)")

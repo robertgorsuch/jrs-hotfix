@@ -22,9 +22,9 @@ import picocli.CommandLine.Parameters;
 /**
  * {@code jrs-hotfix merge}: preparing a merge of a hotfix into a customized server before the
  * outage, and resolving what it could not merge by itself. Invariants: no command here touches the
- * installation; {@code status} and {@code show} write nothing at all, the others write under the
- * home only and take the run lock; {@code status <id>} exits 0 only when no file waits for a
- * decision.
+ * installation; {@code list}, {@code status} and {@code show} write nothing at all, the others
+ * write under the home only and take the run lock; {@code status <id>} exits 0 only when no file
+ * waits for a decision.
  */
 @Command(
     name = "merge",
@@ -34,6 +34,7 @@ import picocli.CommandLine.Parameters;
             + " for a decision, resolve it.",
     subcommands = {
       MergeCommand.Prepare.class,
+      MergeCommand.ListMerges.class,
       MergeCommand.Status.class,
       MergeCommand.Show.class,
       MergeCommand.Resolve.class,
@@ -123,16 +124,49 @@ final class MergeCommand extends GroupCommand {
     }
   }
 
-  /** {@code merge status [<mergeId>]}. */
+  /** {@code merge list}. */
+  @Command(
+      name = "list",
+      mixinStandardHelpOptions = true,
+      description = "List the merges in the home, with how many files each waits on.",
+      footer = {"", "Example:", "  jrs-hotfix merge list"})
+  static final class ListMerges extends AppCommand {
+    @Override
+    public Integer call() {
+      Bootstrap boot = open();
+      PrintWriter out = out();
+      List<MergeDoc> all = boot.plans().runtime().merges().list();
+      if (all.isEmpty()) {
+        out.println("no merges; `jrs-hotfix merge prepare <package.zip>` prepares one");
+        out.flush();
+        return ExitCodes.SUCCESS;
+      }
+      TextTable table = table();
+      table.row("ID", "HOTFIX", "PREPARED", "FILES", "WAITING");
+      for (MergeDoc doc : all) {
+        table.row(
+            doc.id(),
+            doc.hotfixId(),
+            doc.createdAt().toString(),
+            String.valueOf(doc.files().size()),
+            String.valueOf(doc.blocking().size()));
+      }
+      table.printTo(out);
+      out.flush();
+      return ExitCodes.SUCCESS;
+    }
+  }
+
+  /** {@code merge status <mergeId>}. */
   @Command(
       name = "status",
       mixinStandardHelpOptions = true,
       description =
-          "Without an id, list the merges in the home. With one, list its files and their states;"
-              + " exit 0 when none waits for a decision, 2 otherwise.",
+          "List a merge's files and their states; exit 0 when none waits for a decision, 2"
+              + " otherwise.",
       footer = {"", "Example:", "  jrs-hotfix merge status <id>"})
   static final class Status extends AppCommand {
-    @Parameters(index = "0", arity = "0..1", paramLabel = "<mergeId>", description = "The merge.")
+    @Parameters(index = "0", paramLabel = "<mergeId>", description = "The merge.")
     String id;
 
     @Override
@@ -140,27 +174,6 @@ final class MergeCommand extends GroupCommand {
       Bootstrap boot = open();
       HotfixPlans plans = boot.plans();
       PrintWriter out = out();
-      if (id == null) {
-        List<MergeDoc> all = plans.runtime().merges().list();
-        if (all.isEmpty()) {
-          out.println("no merges; `jrs-hotfix merge prepare <package.zip>` prepares one");
-          out.flush();
-          return ExitCodes.SUCCESS;
-        }
-        TextTable table = table();
-        table.row("ID", "HOTFIX", "PREPARED", "FILES", "WAITING");
-        for (MergeDoc doc : all) {
-          table.row(
-              doc.id(),
-              doc.hotfixId(),
-              doc.createdAt().toString(),
-              String.valueOf(doc.files().size()),
-              String.valueOf(doc.blocking().size()));
-        }
-        table.printTo(out);
-        out.flush();
-        return ExitCodes.SUCCESS;
-      }
       MergeDoc doc = plans.merge(id);
       printReport(out, boot, doc);
       List<String> changed = plans.mergeChangedSince(doc);
@@ -387,7 +400,7 @@ final class MergeCommand extends GroupCommand {
               err(),
               ExitCodes.PRECHECK_FAILED,
               "unknown merge " + id,
-              Optional.of("run `jrs-hotfix merge status`"));
+              Optional.of("run `jrs-hotfix merge list`"));
         }
       } catch (IOException e) {
         throw new HotfixException(

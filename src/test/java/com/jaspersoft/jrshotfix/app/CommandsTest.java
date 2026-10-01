@@ -206,7 +206,8 @@ class CommandsTest {
             "hotfix.apply",
             HotfixPlans.applyArgsJson(new HotfixPlans.ApplyArgs(f.pkg, true)));
     assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(8);
-    assertThat(f.err()).contains("runs resume stuck").contains("runs rollback stuck");
+    assertThat(f.err()).contains("runs resume stuck").contains("runs undo stuck");
+    // the name before 0.6 still works, hidden
     assertThat(f.run("runs", "rollback", "stuck", "--yes")).isEqualTo(0);
     assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
   }

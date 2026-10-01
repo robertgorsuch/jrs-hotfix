@@ -460,7 +460,7 @@ public final class HotfixPlans {
                 new HotfixException(
                     HotfixException.PRECHECK,
                     "unknown merge " + id,
-                    "run `jrs-hotfix merge status` for the merges in this home"));
+                    "run `jrs-hotfix merge list` for the merges in this home"));
   }
 
   /** The webapp paths of {@code doc} that are no longer as it found them, nor as it leaves them. */

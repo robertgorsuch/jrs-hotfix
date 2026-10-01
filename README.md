@@ -21,7 +21,7 @@ It comes as one download with everything it needs inside. There is nothing else 
 | Find out what the site changed in the webapp | `jrs-hotfix scan` |
 | Install a hotfix without losing the site's changes | `jrs-hotfix baseline add <vendor.war>`, then `jrs-hotfix apply <package.zip>` |
 | Make a hotfixed WAR from a WAR, with no server | `jrs-hotfix apply <package.zip> --war <in.war> --out <out.war>` |
-| Finish or undo an interrupted job | `jrs-hotfix runs resume <id>` / `jrs-hotfix runs rollback <id>` |
+| Finish or undo an interrupted job | `jrs-hotfix runs resume <id>` / `jrs-hotfix runs undo <id>` |
 
 ---
 
@@ -88,7 +88,7 @@ Every command that changes something works the same way:
 2. **It asks** `Run this plan? [y/N]`. Type `y` to go ahead. Anything else stops, and nothing has changed.
 3. **It runs the steps**, one line per step, then says what happened and what to do next.
 
-Want to see the plan without being asked to run it? Add `--plan` to `apply` or `rollback`. `--yes` answers every question for scripted runs (it implies `--non-interactive`, which never prompts and fails closed with exit 2 wherever a confirmation would be needed).
+Want to see the plan without being asked to run it? Add `--plan` to `apply` or `rollback`. `--yes` answers every question for scripted runs. Without a terminal jrs-hotfix never prompts: where a confirmation is needed and `--yes` was not given, it stops with exit 2.
 
 The examples below show the most common jobs.
 
@@ -169,10 +169,10 @@ Then see what the site changed:
 
 ```bash
 jrs-hotfix scan
-jrs-hotfix scan --package C:\Downloads\hotfix_....zip
+jrs-hotfix verify C:\Downloads\hotfix_....zip
 ```
 
-`scan` compares every file of the webapp with the baseline and changes nothing. Its first line is the answer, `vanilla: no vendor file was changed` or `customized: N changed, M added, K removed`, and the files follow, each with its class: `X` reviewed XML, `P` properties, `T` pages, `G` scripts and stylesheets, `B` binary. Files that differ in line ends only are equal. Files the installer fills in for one server are listed as `INSTALLER` and are not customizations; logs and built scripts are counted, not listed; a deployed `applicationContext-externalAuth*.xml` is listed under its own heading. Exit 0 either way, 2 when there is no baseline that fits this installation. With `--package`, the scan adds what the package would meet: for each file it ships, whether only the vendor changed it (replaced), only the site (kept), or both (a collision).
+`scan` compares every file of the webapp with the baseline and changes nothing. Its first line is the answer, `vanilla: no vendor file was changed` or `customized: N changed, M added, K removed`, and the files follow, each with its class: `X` reviewed XML, `P` properties, `T` pages, `G` scripts and stylesheets, `B` binary. Files that differ in line ends only are equal. Files the installer fills in for one server are listed as `INSTALLER` and are not customizations; logs and built scripts are counted, not listed; a deployed `applicationContext-externalAuth*.xml` is listed under its own heading. Exit 0 either way, 2 when there is no baseline that fits this installation. `verify <package.zip>` adds what the package would meet, whenever a baseline fits: for each file it ships, whether only the vendor changed it (replaced), only the site (kept), or both (a collision). (Before 0.6 that was `scan --package`.)
 
 With a baseline that fits, `apply` no longer replaces what the site changed. It first prepares a merge (or you prepare one ahead of the outage with `jrs-hotfix merge prepare <package.zip>`), which decides every file the package ships under the webapp:
 
@@ -234,20 +234,20 @@ jrs-hotfix finishes every job by saying what happened and what to do next. The n
 | **4** | A step failed, and jrs-hotfix could not put everything back | The message names the files and the snapshot; restore them from `runs/<runId>/` in the home |
 | **5** | You cancelled it | Nothing |
 | **6** | Not an official package, or not a supported installation (not 10.x, not Tomcat) | Nothing changed. Check [Before you start](#before-you-start) |
-| **8** | An earlier job was interrupted (a crash, a reboot, Ctrl-C) | Run `jrs-hotfix runs resume <id>` to finish it, or `jrs-hotfix runs rollback <id>` to undo it |
+| **8** | An earlier job was interrupted (a crash, a reboot, Ctrl-C) | Run `jrs-hotfix runs resume <id>` to finish it, or `jrs-hotfix runs undo <id>` to undo it |
 | **9** | Another jrs-hotfix job is already running | Wait for it to finish |
 
-A run whose journal has no terminal state blocks every mutating command with exit 8 until `runs resume` finishes it or `runs rollback` undoes it; the menu's entry 6 offers both first. A run's snapshot lives in its run directory for as long as the run does, and goes when it ends: an apply's becomes the undo, any other is deleted. A run that failed with exit 4 keeps its snapshot, which its message told you to restore from, until `runs prune --include-failed`.
+A run whose journal has no terminal state blocks every mutating command with exit 8 until `runs resume` finishes it or `runs undo` undoes it; the menu's entry 6 offers both first. A run's snapshot lives in its run directory for as long as the run does, and goes when it ends: an apply's becomes the undo, any other is deleted. A run that failed with exit 4 keeps its snapshot, which its message told you to restore from, until `runs prune --include-failed`.
 
 ```bash
 jrs-hotfix runs list                                   # every job that has run, and how it ended
 jrs-hotfix runs show <id>                              # the run's record, every step transition and the stored plan: exactly where it stopped
 jrs-hotfix runs resume <id>                            # finish an interrupted run
-jrs-hotfix runs rollback <id>                          # undo an interrupted run
+jrs-hotfix runs undo <id>                              # undo an interrupted run (`runs rollback` before 0.6)
 jrs-hotfix runs prune --older-than <days> [--include-failed]
 ```
 
-A run interrupted while the service was down, at an installation outside the default paths, is found again through the home jrs-hotfix remembers it used last; if that is gone too, pass `--home <installDir>/jrs-hotfix` (or set `JRS_HOTFIX_HOME`) to `runs resume` or `runs rollback`.
+A run interrupted while the service was down, at an installation outside the default paths, is found again through the home jrs-hotfix remembers it used last; if that is gone too, pass `--home <installDir>/jrs-hotfix` (or set `JRS_HOTFIX_HOME`) to `runs resume` or `runs undo`.
 
 ---
 
@@ -270,20 +270,20 @@ jrs-hotfix                                   menu at a terminal; usage otherwise
 jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--keep-superseded] [--plan] [--yes]
 jrs-hotfix apply <package.zip> --war <in.war> --out <out.war> [--merge <mergeId>]
 jrs-hotfix rollback [--plan] [--yes]
-jrs-hotfix verify <package.zip>
-jrs-hotfix scan [--package <package.zip>] [--war <file.war>]
+jrs-hotfix verify <package.zip> [--war <file.war>]
+jrs-hotfix scan [--war <file.war>]
 jrs-hotfix baseline [list | add <war | dir | package.zip> | remove <id>]
-jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war>] | status [<mergeId>]
+jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war>] | list | status <mergeId>
                   | show <mergeId> <path>
                   | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
                   | discard <mergeId>]
 jrs-hotfix list
-jrs-hotfix runs [list | show <id> | resume <id> | rollback <id> | prune --older-than <days> [--include-failed]]
+jrs-hotfix runs [list | show <id> | resume <id> | undo <id> | prune --older-than <days> [--include-failed]]
 jrs-hotfix settings [show | set <key> <value> | detect]
 jrs-hotfix --docs | --version | --help
 ```
 
-Global options: `--home <dir>` picks the home directory (default: detected). `--yes` answers every confirmation without asking and implies `--non-interactive`. `--plan` prints the plan for `apply` or `rollback` and stops; nothing is changed. `--non-interactive` never prompts and fails closed (exit 2) where a confirmation would otherwise be needed.
+Global options: `--home <dir>` picks the home directory (default: detected). `--yes` answers every confirmation without asking. `--plan` prints the plan for `apply` or `rollback` and stops; nothing is changed. Without a terminal nothing prompts, and a confirmation that `--yes` did not give fails closed (exit 2). (`--non-interactive`, which forced that at a terminal, is still accepted but no longer listed.)
 
 ---
 

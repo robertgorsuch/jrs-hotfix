@@ -60,8 +60,10 @@ class MergeCommandsTest {
     assertThat(s.read(Wars.WEB_XML)).contains(">60<").doesNotContain("main2");
     String id = mergeId(f);
 
-    assertThat(f.run("merge", "status")).isEqualTo(0);
+    assertThat(f.run("merge", "list")).isEqualTo(0);
     assertThat(f.out()).contains(id).contains(SiteFixture.HOTFIX_ID);
+    // the list is its own command since 0.6: status needs the id
+    assertThat(f.run("merge", "status")).isEqualTo(1);
     assertThat(f.run("merge", "status", id)).isEqualTo(2);
     assertThat(f.out())
         .contains("merge " + id + " for " + SiteFixture.HOTFIX_ID)
@@ -209,7 +211,7 @@ class MergeCommandsTest {
         .contains("JRSHF-10.0.0-20260615-0900")
         .contains("JRSHF-10.0.0-20260701-0100")
         .doesNotContain("JRSHF-10.0.0-20260601-1200");
-    assertThat(f.run("merge", "status")).isEqualTo(0);
+    assertThat(f.run("merge", "list")).isEqualTo(0);
     assertThat(f.out()).contains("no merges");
   }
 

@@ -31,6 +31,17 @@ class GlobalOptionsInheritanceTest {
   }
 
   @Test
+  void should_accept_non_interactive_but_leave_it_out_of_the_help() {
+    StringWriter help = new StringWriter();
+    Main.commandLine(
+            new PrintWriter(help, true), new PrintWriter(new StringWriter()), Bootstrap.DEFAULT)
+        .execute("--help");
+    assertThat(help.toString()).contains("--yes").doesNotContain("--non-interactive");
+    // hidden since 0.6, still honoured: scripts that pass it keep working
+    assertThat(run("--non-interactive", "list").nonInteractive()).isTrue();
+  }
+
+  @Test
   void should_use_the_home_given_before_the_command_when_the_command_names_none() {
     Path home = tmp.resolve("home");
 

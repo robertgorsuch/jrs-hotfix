@@ -167,7 +167,7 @@ class ScenarioTest {
       }
       String runId = f.pendingRunId();
 
-      f.cli.run("runs", "rollback", runId, "--yes").assertExit(0);
+      f.cli.run("runs", "undo", runId, "--yes").assertExit(0);
 
       assertThat(read(f, LIB + "foo-1.2.3.jar")).isEqualTo("old foo");
       assertThat(read(f, LIB + "bar-0.9.jar")).isEqualTo("bar");

@@ -33,8 +33,8 @@ import java.util.function.Supplier;
  * cause. Every event, including those steps emit themselves, passes the redactor before any
  * subscriber sees it, so redaction is an engine guarantee rather than a per-sink convention. A
  * journal write that fails ends the run with a {@code Failed} outcome and a {@code RunFailed} event
- * naming {@code runs resume} and {@code runs rollback}, never with an escaping exception;
- * cancellation is noticed inside a retry backoff within one {@link Sleeper#SLICE}. {@link
+ * naming {@code runs resume} and {@code runs undo}, never with an escaping exception; cancellation
+ * is noticed inside a retry backoff within one {@link Sleeper#SLICE}. {@link
  * com.jaspersoft.jrshotfix.engine.LockHeldException} propagates untouched so the CLI can map it to
  * exit code 9.
  */
@@ -191,7 +191,7 @@ public final class Runner {
     /**
      * The journal is the run's source of truth; when it cannot be written the run cannot go on and
      * cannot even record that it stopped. The outcome says so, names the run for {@code runs
-     * resume} and {@code runs rollback}, and counts as rollback-incomplete whenever a mutating step
+     * resume} and {@code runs undo}, and counts as rollback-incomplete whenever a mutating step
      * already ran, because nothing was undone. The terminal row is still attempted, since the
      * failure may have been a single write.
      */
@@ -203,7 +203,7 @@ public final class Runner {
               + " is unknown until the run journal is writable again; run jrs-hotfix settings"
               + " show and check the service, then jrs-hotfix runs resume "
               + runId
-              + " or jrs-hotfix runs rollback "
+              + " or jrs-hotfix runs undo "
               + runId;
       RunOutcome.Failed outcome = new RunOutcome.Failed(cause, mutated, nextAction, List.of());
       try {
