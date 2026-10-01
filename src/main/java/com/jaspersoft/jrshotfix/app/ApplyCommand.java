@@ -100,7 +100,7 @@ final class ApplyCommand extends AppCommand {
             e);
       }
       out().println("package " + file.getFileName() + "  sha256 " + sha);
-      confirmed = Confirm.ask(out(), "Does this checksum match the support portal? [y/N] ");
+      confirmed = Prompter.yes(out(), "Does this checksum match the support portal? [y/N] ", false);
       if (!confirmed) {
         return ExitCodes.fail(
             err(),

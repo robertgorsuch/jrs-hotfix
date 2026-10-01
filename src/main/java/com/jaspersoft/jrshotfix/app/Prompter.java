@@ -19,14 +19,13 @@ import org.jline.reader.UserInterruptException;
 
 /**
  * Questions for the operator across several prompts in one command (#63). Invariants: answers come
- * from the console when there is one (secrets without echo), otherwise from one buffered reader
- * over standard input shared by every prompt of the process, so piped answers are consumed line by
- * line and none is lost to a second buffer; end of input is an empty {@link Optional} and a yes/no
- * question answered by end of input is no, so an unattended run never agrees by accident; a secret
- * is returned as a {@code char[]} the caller must zero, and is never printed; tests replace the
- * input with {@link #override} and restore it with {@link #reset}. {@link #path} additionally
- * offers filesystem completion through JLine (#102, ADR-0037) when a real interactive terminal is
- * present; any failure to obtain one is permanent for the process and falls back to {@link #line}.
+ * from the console when there is one, otherwise from one buffered reader over standard input shared
+ * by every prompt of the process, so piped answers are consumed line by line and none is lost to a
+ * second buffer; end of input is an empty {@link Optional} and a yes/no question answered by end of
+ * input is no, so an unattended run never agrees by accident; tests replace the input with {@link
+ * #override} and restore it with {@link #reset}. {@link #path} additionally offers filesystem
+ * completion through JLine (#102, ADR-0037) when a real interactive terminal is present; any
+ * failure to obtain one is permanent for the process and falls back to {@link #line}.
  */
 final class Prompter {
 
@@ -214,27 +213,6 @@ final class Prompter {
         out.println();
       }
       return answer;
-    } catch (IOException e) {
-      return Optional.empty();
-    }
-  }
-
-  /** A secret, not echoed on a console; empty at end of input. The caller zeroes the array. */
-  static Optional<char[]> secret(PrintWriter out, String prompt) {
-    Optional<Console> console = console();
-    if (console.isPresent()) {
-      out.flush();
-      return Optional.ofNullable(console.get().readPassword("%s", prompt));
-    }
-    out.print(prompt);
-    out.flush();
-    try {
-      String answer = reader().readLine();
-      if (answer == null) {
-        out.println();
-        return Optional.empty();
-      }
-      return Optional.of(answer.toCharArray());
     } catch (IOException e) {
       return Optional.empty();
     }

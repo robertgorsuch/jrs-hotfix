@@ -15,6 +15,7 @@ import com.jaspersoft.jrshotfix.pkg.PackageStager;
 import com.jaspersoft.jrshotfix.pkg.PropertiesMerge;
 import com.jaspersoft.jrshotfix.platform.Durability;
 import com.jaspersoft.jrshotfix.platform.FileOps;
+import com.jaspersoft.jrshotfix.platform.Lists;
 import com.jaspersoft.jrshotfix.platform.Sums;
 import com.jaspersoft.jrshotfix.platform.Trees;
 import com.jaspersoft.jrshotfix.scan.Scan;
@@ -416,12 +417,7 @@ public final class MergeWorkspace {
     if (keys.isEmpty() || what.isEmpty()) {
       return "";
     }
-    List<String> named = keys.size() > 10 ? keys.subList(0, 10) : keys;
-    return what
-        + ": "
-        + String.join(", ", named)
-        + (keys.size() > named.size() ? " and " + (keys.size() - named.size()) + " more" : "")
-        + ". ";
+    return what + ": " + Lists.firstAndMore(keys, 10) + ". ";
   }
 
   /** The bytes of a workspace file; empty when it is absent or too large to merge. */
@@ -562,11 +558,7 @@ public final class MergeWorkspace {
         report,
         String.join(System.lineSeparator(), report(doc)) + System.lineSeparator(),
         StandardCharsets.UTF_8);
-    Path tmp = file.resolveSibling(DOC + ".tmp");
-    Files.writeString(tmp, Json.writePretty(doc), StandardCharsets.UTF_8);
-    Durability.sync(tmp);
-    Durability.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-    Durability.syncDirectory(file.toAbsolutePath().getParent());
+    Durability.writeAtomically(file, Json.writePretty(doc));
   }
 
   /** The summary of a merge as it is printed and kept in {@code report.txt}. */

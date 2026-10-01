@@ -13,6 +13,7 @@ import com.jaspersoft.jrshotfix.pkg.PackageStager;
 import com.jaspersoft.jrshotfix.platform.Durability;
 import com.jaspersoft.jrshotfix.platform.Sums;
 import com.jaspersoft.jrshotfix.platform.Trees;
+import com.jaspersoft.jrshotfix.platform.Zips;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -265,11 +266,8 @@ public final class BaselineStore {
     try (InputStream in = Files.newInputStream(war);
         ZipInputStream zip = new ZipInputStream(in)) {
       ZipEntry entry;
-      while ((entry = zip.getNextEntry()) != null) {
-        if (entry.isDirectory()) {
-          continue;
-        }
-        String path = entry.getName().replace('\\', '/');
+      while ((entry = Zips.nextFile(zip)) != null) {
+        String path = Zips.name(entry);
         if (!PackagePaths.pathProblems(path).isEmpty()) {
           throw notAWebapp(war, "it holds an unusable path");
         }

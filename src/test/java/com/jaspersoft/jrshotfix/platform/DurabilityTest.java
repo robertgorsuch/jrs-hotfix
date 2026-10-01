@@ -44,6 +44,18 @@ class DurabilityTest {
   }
 
   @Test
+  void should_replace_the_file_and_leave_no_temporary_when_writing_atomically(@TempDir Path dir)
+      throws IOException {
+    Path file = dir.resolve("new-dir").resolve("ledger.json");
+
+    Durability.writeAtomically(file, "first");
+    Durability.writeAtomically(file, "second é");
+
+    assertThat(Files.readString(file, StandardCharsets.UTF_8)).isEqualTo("second é");
+    assertThat(file.resolveSibling("ledger.json.tmp")).doesNotExist();
+  }
+
+  @Test
   void should_force_a_file_that_was_written_earlier(@TempDir Path dir) throws IOException {
     Path file = dir.resolve("manifest.json");
     Files.writeString(file, "{}", StandardCharsets.UTF_8);

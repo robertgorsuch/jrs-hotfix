@@ -39,6 +39,5 @@ class RunIdsAndOutcomeTest {
     assertThat(new RunOutcome.Failed("x", false, "y", List.of()).exitCode()).isEqualTo(2);
     assertThat(new RunOutcome.Cancelled("x").exitCode()).isEqualTo(5);
     assertThat(new RunOutcome.PrecheckFailed("s1", "x", "y").exitCode()).isEqualTo(2);
-    assertThat(new RunOutcome.FingerprintMismatch(List.of("bundle")).exitCode()).isEqualTo(2);
   }
 }

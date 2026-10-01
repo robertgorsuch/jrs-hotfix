@@ -2,7 +2,9 @@ package com.jaspersoft.jrshotfix.pkg;
 
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.platform.FileOps;
+import com.jaspersoft.jrshotfix.platform.Lists;
 import com.jaspersoft.jrshotfix.platform.Sums;
+import com.jaspersoft.jrshotfix.platform.Zips;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -14,7 +16,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -88,54 +89,6 @@ public final class OfficialPackage {
 
   private OfficialPackage() {}
 
-  /** What {@code hotfix record} stores about a package applied by hand. */
-  public record Described(String id, String title, String release, String edition, String build) {}
-
-  /**
-   * The identity the package's outer readme gives it, without reading the payload: the same id,
-   * title, release, edition and build {@link #read} derives, so a hotfix recorded by hand and one
-   * applied through jrs-hotfix share an id and cannot both be in the ledger.
-   */
-  public static Described describe(Path zip) throws IOException {
-    try {
-      return describeChecked(zip);
-    } catch (IllegalArgumentException e) {
-      throw unusable(e.getMessage(), Optional.of(e));
-    }
-  }
-
-  private static Described describeChecked(Path zip) throws IOException {
-    Shape shape =
-        shape(zip)
-            .orElseThrow(
-                () ->
-                    new HotfixException(
-                        HotfixException.PRECHECK,
-                        zip + " is not a readable hotfix package",
-                        "point jrs-hotfix at the hotfix ZIP as it was downloaded"));
-    if (shape.readme().isEmpty() || !shape.payload()) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          zip + NEITHER_SHAPE_SHORT,
-          "point jrs-hotfix at the hotfix ZIP as support published it");
-    }
-    try (InputStream in = Files.newInputStream(zip);
-        ZipInputStream outer = new ZipInputStream(in)) {
-      ZipEntry entry;
-      while ((entry = outer.getNextEntry()) != null) {
-        if (!entry.isDirectory() && shape.kind(entry.getName().replace('\\', '/')) == Kind.README) {
-          Header header = Header.parse(readLines(outer));
-          return new Described(
-              header.id(), header.title(), header.release(), header.edition(), header.build());
-        }
-      }
-    }
-    throw new HotfixException(
-        HotfixException.PRECHECK,
-        "no readme.txt in " + zip,
-        "point jrs-hotfix at the hotfix ZIP as it was downloaded, not at an unpacked copy");
-  }
-
   /** True when {@code zip} is an official package. */
   public static boolean looksOfficial(Path zip) {
     return shape(zip).map(Shape::official).orElse(false);
@@ -205,14 +158,12 @@ public final class OfficialPackage {
     try (InputStream in = Files.newInputStream(zip);
         ZipInputStream z = new ZipInputStream(in)) {
       ZipEntry e;
-      while ((e = z.getNextEntry()) != null) {
-        String name = e.getName().replace('\\', '/');
+      while ((e = Zips.nextFile(z)) != null) {
+        String name = Zips.name(e);
         if (name.equals(BUNDLE_MANIFEST)) {
           return Optional.empty();
         }
-        if (!e.isDirectory()) {
-          names.add(name);
-        }
+        names.add(name);
       }
     } catch (IOException e) {
       return Optional.empty();
@@ -349,15 +300,12 @@ public final class OfficialPackage {
     Notes notes = new Notes();
     Payload payload =
         new Payload(paths, entries, kept, vendorFiles, added, notes, decisions, webappPrefix);
-    MessageDigest whole = sha256();
+    MessageDigest whole = Sums.newDigest();
     try (InputStream in = new DigestInputStream(Files.newInputStream(source), whole);
         ZipInputStream outer = new ZipInputStream(in)) {
       ZipEntry entry;
-      while ((entry = outer.getNextEntry()) != null) {
-        if (entry.isDirectory()) {
-          continue;
-        }
-        String name = entry.getName().replace('\\', '/');
+      while ((entry = Zips.nextFile(outer)) != null) {
+        String name = Zips.name(entry);
         switch (shape.kind(name)) {
           case README -> header = Header.parse(readLines(outer));
           case WEBAPP_ZIP -> readmes.add(inner(outer, name, webappPrefix, payload));
@@ -497,11 +445,8 @@ public final class OfficialPackage {
     Readme readme = Readme.empty();
     ZipInputStream zip = new ZipInputStream(source);
     ZipEntry entry;
-    while ((entry = zip.getNextEntry()) != null) {
-      if (entry.isDirectory()) {
-        continue;
-      }
-      String name = entry.getName().replace('\\', '/');
+    while ((entry = Zips.nextFile(zip)) != null) {
+      String name = Zips.name(entry);
       if (name.equalsIgnoreCase(README)) {
         readme = Readme.parse(prefix, readLines(zip));
         continue;
@@ -643,9 +588,7 @@ public final class OfficialPackage {
       if (keys.isEmpty()) {
         return "none";
       }
-      List<String> named = keys.size() > MAX_NAMED_KEYS ? keys.subList(0, MAX_NAMED_KEYS) : keys;
-      return String.join(", ", named)
-          + (keys.size() > named.size() ? " and " + (keys.size() - named.size()) + " more" : "");
+      return Lists.firstAndMore(keys, MAX_NAMED_KEYS);
     }
   }
 
@@ -887,7 +830,7 @@ public final class OfficialPackage {
     try (InputStream in = Files.newInputStream(jar);
         ZipInputStream zip = new ZipInputStream(in)) {
       ZipEntry entry;
-      while ((entry = zip.getNextEntry()) != null) {
+      while ((entry = Zips.nextFile(zip)) != null) {
         if (entry.getName().equals("META-INF/web-fragment.xml")) {
           String xml = new String(zip.readAllBytes(), StandardCharsets.UTF_8);
           Matcher m = FRAGMENT_NAME.matcher(xml);
@@ -967,14 +910,6 @@ public final class OfficialPackage {
       lines.add(line.stripTrailing());
     }
     return lines;
-  }
-
-  private static MessageDigest sha256() {
-    try {
-      return MessageDigest.getInstance("SHA-256");
-    } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 is mandatory in every JRE", e);
-    }
   }
 
   /** What the outer readme says about the package as a whole. */

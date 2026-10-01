@@ -87,14 +87,14 @@ class OfficialPackageTest {
         Packages.zipBytes(Map.of(Packages.LIB + "foo-1.2.3.jar", "x"), null));
     Path zip = Packages.zip(tmp.resolve("dl/odd.zip"), outer);
     assertThat(OfficialPackage.looksOfficial(zip)).isTrue();
-    assertThat(OfficialPackage.describe(zip).id()).isEqualTo("JRSHF-10.0.0-20260730-0457");
+    assertThat(readHere(zip).id()).isEqualTo("JRSHF-10.0.0-20260730-0457");
   }
 
   @Test
   void should_refuse_a_zip_that_is_not_a_package_when_read() throws Exception {
     Path zip = Packages.zip(tmp.resolve("dl/other.zip"), Map.of("a.txt", new byte[] {1}));
     assertThat(OfficialPackage.looksOfficial(zip)).isFalse();
-    assertThatThrownBy(() -> OfficialPackage.describe(zip))
+    assertThatThrownBy(() -> readHere(zip))
         .isInstanceOf(HotfixException.class)
         .hasMessageContaining("readme.txt");
   }
@@ -106,10 +106,14 @@ class OfficialPackageTest {
     outer.put(
         "jasperserver-pro.zip",
         Packages.zipBytes(Map.of(Packages.LIB + "foo-1.2.3.jar", "x"), null));
-    assertThatThrownBy(
-            () -> OfficialPackage.describe(Packages.zip(tmp.resolve("dl/nobuild.zip"), outer)))
+    assertThatThrownBy(() -> readHere(Packages.zip(tmp.resolve("dl/nobuild.zip"), outer)))
         .isInstanceOf(HotfixException.class)
         .hasMessageContaining("build");
+  }
+
+  private PackageContents readHere(Path zip) throws Exception {
+    return OfficialPackage.read(
+        zip, Packages.install(tmp.resolve("jrs")), "jasperserver-pro", files);
   }
 
   /** A package whose webapp archive holds {@code payload} and {@code innerReadme}. */

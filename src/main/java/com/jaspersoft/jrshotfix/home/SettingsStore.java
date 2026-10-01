@@ -7,7 +7,6 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Optional;
 
 /** settings.json under the home. Invariants: absent file is "no settings"; a save is atomic. */
@@ -29,13 +28,7 @@ public final class SettingsStore {
   public static void save(Home home, Settings settings) {
     Path file = home.settingsFile();
     try {
-      Files.createDirectories(file.getParent());
-      Path tmp = file.resolveSibling("settings.json.tmp");
-      Files.writeString(tmp, Json.writePretty(settings), StandardCharsets.UTF_8);
-      Durability.sync(tmp);
-      Durability.move(
-          tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-      Durability.syncDirectory(file.toAbsolutePath().getParent());
+      Durability.writeAtomically(file, Json.writePretty(settings));
     } catch (IOException e) {
       throw new UncheckedIOException("cannot write " + file, e);
     }

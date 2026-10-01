@@ -5,10 +5,12 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.CopyOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.HexFormat;
@@ -42,9 +44,23 @@ public final class Durability {
 
   /** As {@link #copy}, also returning the hex SHA-256 of the bytes that were written. */
   public static String copyHashing(Path source, Path target) throws IOException {
-    MessageDigest digest = DefaultFileOps.sha256Digest();
+    MessageDigest digest = Sums.newDigest();
     write(source, target, Optional.of(digest));
     return HexFormat.of().formatHex(digest.digest());
+  }
+
+  /**
+   * Replaces {@code file} with {@code text} (UTF-8) so that a crash leaves either the old content
+   * or the new, never a mix: the text is written to a sibling {@code .tmp} and forced, renamed over
+   * the file, and the rename made durable. Creates the parent directories.
+   */
+  public static void writeAtomically(Path file, String text) throws IOException {
+    Files.createDirectories(file.getParent());
+    Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+    Files.writeString(tmp, text, StandardCharsets.UTF_8);
+    sync(tmp);
+    move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    syncDirectory(file.toAbsolutePath().getParent());
   }
 
   /** Forces a file that is already written and closed. */

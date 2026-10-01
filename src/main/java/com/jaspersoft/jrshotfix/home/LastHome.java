@@ -7,7 +7,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.Optional;
 
@@ -65,13 +64,7 @@ public final class LastHome {
       return;
     }
     try {
-      Files.createDirectories(file.getParent());
-      Path tmp = file.resolveSibling(FILE + ".tmp");
-      Files.writeString(tmp, home.root() + System.lineSeparator(), StandardCharsets.UTF_8);
-      Durability.sync(tmp);
-      Durability.move(
-          tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-      Durability.syncDirectory(file.toAbsolutePath().getParent());
+      Durability.writeAtomically(file, home.root() + System.lineSeparator());
     } catch (IOException | RuntimeException e) {
       Diag.warn("cannot remember the home in {}: {}", file, e.getMessage());
     }

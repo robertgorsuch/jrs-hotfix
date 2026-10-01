@@ -2,6 +2,7 @@ package com.jaspersoft.jrshotfix.pkg;
 
 import com.jaspersoft.jrshotfix.engine.CancellationToken;
 import com.jaspersoft.jrshotfix.platform.Durability;
+import com.jaspersoft.jrshotfix.platform.Zips;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -67,12 +68,9 @@ public final class PackageStager {
     try (InputStream in = Files.newInputStream(zip);
         ZipInputStream outer = new ZipInputStream(in)) {
       ZipEntry entry;
-      while ((entry = outer.getNextEntry()) != null) {
+      while ((entry = Zips.nextFile(outer)) != null) {
         cancel.checkpoint();
-        if (entry.isDirectory()) {
-          continue;
-        }
-        String name = entry.getName().replace('\\', '/');
+        String name = Zips.name(entry);
         switch (shape.get().kind(name)) {
           case WEBAPP_ZIP, INSTALL_ZIP -> {
             Map<String, String> wanted = inner.get(name);
@@ -104,11 +102,8 @@ public final class PackageStager {
       throws IOException {
     ZipInputStream zip = new ZipInputStream(source);
     ZipEntry entry;
-    while ((entry = zip.getNextEntry()) != null) {
+    while ((entry = Zips.nextFile(zip)) != null) {
       cancel.checkpoint();
-      if (entry.isDirectory()) {
-        continue;
-      }
       String path = wanted.get(entry.getName());
       if (path != null) {
         write(zip, root, path, destination);

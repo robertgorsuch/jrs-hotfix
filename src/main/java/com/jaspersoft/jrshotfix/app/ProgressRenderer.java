@@ -124,12 +124,6 @@ final class ProgressRenderer implements EventSink {
             rows.add(new String[] {"next", p.remediation()});
             yield icon(Icon.FAIL) + " run " + runId + " stopped at a precheck; nothing changed";
           }
-          case RunOutcome.FingerprintMismatch m -> {
-            rows.add(new String[] {"cause", "inputs changed since planning: " + m.changedKeys()});
-            rows.add(
-                new String[] {"next", "run the command again to plan against the current state"});
-            yield icon(Icon.FAIL) + " run " + runId + " refused; nothing changed";
-          }
         };
     List<String[]> ordered = new ArrayList<>();
     if (lastFailure.isPresent() && !(outcome instanceof RunOutcome.Succeeded)) {

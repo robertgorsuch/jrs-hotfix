@@ -94,7 +94,7 @@ class JournalPortTest {
     Context ctx =
         new Context(
             "r-journal", new Home(home), new FakePlatform(home), new CancellationToken(), Map.of());
-    return new Result(runner.run(plan, ctx, EngineFixture.fingerprint(), RunOptions.DEFAULT), sink);
+    return new Result(runner.run(plan, ctx, RunOptions.DEFAULT), sink);
   }
 
   /** A journal that remembers what it was asked to do and fails on the Nth write. */

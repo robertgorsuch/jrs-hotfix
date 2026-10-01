@@ -105,7 +105,7 @@ public final class HotfixFixture implements AutoCloseable {
 
   public RunOutcome run(Plan plan, String runId) {
     Runner runner = new Runner(journal, EventSink.discard(), Clock.systemUTC(), Sleeper.none());
-    return runner.run(plan, ctx(runId), plan.fingerprint(), RunOptions.DEFAULT);
+    return runner.run(plan, ctx(runId), RunOptions.DEFAULT);
   }
 
   public Path target(String packagePath) {

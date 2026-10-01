@@ -11,7 +11,6 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -67,13 +66,7 @@ public final class RunPlans {
       doc.put("fingerprintInputs", plan.fingerprint().inputs());
       doc.put("stepIds", plan.steps().stream().map(Step::id).toList());
       doc.put("summary", plan.summary());
-      Files.createDirectories(file.getParent());
-      Path tmp = file.resolveSibling(FILE + ".tmp");
-      Files.writeString(tmp, Json.writePretty(doc), StandardCharsets.UTF_8);
-      Durability.sync(tmp);
-      Durability.move(
-          tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-      Durability.syncDirectory(file.toAbsolutePath().getParent());
+      Durability.writeAtomically(file, Json.writePretty(doc));
     } catch (IOException e) {
       throw new UncheckedIOException("cannot write " + file, e);
     }

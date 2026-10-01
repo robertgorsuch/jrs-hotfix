@@ -7,6 +7,7 @@ import com.jaspersoft.jrshotfix.pkg.FileTarget;
 import com.jaspersoft.jrshotfix.pkg.PackageContents;
 import com.jaspersoft.jrshotfix.pkg.PackagePaths;
 import com.jaspersoft.jrshotfix.pkg.SiteDecisions;
+import com.jaspersoft.jrshotfix.platform.Lists;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -55,7 +56,6 @@ final class MergePlans {
   static HotfixException blocked(MergeDoc doc) {
     List<String> waiting =
         doc.blocking().stream().map(i -> i.path() + " (" + i.state() + ")").toList();
-    List<String> shown = waiting.size() > 8 ? waiting.subList(0, 8) : waiting;
     return new HotfixException(
         HotfixException.PRECHECK,
         waiting.size()
@@ -64,10 +64,7 @@ final class MergePlans {
             + " wait for your decision in merge "
             + doc.id()
             + ": "
-            + String.join(", ", shown)
-            + (waiting.size() > shown.size()
-                ? " and " + (waiting.size() - shown.size()) + " more"
-                : "")
+            + Lists.firstAndMore(waiting, 8)
             + "; nothing was changed on the server",
         "`jrs-hotfix merge status "
             + doc.id()
@@ -128,14 +125,9 @@ final class MergePlans {
     }
     List<String> changed = changedSince(doc);
     if (!changed.isEmpty()) {
-      List<String> shown = changed.size() > 8 ? changed.subList(0, 8) : changed;
       throw new HotfixException(
           HotfixException.PRECHECK,
-          "changed since the merge was prepared: "
-              + String.join(", ", shown)
-              + (changed.size() > shown.size()
-                  ? " and " + (changed.size() - shown.size()) + " more"
-                  : ""),
+          "changed since the merge was prepared: " + Lists.firstAndMore(changed, 8),
           "prepare the merge again with `jrs-hotfix merge prepare <package.zip>`; what you"
               + " resolved in "
               + doc.id()

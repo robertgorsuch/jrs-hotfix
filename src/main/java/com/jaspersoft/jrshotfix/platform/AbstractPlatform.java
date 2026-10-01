@@ -136,22 +136,8 @@ abstract class AbstractPlatform implements Platform {
     if (webapp.isEmpty()) {
       return Optional.empty();
     }
-    Optional<Path> buildomatic = existingDir(base.resolve("buildomatic"));
-    Optional<Path> javaHome =
-        Stream.of("java", "jre", "jdk")
-            .map(base::resolve)
-            .filter(AbstractPlatform::looksLikeJavaHome)
-            .findFirst();
-    Optional<Integer> port = ServerXml.httpPort(tomcat.get().resolve("conf").resolve("server.xml"));
     return Optional.of(
-        new TomcatLayout(
-            base,
-            tomcat.get(),
-            webapp.get(),
-            webapp.get().getFileName().toString(),
-            buildomatic,
-            javaHome,
-            port));
+        new TomcatLayout(base, tomcat.get(), webapp.get(), webapp.get().getFileName().toString()));
   }
 
   private static Optional<Path> findTomcatDir(Path base) {
@@ -189,15 +175,6 @@ abstract class AbstractPlatform implements Platform {
   private static String name(Path p) {
     Path file = p.getFileName();
     return file == null ? "" : file.toString();
-  }
-
-  private static boolean looksLikeJavaHome(Path dir) {
-    Path bin = dir.resolve("bin");
-    return Files.isRegularFile(bin.resolve("java")) || Files.isRegularFile(bin.resolve("java.exe"));
-  }
-
-  private static Optional<Path> existingDir(Path dir) {
-    return Files.isDirectory(dir) ? Optional.of(dir) : Optional.empty();
   }
 
   /** The well-known places to look after the running Tomcats, most likely first. */

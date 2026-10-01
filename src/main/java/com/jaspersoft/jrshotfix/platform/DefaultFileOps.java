@@ -10,7 +10,6 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.UserPrincipal;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
@@ -41,7 +40,7 @@ public class DefaultFileOps implements FileOps {
 
   @Override
   public String sha256(Path file) throws IOException {
-    MessageDigest digest = sha256Digest();
+    MessageDigest digest = Sums.newDigest();
     byte[] buffer = new byte[BUFFER_SIZE];
     try (InputStream in = Files.newInputStream(file)) {
       int read;
@@ -259,13 +258,5 @@ public class DefaultFileOps implements FileOps {
     Path absolute = target.toAbsolutePath();
     String name = "." + absolute.getFileName() + "." + System.nanoTime() + TEMP_SUFFIX;
     return absolute.resolveSibling(name);
-  }
-
-  static MessageDigest sha256Digest() {
-    try {
-      return MessageDigest.getInstance("SHA-256");
-    } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 is mandatory in every JRE", e);
-    }
   }
 }

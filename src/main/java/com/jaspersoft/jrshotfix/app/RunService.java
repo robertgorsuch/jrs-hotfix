@@ -36,7 +36,6 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -165,12 +164,7 @@ final class RunService {
     }
   }
 
-  /** Stores the plan, then runs it. The runner takes the run lock. */
-  RunOutcome run(Runner runner, Plan plan, Context ctx, String operation, String argsJson) {
-    return run(runner, plan, ctx, operation, argsJson, List.of());
-  }
-
-  /** As {@link #run(Runner, Plan, Context, String, String)}, writing {@code audit} to the log. */
+  /** Stores the plan, then runs it, writing {@code audit} to the log. The runner takes the lock. */
   RunOutcome run(
       Runner runner,
       Plan plan,
@@ -185,7 +179,7 @@ final class RunService {
         ctx.runId(),
         operation + " " + argsJson,
         audit,
-        () -> runner.run(plan, ctx, plan.fingerprint(), RunOptions.DEFAULT));
+        () -> runner.run(plan, ctx, RunOptions.DEFAULT));
   }
 
   RunOutcome resume(Runner runner, Plan plan, String runId, Context ctx) {
@@ -215,14 +209,8 @@ final class RunService {
     }
     Path file = boot.home().notesFile(runId);
     try {
-      Files.createDirectories(file.getParent());
-      Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
-      String text = String.join(System.lineSeparator(), notes) + System.lineSeparator();
-      Files.writeString(tmp, text, StandardCharsets.UTF_8);
-      Durability.sync(tmp);
-      Durability.move(
-          tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-      Durability.syncDirectory(file.toAbsolutePath().getParent());
+      Durability.writeAtomically(
+          file, String.join(System.lineSeparator(), notes) + System.lineSeparator());
     } catch (IOException e) {
       // before any step has run: a precheck-class refusal (exit 2), not an unexplained exit 4
       throw new HotfixException(

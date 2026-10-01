@@ -1,11 +1,9 @@
 package com.jaspersoft.jrshotfix.service;
 
-import com.jaspersoft.jrshotfix.engine.Context;
 import com.jaspersoft.jrshotfix.engine.Sleeper;
 import com.jaspersoft.jrshotfix.platform.ServiceController;
 import java.time.Clock;
 import java.time.Duration;
-import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -36,32 +34,4 @@ public interface ServiceRuntime {
 
   /** Asks the server whether it is up; never cached. */
   ServerProbe probe();
-
-  /**
-   * Where a step finds its runtime when it runs. An ops operation holds its runtime already and
-   * passes a {@link Fixed} one; a strategy that builds its steps before any context exists resolves
-   * the runtime from the context each step runs in instead.
-   */
-  @FunctionalInterface
-  interface Source {
-
-    ServiceRuntime at(Context ctx);
-
-    static Source fixed(ServiceRuntime runtime) {
-      return new Fixed(runtime);
-    }
-  }
-
-  /** A runtime known when the plan is built, the same for every context. */
-  record Fixed(ServiceRuntime runtime) implements Source {
-
-    public Fixed {
-      Objects.requireNonNull(runtime, "runtime");
-    }
-
-    @Override
-    public ServiceRuntime at(Context ctx) {
-      return runtime;
-    }
-  }
 }

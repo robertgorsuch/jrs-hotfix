@@ -58,12 +58,7 @@ public class PlatformDetectionTest {
     assertThat(layout.tomcatDir()).isEqualTo(tomcat);
     assertThat(layout.webappName()).isEqualTo("jasperserver-pro");
     assertThat(layout.webappDir()).isEqualTo(tomcat.resolve("webapps").resolve("jasperserver-pro"));
-    assertThat(layout.webInfLib()).isDirectory();
-    assertThat(layout.buildomaticDir()).contains(install.resolve("buildomatic"));
-    assertThat(layout.bundledJavaHome()).contains(install.resolve("java"));
-    assertThat(layout.httpPort()).contains(8181);
-    assertThat(layout.requiresServiceStop(layout.webInfLib().resolve("x.jar"))).isTrue();
-    assertThat(layout.requiresServiceStop(tomcat.resolve("conf").resolve("server.xml"))).isFalse();
+    assertThat(layout.webappDir().resolve("WEB-INF").resolve("lib")).isDirectory();
   }
 
   @Test
@@ -75,7 +70,6 @@ public class PlatformDetectionTest {
 
     assertThat(detected).isPresent();
     assertThat(detected.get().webappName()).isEqualTo("jasperserver");
-    assertThat(detected.get().httpPort()).isEmpty();
   }
 
   @Test
