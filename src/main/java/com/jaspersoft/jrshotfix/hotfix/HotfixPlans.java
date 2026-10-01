@@ -450,7 +450,7 @@ public final class HotfixPlans {
         new OfficialPackage.Superseded(vendorFiles(rt)::contains, !keep);
     try {
       return OfficialPackage.read(
-          file, rt.paths(), rt.settings().webappName(), rt.files(), decisions, superseded);
+          file, rt.paths(), rt.settings().webappName(), decisions, superseded);
     } catch (IOException | UncheckedIOException e) {
       throw new HotfixException(
           HotfixException.PRECHECK,

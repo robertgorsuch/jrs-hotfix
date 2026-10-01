@@ -42,7 +42,7 @@ class BaseViewTest {
   /** Applies the hotfix of {@link BaselineStoreTest#hotfix} by hand and adds its baseline. */
   private void applyHotfixByHand(boolean withBaseline) throws Exception {
     Path zip = BaselineStoreTest.hotfix(tmp.resolve("dl/hotfix.zip"));
-    PackageContents contents = OfficialPackage.read(zip, paths, "jasperserver-pro", files);
+    PackageContents contents = OfficialPackage.read(zip, paths, "jasperserver-pro");
     if (withBaseline) {
       store.addHotfix(zip, contents, "jasperserver-pro");
     }

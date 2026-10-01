@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.jaspersoft.jrshotfix.engine.CancellationToken;
-import com.jaspersoft.jrshotfix.platform.DefaultFileOps;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -70,8 +69,7 @@ class PackageStagerTest {
     outer.put("jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar", bytes("patched foo"));
     outer.put("jasperserver-pro/WEB-INF/lib/new-1.0.jar", bytes("brand new"));
     Path zip = Packages.zip(tmp.resolve("tree.zip"), outer);
-    PackageContents contents =
-        OfficialPackage.read(zip, paths, "jasperserver-pro", new DefaultFileOps());
+    PackageContents contents = OfficialPackage.read(zip, paths, "jasperserver-pro");
     Path staging = tmp.resolve("staging");
 
     PackageStager.stage(
@@ -97,8 +95,7 @@ class PackageStagerTest {
         "hotfix\\jasperserver-pro.zip",
         Packages.zipBytes(Map.of(Packages.LIB + "foo-1.2.3.jar", "patched foo"), null));
     Path zip = Packages.zip(tmp.resolve("windows.zip"), outer);
-    PackageContents contents =
-        OfficialPackage.read(zip, paths, "jasperserver-pro", new DefaultFileOps());
+    PackageContents contents = OfficialPackage.read(zip, paths, "jasperserver-pro");
     Path staging = tmp.resolve("staging");
 
     PackageStager.stage(

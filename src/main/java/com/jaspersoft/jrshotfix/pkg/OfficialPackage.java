@@ -5,7 +5,6 @@ import com.jaspersoft.jrshotfix.pkg.PackageLayout.Shape;
 import com.jaspersoft.jrshotfix.pkg.PackageReadme.Header;
 import com.jaspersoft.jrshotfix.pkg.PackageReadme.Notes;
 import com.jaspersoft.jrshotfix.pkg.PackageReadme.Readme;
-import com.jaspersoft.jrshotfix.platform.FileOps;
 import com.jaspersoft.jrshotfix.platform.Lists;
 import com.jaspersoft.jrshotfix.platform.Sums;
 import com.jaspersoft.jrshotfix.platform.Zips;
@@ -91,20 +90,20 @@ public final class OfficialPackage {
    * {@code webappName} and installation entries onto the install directory. Streams the file once
    * and writes nothing.
    */
-  public static PackageContents read(
-      Path source, PackagePaths paths, String webappName, FileOps files) throws IOException {
-    return read(source, paths, webappName, files, SiteDecisions.NONE);
+  public static PackageContents read(Path source, PackagePaths paths, String webappName)
+      throws IOException {
+    return read(source, paths, webappName, SiteDecisions.NONE);
   }
 
   /**
-   * As {@link #read(Path, PackagePaths, String, FileOps)}, with what a prepared merge decided about
-   * the files under the webapp: a kept file gets no entry, a merged one lands as the merged file,
-   * and the reader's own rules for the installer-written files are not applied.
+   * As {@link #read(Path, PackagePaths, String)}, with what a prepared merge decided about the
+   * files under the webapp: a kept file gets no entry, a merged one lands as the merged file, and
+   * the reader's own rules for the installer-written files are not applied.
    */
   public static PackageContents read(
-      Path source, PackagePaths paths, String webappName, FileOps files, SiteDecisions decisions)
+      Path source, PackagePaths paths, String webappName, SiteDecisions decisions)
       throws IOException {
-    return read(source, paths, webappName, files, decisions, Superseded.REPORT_ONLY);
+    return read(source, paths, webappName, decisions, Superseded.REPORT_ONLY);
   }
 
   /**
@@ -124,14 +123,13 @@ public final class OfficialPackage {
   }
 
   /**
-   * As {@link #read(Path, PackagePaths, String, FileOps, SiteDecisions)}, with what to do about
-   * superseded libraries.
+   * As {@link #read(Path, PackagePaths, String, SiteDecisions)}, with what to do about superseded
+   * libraries.
    */
   public static PackageContents read(
       Path source,
       PackagePaths paths,
       String webappName,
-      FileOps files,
       SiteDecisions decisions,
       Superseded superseded)
       throws IOException {

@@ -28,7 +28,7 @@ class OfficialPackageTest {
     PackagePaths paths = Packages.install(tmp.resolve("jrs"));
     PackageContents c =
         OfficialPackage.read(
-            Packages.standard(tmp.resolve("dl/hotfix.zip")), paths, "jasperserver-pro", files);
+            Packages.standard(tmp.resolve("dl/hotfix.zip")), paths, "jasperserver-pro");
     assertThat(c.id()).isEqualTo("JRSHF-10.0.0-20260730-0457");
     assertThat(c.release()).isEqualTo("10.0.0");
     assertThat(c.edition()).isEqualTo("PRO");
@@ -72,7 +72,7 @@ class OfficialPackageTest {
     PackagePaths paths = Packages.install(tmp.resolve("jrs"));
     PackageContents c =
         OfficialPackage.read(
-            Packages.standard(tmp.resolve("dl/hotfix.zip")), paths, "jasperserver-pro", files);
+            Packages.standard(tmp.resolve("dl/hotfix.zip")), paths, "jasperserver-pro");
     assertThat(c.deletes())
         .extracting(PackageContents.Entry::path)
         .doesNotContain("webapps/jasperserver-pro/WEB-INF/lib/never-installed-1.0.jar");
@@ -109,17 +109,17 @@ class OfficialPackageTest {
         Packages.zip(
             tmp.resolve("dl/bare.zip"),
             Map.of("readme.txt", Packages.OUTER_README.getBytes(StandardCharsets.UTF_8)));
-    assertThatThrownBy(() -> OfficialPackage.read(notZip, paths, "jasperserver-pro", files))
+    assertThatThrownBy(() -> OfficialPackage.read(notZip, paths, "jasperserver-pro"))
         .isInstanceOf(HotfixException.class)
         .hasMessage(notZip + " is not a readable hotfix package")
         .extracting(e -> ((HotfixException) e).remediation())
         .isEqualTo("point jrs-hotfix at the hotfix ZIP as it was downloaded");
-    assertThatThrownBy(() -> OfficialPackage.read(noReadme, paths, "jasperserver-pro", files))
+    assertThatThrownBy(() -> OfficialPackage.read(noReadme, paths, "jasperserver-pro"))
         .hasMessage("no readme.txt in " + noReadme)
         .extracting(e -> ((HotfixException) e).remediation())
         .isEqualTo(
             "point jrs-hotfix at the hotfix ZIP as it was downloaded, not at an unpacked copy");
-    assertThatThrownBy(() -> OfficialPackage.read(noPayload, paths, "jasperserver-pro", files))
+    assertThatThrownBy(() -> OfficialPackage.read(noPayload, paths, "jasperserver-pro"))
         .hasMessage("no jasperserver or js-install archive in " + noPayload)
         .extracting(e -> ((HotfixException) e).remediation())
         .isEqualTo("point jrs-hotfix at the hotfix ZIP as it was downloaded");
@@ -138,8 +138,7 @@ class OfficialPackageTest {
   }
 
   private PackageContents readHere(Path zip) throws Exception {
-    return OfficialPackage.read(
-        zip, Packages.install(tmp.resolve("jrs")), "jasperserver-pro", files);
+    return OfficialPackage.read(zip, Packages.install(tmp.resolve("jrs")), "jasperserver-pro");
   }
 
   /** A package whose webapp archive holds {@code payload} and {@code innerReadme}. */
@@ -162,8 +161,7 @@ class OfficialPackageTest {
         OfficialPackage.read(
             packageWith("long.zip", Map.of(Packages.LIB + "foo-1.2.3.jar", "x"), readme.toString()),
             paths,
-            "jasperserver-pro",
-            files);
+            "jasperserver-pro");
     assertThat(c.noteLines()).contains("step 1", "step 60", "step 61", "step 70");
     assertThat(c.noteLines())
         .noneSatisfy(n -> assertThat(n).contains("see readme.txt for the rest"));
@@ -185,8 +183,7 @@ class OfficialPackageTest {
         OfficialPackage.read(
             packageWith("sql.zip", Map.of(Packages.LIB + "foo-1.2.3.jar", "x"), readme),
             paths,
-            "jasperserver-pro",
-            files);
+            "jasperserver-pro");
     assertThat(c.noteLines())
         .containsSubsequence(
             "Details for fix JS-72244:",
@@ -207,8 +204,7 @@ class OfficialPackageTest {
         OfficialPackage.read(
             packageWith("indent.zip", Map.of(Packages.LIB + "foo-1.2.3.jar", "x"), readme),
             paths,
-            "jasperserver-pro",
-            files);
+            "jasperserver-pro");
     assertThat(c.noteLines())
         .containsSubsequence(
             "Details for fix A:", "   UPDATE T", "      SET a = 1;", "", "Details for fix B:");
@@ -238,7 +234,7 @@ class OfficialPackageTest {
             notes.replace("Details for fix A:\n", "Details for fix A:\n\n")));
     PackageContents c =
         OfficialPackage.read(
-            Packages.zip(tmp.resolve("dl/twice.zip"), outer), paths, "jasperserver-pro", files);
+            Packages.zip(tmp.resolve("dl/twice.zip"), outer), paths, "jasperserver-pro");
     assertThat(c.noteLines()).filteredOn("Details for fix A:"::equals).hasSize(1);
     assertThat(c.noteLines()).filteredOn("UPDATE T"::equals).hasSize(2);
     assertThat(c.noteLines()).filteredOn(n -> n.contains("Additional Notes")).hasSize(1);
@@ -271,7 +267,7 @@ class OfficialPackageTest {
     outer.put("js-install.zip", Packages.zipBytes(templates, null));
     PackageContents c =
         OfficialPackage.read(
-            Packages.zip(tmp.resolve("dl/settings.zip"), outer), paths, "jasperserver-pro", files);
+            Packages.zip(tmp.resolve("dl/settings.zip"), outer), paths, "jasperserver-pro");
     assertThat(c.noteLines())
         .filteredOn(n -> n.contains("are overwritten"))
         .singleElement()
@@ -294,7 +290,7 @@ class OfficialPackageTest {
     payload.put(Packages.LIB + "foo-1.2.3.jar", "x");
     payload.put("WEB-INF/js.quartz.properties", theirs);
     return OfficialPackage.read(
-        packageWith("quartz.zip", payload, null), paths, "jasperserver-pro", files);
+        packageWith("quartz.zip", payload, null), paths, "jasperserver-pro");
   }
 
   private static String sha256(String text) throws Exception {
@@ -353,8 +349,7 @@ class OfficialPackageTest {
     Map<String, String> payload = new LinkedHashMap<>();
     payload.put("WEB-INF/js.quartz.properties", "a=1\n");
     PackageContents c =
-        OfficialPackage.read(
-            packageWith("fresh.zip", payload, null), paths, "jasperserver-pro", files);
+        OfficialPackage.read(packageWith("fresh.zip", payload, null), paths, "jasperserver-pro");
     assertThat(c.adds()).singleElement().satisfies(e -> assertThat(e.packageSha256()).isEmpty());
   }
 
@@ -371,8 +366,7 @@ class OfficialPackageTest {
     return OfficialPackage.read(
         packageWith("context.zip", payload, "Deleted files:\nMETA-INF/context.xml\n"),
         paths,
-        "jasperserver-pro",
-        files);
+        "jasperserver-pro");
   }
 
   @Test
@@ -413,8 +407,7 @@ class OfficialPackageTest {
         OfficialPackage.read(
             packageWith("fresh-context.zip", Map.of("META-INF/context.xml", "<Context/>"), null),
             paths,
-            "jasperserver-pro",
-            files);
+            "jasperserver-pro");
     assertThat(c.adds()).extracting(PackageContents.Entry::path).containsExactly(CONTEXT);
     assertThat(c.kept()).isEmpty();
   }
@@ -431,8 +424,7 @@ class OfficialPackageTest {
         OfficialPackage.read(
             packageWith("widget.zip", Map.of(Packages.LIB + "widget-2.1.0.jar", "new"), null),
             paths,
-            "jasperserver-pro",
-            files);
+            "jasperserver-pro");
     assertThat(c.deletes()).isEmpty();
     assertThat(c.noteLines())
         .filteredOn(n -> n.contains("older version"))
@@ -452,7 +444,7 @@ class OfficialPackageTest {
     // the standard package replaces foo-1.2.3.jar and its readme's glob deletes foo-1.0.0.jar
     PackageContents c =
         OfficialPackage.read(
-            Packages.standard(tmp.resolve("dl/hotfix.zip")), paths, "jasperserver-pro", files);
+            Packages.standard(tmp.resolve("dl/hotfix.zip")), paths, "jasperserver-pro");
     assertThat(c.noteLines()).noneSatisfy(n -> assertThat(n).contains("older version"));
   }
 
@@ -466,8 +458,7 @@ class OfficialPackageTest {
                 Map.of(Packages.LIB + "foo-1.2.3.jar", "x"),
                 "Deleted files:\n../x\nIMPORTANT\n../*.jar\n"),
             paths,
-            "jasperserver-pro",
-            files);
+            "jasperserver-pro");
     assertThat(c.deletes()).isEmpty();
     assertThat(c.noteLines()).anySatisfy(n -> assertThat(n).contains("../x").contains("skipped"));
     assertThat(c.noteLines())
@@ -480,7 +471,7 @@ class OfficialPackageTest {
     PackagePaths paths = Packages.install(tmp.resolve("jrs"));
     Path zip =
         packageWith("ctrl.zip", Map.of(Packages.LIB + "foo\n-1.2.3.jar", "x"), "Added files:\n");
-    assertThatThrownBy(() -> OfficialPackage.read(zip, paths, "jasperserver-pro", files))
+    assertThatThrownBy(() -> OfficialPackage.read(zip, paths, "jasperserver-pro"))
         .isInstanceOfSatisfying(
             HotfixException.class, e -> assertThat(e.kind()).isEqualTo(HotfixException.UNSUPPORTED))
         .hasMessageContaining("unusable path");
@@ -503,8 +494,7 @@ class OfficialPackageTest {
             Map.of(Packages.LIB + "foo-1.2.3.jar", "new foo"),
             "Deleted files:\nWEB-INF/lib/FOO-1.2.3.jar\n"),
         paths,
-        "jasperserver-pro",
-        files);
+        "jasperserver-pro");
   }
 
   @Test

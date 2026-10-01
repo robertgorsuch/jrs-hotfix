@@ -55,13 +55,6 @@ public final class PropertiesMerge {
     MARKERS
   }
 
-  /** The markers of {@link Conflict}, under the names the merge tests already use. */
-  public static final String MARK_MINE = Conflict.MARK_MINE;
-
-  public static final String MARK_BASE = Conflict.MARK_BASE;
-  public static final String MARK_SEPARATOR = Conflict.MARK_SEPARATOR;
-  public static final String MARK_THEIRS = Conflict.MARK_THEIRS;
-
   /**
    * A three-way merge and what was done, by key name only (a value may be a secret): {@code kept}
    * are the keys where the site's value stands against another of the vendor's; {@code carried} the

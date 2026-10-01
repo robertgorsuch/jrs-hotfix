@@ -9,6 +9,7 @@ import com.jaspersoft.jrshotfix.home.SettingsStore;
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
 import com.jaspersoft.jrshotfix.hotfix.HotfixRuntime;
+import com.jaspersoft.jrshotfix.platform.DefaultHome;
 import com.jaspersoft.jrshotfix.platform.NativeTempDir;
 import com.jaspersoft.jrshotfix.platform.OperatorPrompt;
 import com.jaspersoft.jrshotfix.platform.Platform;
@@ -173,7 +174,7 @@ final class Bootstrap {
    * JRS_HOTFIX_HOME} named one, else {@code installDir/jrs-hotfix}.
    */
   Home homeFor(Path installDir) {
-    return explicitHome ? home : new Home(installDir.resolve("jrs-hotfix"));
+    return explicitHome ? home : new Home(installDir.resolve(DefaultHome.DIR));
   }
 
   /** Makes {@code h} the home a later command finds without {@code --home}; never fails. */
@@ -214,7 +215,7 @@ final class Bootstrap {
       throw new HotfixException(
           HotfixException.PRECHECK, file + " does not exist", "point --war at the WAR file");
     }
-    Home warHome = explicitHome ? home : new Home(file.getParent().resolve("jrs-hotfix"));
+    Home warHome = explicitHome ? home : new Home(file.getParent().resolve(DefaultHome.DIR));
     Settings s = warSettings(warHome, file);
     Bootstrap turned =
         new Bootstrap(

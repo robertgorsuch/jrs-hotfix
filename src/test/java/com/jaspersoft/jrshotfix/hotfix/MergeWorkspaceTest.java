@@ -10,7 +10,7 @@ import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
 import com.jaspersoft.jrshotfix.merge.MergeWorkspace.Choice;
 import com.jaspersoft.jrshotfix.merge.MergeWorkspace.OnConflict;
 import com.jaspersoft.jrshotfix.pkg.Packages;
-import com.jaspersoft.jrshotfix.text.PropertiesMerge;
+import com.jaspersoft.jrshotfix.text.Conflict;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -107,13 +107,13 @@ class MergeWorkspaceTest {
     assertThat(security.note()).contains("changed by both, to resolve: max.upload");
     assertThat(Files.readAllLines(s.side(doc, Wars.SECURITY, MergeWorkspace.MERGED)))
         .containsSubsequence(
-            PropertiesMerge.MARK_MINE,
+            Conflict.MARK_MINE,
             "max.upload=50",
-            PropertiesMerge.MARK_BASE,
+            Conflict.MARK_BASE,
             "max.upload=10",
-            PropertiesMerge.MARK_SEPARATOR,
+            Conflict.MARK_SEPARATOR,
             "max.upload=20",
-            PropertiesMerge.MARK_THEIRS);
+            Conflict.MARK_THEIRS);
     MergeDoc.Item web = s.item(doc, Wars.WEB_XML);
     assertThat(web.state()).isEqualTo(State.CONFLICT);
     assertThat(web.note()).contains("1 place(s) changed by both");
