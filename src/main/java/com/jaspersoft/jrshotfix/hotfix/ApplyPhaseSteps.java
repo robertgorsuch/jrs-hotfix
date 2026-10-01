@@ -2,8 +2,8 @@ package com.jaspersoft.jrshotfix.hotfix;
 
 import com.jaspersoft.jrshotfix.engine.CheckResult;
 import com.jaspersoft.jrshotfix.engine.Context;
-import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.engine.StepResult;
+import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
 import com.jaspersoft.jrshotfix.pkg.Action;
 import com.jaspersoft.jrshotfix.pkg.FileTarget;
@@ -25,30 +25,91 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * The apply phase of the apply plan: staging straight out of the package, and the swap itself.
- * Invariants: every step re-checks the state on disk before it acts, so re-execution after a crash
- * converges; staging runs before the service stop, so the outage is only the swap; the swap
- * restores from the run's snapshot when compensated.
+ * The backup and apply phases of the apply plan: the snapshot every later step restores from,
+ * staging straight out of the package, and the swap itself. Invariants: every step re-checks the
+ * state on disk before it acts, so re-execution after a crash converges; the snapshot is verified
+ * as it is created, and an existing snapshot for the same run and step is reused rather than
+ * rewritten, and the ledger entry's {@code snapshotRef} is what records it; staging runs before the
+ * service stop, so the outage is only the swap; the swap restores from the run's snapshot when
+ * compensated.
  */
 final class ApplyPhaseSteps {
 
   private ApplyPhaseSteps() {}
 
+  /** Step 2: snapshot every file that will be replaced or deleted. */
+  static final class TakeSnapshot extends HotfixStep<ApplyInput> {
+    TakeSnapshot(HotfixRuntime rt, ApplyInput in) {
+      super(rt, in);
+    }
+
+    @Override
+    public String id() {
+      return ApplySteps.SNAPSHOT;
+    }
+
+    @Override
+    public String title() {
+      return "snapshot the files this hotfix replaces or deletes";
+    }
+
+    @Override
+    public String phase() {
+      return ApplySteps.BACKUP;
+    }
+
+    @Override
+    public String detail() {
+      return "up to "
+          + in.touched().size()
+          + " file(s) -> "
+          + ApplySteps.snapshotDir(rt.home(), "{runId}");
+    }
+
+    /** The runner does not compensate it: the snapshot stays, and a re-run reuses it. */
+    @Override
+    public boolean mutating() {
+      return false;
+    }
+
+    @Override
+    public CheckResult precheck(Context ctx) {
+      return CheckResult.pass();
+    }
+
+    /**
+     * Snapshots every path the plan touches that exists right now, not only those the plan expected
+     * to find: a target the plan saw as absent may exist by now, and without this it would be
+     * overwritten with nothing kept to put back.
+     */
+    @Override
+    public StepResult execute(Context ctx, EventSink out) {
+      List<Path> paths = in.touched().stream().filter(Files::isRegularFile).distinct().toList();
+      try {
+        Snapshot snapshot =
+            rt.snapshots().create(ctx.runId(), ApplySteps.SNAPSHOT, paths, in.paths().commonBase());
+        log(ctx, out, Event.Log.Level.INFO, paths.size() + " file(s) saved to " + snapshot.dir());
+        return StepResult.ok();
+      } catch (IOException | RuntimeException e) {
+        return Failures.recoverable(
+            "cannot snapshot: " + Failures.describe(e),
+            "check free space and permissions under " + rt.home().snapshots());
+      }
+    }
+
+    @Override
+    public StepResult compensate(Context ctx, EventSink out) {
+      return StepResult.ok();
+    }
+  }
+
   /**
    * Step 3: extract the payload into the run's staging directory, put the merged file in the place
    * of a settings file this server has values of its own in, and verify every hash. The package's
-   * files are also written as the hotfix's baseline here, before the outage.
+   * files are also written as the hotfix's baseline here, before the outage. Staging writes a tree
+   * under the run directory, so it is a mutation the runner compensates.
    */
-  static final class StageFiles extends ApplySteps.ReadOnly {
-    /**
-     * Staging writes a tree under the run directory, so it is a mutation the runner must
-     * compensate; as a read-only step its clean-up would never be called.
-     */
-    @Override
-    public boolean mutating() {
-      return true;
-    }
-
+  static final class StageFiles extends HotfixStep<ApplyInput> {
     StageFiles(HotfixRuntime rt, ApplyInput in) {
       super(rt, in);
     }
@@ -89,9 +150,7 @@ final class ApplyPhaseSteps {
       try {
         for (FileTarget t : in.targets()) {
           if (t.action() != Action.DELETE
-              && !FileTarget.hashOf(files, in.staged(ctx, t))
-                  .map(h -> h.equals(t.after().orElse("")))
-                  .orElse(false)) {
+              && !hashesTo(files, in.staged(ctx, t), t.after().orElse(""))) {
             wanted.put(t.packagePath(), t);
           }
         }
@@ -117,14 +176,7 @@ final class ApplyPhaseSteps {
           }
           Optional<String> actual = FileTarget.hashOf(files, in.staged(ctx, t));
           if (!actual.equals(t.after())) {
-            return Failures.recoverable(
-                "staged "
-                    + t.packagePath()
-                    + " hashes to "
-                    + actual.orElse("nothing (not in the package)")
-                    + ", expected "
-                    + t.after().orElse("?"),
-                "the package changed since it was planned; plan again");
+            return stagedMismatch(t, actual, t.after());
           }
         }
       } catch (IOException | UncheckedIOException e) {
@@ -147,15 +199,7 @@ final class ApplyPhaseSteps {
       Path staged = in.staged(ctx, t);
       Optional<String> payload = FileTarget.hashOf(rt.files(), staged);
       if (!payload.equals(t.entry().packageSha256())) {
-        return Optional.of(
-            Failures.recoverable(
-                "staged "
-                    + t.packagePath()
-                    + " hashes to "
-                    + payload.orElse("nothing (not in the package)")
-                    + ", expected "
-                    + t.entry().packageSha256().orElse("?"),
-                "the package changed since it was planned; plan again"));
+        return Optional.of(stagedMismatch(t, payload, t.entry().packageSha256()));
       }
       if (t.entry().mergedFile().isPresent()) {
         // a prepared merge holds the file to install; the hash check after this says it is the
@@ -203,13 +247,9 @@ final class ApplyPhaseSteps {
   }
 
   /** Step 5: rename staged files into place, delete listed files; compensation restores. */
-  static final class AtomicSwap implements Step {
-    private final HotfixRuntime rt;
-    private final ApplyInput in;
-
+  static final class AtomicSwap extends HotfixStep<ApplyInput> {
     AtomicSwap(HotfixRuntime rt, ApplyInput in) {
-      this.rt = rt;
-      this.in = in;
+      super(rt, in);
     }
 
     @Override
@@ -246,8 +286,7 @@ final class ApplyPhaseSteps {
         if (t.action() == Action.DELETE || Files.isRegularFile(in.staged(ctx, t))) {
           continue;
         }
-        String expected = t.after().orElse("");
-        if (!FileTarget.hashOf(files, t.target()).map(expected::equals).orElse(false)) {
+        if (!hashesTo(files, t.target(), t.after().orElse(""))) {
           unstaged.add(t.packagePath());
         }
       }
@@ -257,22 +296,17 @@ final class ApplyPhaseSteps {
             "stage-files did not run for this run or its staging tree was removed by hand; roll"
                 + " the run back and apply the package again");
       }
-      List<String> locked = new ArrayList<>();
-      for (Path p : in.touched()) {
-        if (Files.isRegularFile(p) && files.isLocked(p)) {
-          locked.add(p + files.lockHolder(p).map(h -> " (held by " + h + ")").orElse(""));
-        }
-      }
+      List<String> locked =
+          ApplySteps.locked(
+              files,
+              in.touched(),
+              (p, holder) -> p + holder.map(h -> " (held by " + h + ")").orElse(""));
       if (!locked.isEmpty()) {
         return CheckResult.fail(
             "still locked after the service stop: " + String.join(", ", locked),
             "end the process holding the file, then run again");
       }
-      // no holder found is not the same as no holder when the scan is blind
-      return files
-          .lockInspectionLimit()
-          .map(limit -> CheckResult.warn("no locked file found, but " + limit))
-          .orElseGet(CheckResult::pass);
+      return ApplySteps.noLockFound(files);
     }
 
     /**
@@ -320,7 +354,7 @@ final class ApplyPhaseSteps {
           switch (t.action()) {
             case ADD, REPLACE -> {
               String expected = t.after().orElse("");
-              if (!FileTarget.hashOf(files, t.target()).map(expected::equals).orElse(false)) {
+              if (!hashesTo(files, t.target(), expected)) {
                 Path staged = in.staged(ctx, t);
                 if (!Files.isRegularFile(staged)) {
                   return Failures.recoverable(
@@ -391,7 +425,25 @@ final class ApplyPhaseSteps {
     }
 
     private List<Path> backups(Context ctx) {
-      return List.of(rt.home().snapshots().resolve(ctx.runId()).resolve(ApplySteps.SNAPSHOT));
+      return List.of(ApplySteps.snapshotDir(rt.home(), ctx.runId()));
     }
+  }
+
+  /** Whether {@code path} is a file whose hash is {@code expected}. */
+  private static boolean hashesTo(FileOps files, Path path, String expected) {
+    return FileTarget.hashOf(files, path).map(expected::equals).orElse(false);
+  }
+
+  /** The staged copy of {@code t} is not the payload that was planned. */
+  private static StepResult stagedMismatch(
+      FileTarget t, Optional<String> actual, Optional<String> expected) {
+    return Failures.recoverable(
+        "staged "
+            + t.packagePath()
+            + " hashes to "
+            + actual.orElse("nothing (not in the package)")
+            + ", expected "
+            + expected.orElse("?"),
+        "the package changed since it was planned; plan again");
   }
 }

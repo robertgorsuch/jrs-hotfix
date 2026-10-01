@@ -2,7 +2,6 @@ package com.jaspersoft.jrshotfix.hotfix;
 
 import com.jaspersoft.jrshotfix.engine.CheckResult;
 import com.jaspersoft.jrshotfix.engine.Context;
-import com.jaspersoft.jrshotfix.engine.Step;
 import com.jaspersoft.jrshotfix.engine.StepResult;
 import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
@@ -38,13 +37,9 @@ final class RecordSteps {
   private RecordSteps() {}
 
   /** Step 8: record the installation in the ledger and remove the emptied staging tree. */
-  static final class RecordInstalled implements Step {
-    private final HotfixRuntime rt;
-    private final ApplyInput in;
-
+  static final class RecordInstalled extends HotfixStep<ApplyInput> {
     RecordInstalled(HotfixRuntime rt, ApplyInput in) {
-      this.rt = rt;
-      this.in = in;
+      super(rt, in);
     }
 
     @Override
@@ -93,19 +88,16 @@ final class RecordSteps {
         // failure is said and not made the run's: undoing a good apply for it would be worse.
         rt.baselines().addHotfix(in.packageFile(), c, rt.settings().webappName());
       } catch (IOException | RuntimeException e) {
-        out.emit(
-            new Event.Log(
-                rt.clock().instant(),
-                ctx.runId(),
-                Optional.of(id()),
-                phase(),
-                Event.Log.Level.WARN,
-                "the baseline of "
-                    + id
-                    + " could not be written ("
-                    + Failures.describe(e)
-                    + "); add it with `jrs-hotfix baseline add <package.zip>` before the next"
-                    + " hotfix"));
+        log(
+            ctx,
+            out,
+            Event.Log.Level.WARN,
+            "the baseline of "
+                + id
+                + " could not be written ("
+                + Failures.describe(e)
+                + "); add it with `jrs-hotfix baseline add <package.zip>` before the next"
+                + " hotfix");
       }
       Optional<LedgerEntry> existing = ledger.find(id);
       if (existing.isPresent()) {
@@ -152,14 +144,7 @@ final class RecordSteps {
       try {
         Trees.deleteRecursively(in.stagingDir(ctx));
       } catch (IOException e) {
-        out.emit(
-            new Event.Log(
-                rt.clock().instant(),
-                ctx.runId(),
-                Optional.of(id()),
-                phase(),
-                Event.Log.Level.WARN,
-                "staging left behind: " + e.getMessage()));
+        log(ctx, out, Event.Log.Level.WARN, "staging left behind: " + e.getMessage());
       }
     }
 
@@ -189,17 +174,6 @@ final class RecordSteps {
             id + " (compensation of run " + ctx.runId() + ")");
       }
       return StepResult.ok();
-    }
-
-    private void audit(Context ctx, EventSink out, String kind, String text) {
-      out.emit(
-          new Event.Log(
-              rt.clock().instant(),
-              ctx.runId(),
-              Optional.of(id()),
-              phase(),
-              Event.Log.Level.INFO,
-              "audit " + kind + ": " + text));
     }
 
     /**

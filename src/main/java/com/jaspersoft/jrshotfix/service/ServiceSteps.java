@@ -24,6 +24,7 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 /**
  * The service stop, start and wait steps of every plan that touches the service: hotfix apply and
@@ -62,7 +63,21 @@ public final class ServiceSteps {
   private ServiceSteps() {}
 
   public static Step stop(ServiceRuntime rt, String phase, String id) {
-    return new StopService(rt, phase, id);
+    return stop(rt, phase, id, CheckResult::pass, CheckResult::pass);
+  }
+
+  /**
+   * A stop step whose precheck also runs {@code before} ahead of the controller check and {@code
+   * after} once that check has passed; the first of the three to fail is the precheck's result, and
+   * with none failing it is {@code after}'s.
+   */
+  public static Step stop(
+      ServiceRuntime rt,
+      String phase,
+      String id,
+      Supplier<CheckResult> before,
+      Supplier<CheckResult> after) {
+    return new StopService(rt, phase, id, before, after);
   }
 
   public static Step start(ServiceRuntime rt, String phase, String id) {
@@ -203,15 +218,19 @@ public final class ServiceSteps {
   }
 
   /** Stops the service; compensation starts it only if this run tried to stop it. */
-  private static final class StopService implements Step {
-    private final ServiceRuntime rt;
-    private final String phase;
-    private final String id;
-
-    StopService(ServiceRuntime rt, String phase, String id) {
-      this.rt = Objects.requireNonNull(rt, "rt");
-      this.phase = Objects.requireNonNull(phase, "phase");
-      this.id = Objects.requireNonNull(id, "id");
+  private record StopService(
+      ServiceRuntime rt,
+      String phase,
+      String id,
+      Supplier<CheckResult> before,
+      Supplier<CheckResult> after)
+      implements Step {
+    StopService {
+      Objects.requireNonNull(rt, "rt");
+      Objects.requireNonNull(phase, "phase");
+      Objects.requireNonNull(id, "id");
+      Objects.requireNonNull(before, "before");
+      Objects.requireNonNull(after, "after");
     }
 
     /**
@@ -223,18 +242,8 @@ public final class ServiceSteps {
     }
 
     @Override
-    public String id() {
-      return id;
-    }
-
-    @Override
     public String title() {
       return "stop the JasperReports Server service";
-    }
-
-    @Override
-    public String phase() {
-      return phase;
     }
 
     @Override
@@ -244,7 +253,12 @@ public final class ServiceSteps {
 
     @Override
     public CheckResult precheck(Context ctx) {
-      return controllerCheck(rt);
+      CheckResult first = before.get();
+      if (first instanceof CheckResult.Fail) {
+        return first;
+      }
+      CheckResult controller = controllerCheck(rt);
+      return controller instanceof CheckResult.Fail ? controller : after.get();
     }
 
     @Override
@@ -341,30 +355,16 @@ public final class ServiceSteps {
   }
 
   /** Starts the service; compensation stops it again. */
-  private static final class StartService implements Step {
-    private final ServiceRuntime rt;
-    private final String phase;
-    private final String id;
-
-    StartService(ServiceRuntime rt, String phase, String id) {
-      this.rt = Objects.requireNonNull(rt, "rt");
-      this.phase = Objects.requireNonNull(phase, "phase");
-      this.id = Objects.requireNonNull(id, "id");
-    }
-
-    @Override
-    public String id() {
-      return id;
+  private record StartService(ServiceRuntime rt, String phase, String id) implements Step {
+    StartService {
+      Objects.requireNonNull(rt, "rt");
+      Objects.requireNonNull(phase, "phase");
+      Objects.requireNonNull(id, "id");
     }
 
     @Override
     public String title() {
       return "start the JasperReports Server service";
-    }
-
-    @Override
-    public String phase() {
-      return phase;
     }
 
     @Override
@@ -404,30 +404,16 @@ public final class ServiceSteps {
    * cookie filter shares a date format between threads). A request the server answers with an error
    * is asked again after the backoff. Cancellation is noticed while a request waits.
    */
-  private static final class WaitForServer implements Step {
-    private final ServiceRuntime rt;
-    private final String phase;
-    private final String id;
-
-    WaitForServer(ServiceRuntime rt, String phase, String id) {
-      this.rt = Objects.requireNonNull(rt, "rt");
-      this.phase = Objects.requireNonNull(phase, "phase");
-      this.id = Objects.requireNonNull(id, "id");
-    }
-
-    @Override
-    public String id() {
-      return id;
+  private record WaitForServer(ServiceRuntime rt, String phase, String id) implements Step {
+    WaitForServer {
+      Objects.requireNonNull(rt, "rt");
+      Objects.requireNonNull(phase, "phase");
+      Objects.requireNonNull(id, "id");
     }
 
     @Override
     public String title() {
       return "wait for the server to answer";
-    }
-
-    @Override
-    public String phase() {
-      return phase;
     }
 
     @Override
