@@ -61,7 +61,7 @@ public final class PackageStager {
     if (inner.isEmpty() && direct.isEmpty()) {
       return;
     }
-    Optional<OfficialPackage.Shape> shape = OfficialPackage.shape(zip);
+    Optional<PackageLayout.Shape> shape = PackageLayout.shape(zip);
     if (shape.isEmpty()) {
       throw new IOException(zip + " is no longer a readable hotfix package");
     }
