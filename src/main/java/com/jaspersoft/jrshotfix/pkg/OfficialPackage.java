@@ -53,6 +53,34 @@ public final class OfficialPackage {
 
   private OfficialPackage() {}
 
+  private static final String AS_DOWNLOADED =
+      "point jrs-hotfix at the hotfix ZIP as it was downloaded";
+
+  /** The layout of {@code zip}, or the refusal of a file that is no readable archive. */
+  private static Shape readableShape(Path zip) {
+    return PackageLayout.shape(zip)
+        .orElseThrow(
+            () ->
+                new HotfixException(
+                    HotfixException.PRECHECK,
+                    zip + " is not a readable hotfix package",
+                    AS_DOWNLOADED));
+  }
+
+  /** The refusal of a package without its outer readme. */
+  private static HotfixException noReadme(Path zip) {
+    return new HotfixException(
+        HotfixException.PRECHECK,
+        "no readme.txt in " + zip,
+        AS_DOWNLOADED + ", not at an unpacked copy");
+  }
+
+  /** The refusal of a package without a payload. */
+  private static HotfixException noPayload(Path zip) {
+    return new HotfixException(
+        HotfixException.PRECHECK, "no jasperserver or js-install archive in " + zip, AS_DOWNLOADED);
+  }
+
   /** True when {@code zip} is an official package. */
   public static boolean looksOfficial(Path zip) {
     return PackageLayout.shape(zip).map(Shape::official).orElse(false);
@@ -141,25 +169,12 @@ public final class OfficialPackage {
       SiteDecisions decisions,
       Superseded policy)
       throws IOException {
-    Shape shape =
-        PackageLayout.shape(source)
-            .orElseThrow(
-                () ->
-                    new HotfixException(
-                        HotfixException.PRECHECK,
-                        source + " is not a readable hotfix package",
-                        "point jrs-hotfix at the hotfix ZIP as it was downloaded"));
+    Shape shape = readableShape(source);
     if (shape.readme().isEmpty()) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          "no readme.txt in " + source,
-          "point jrs-hotfix at the hotfix ZIP as it was downloaded, not at an unpacked copy");
+      throw noReadme(source);
     }
     if (!shape.payload()) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          "no jasperserver or js-install archive in " + source,
-          "point jrs-hotfix at the hotfix ZIP as it was downloaded");
+      throw noPayload(source);
     }
     String webappPrefix = PackagePaths.WEBAPPS_PREFIX + webappName + "/";
     Header header = null;
@@ -199,16 +214,10 @@ public final class OfficialPackage {
       in.transferTo(OutputStream.nullOutputStream());
     }
     if (header == null) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          "no readme.txt in " + source,
-          "point jrs-hotfix at the hotfix ZIP as it was downloaded, not at an unpacked copy");
+      throw noReadme(source);
     }
     if (entries.isEmpty() && kept.isEmpty()) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          "no jasperserver or js-install archive in " + source,
-          "point jrs-hotfix at the hotfix ZIP as it was downloaded");
+      throw noPayload(source);
     }
     if (treeReadme != null) {
       readmes.add(treeReadme);

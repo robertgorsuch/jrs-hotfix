@@ -101,6 +101,31 @@ class OfficialPackageTest {
   }
 
   @Test
+  void should_word_the_refusals_of_an_unusable_package_when_read() throws Exception {
+    PackagePaths paths = Packages.install(tmp.resolve("jrs"));
+    Path notZip = tmp.resolve("dl/missing.zip");
+    Path noReadme = Packages.zip(tmp.resolve("dl/other.zip"), Map.of("a.txt", new byte[] {1}));
+    Path noPayload =
+        Packages.zip(
+            tmp.resolve("dl/bare.zip"),
+            Map.of("readme.txt", Packages.OUTER_README.getBytes(StandardCharsets.UTF_8)));
+    assertThatThrownBy(() -> OfficialPackage.read(notZip, paths, "jasperserver-pro", files))
+        .isInstanceOf(HotfixException.class)
+        .hasMessage(notZip + " is not a readable hotfix package")
+        .extracting(e -> ((HotfixException) e).remediation())
+        .isEqualTo("point jrs-hotfix at the hotfix ZIP as it was downloaded");
+    assertThatThrownBy(() -> OfficialPackage.read(noReadme, paths, "jasperserver-pro", files))
+        .hasMessage("no readme.txt in " + noReadme)
+        .extracting(e -> ((HotfixException) e).remediation())
+        .isEqualTo(
+            "point jrs-hotfix at the hotfix ZIP as it was downloaded, not at an unpacked copy");
+    assertThatThrownBy(() -> OfficialPackage.read(noPayload, paths, "jasperserver-pro", files))
+        .hasMessage("no jasperserver or js-install archive in " + noPayload)
+        .extracting(e -> ((HotfixException) e).remediation())
+        .isEqualTo("point jrs-hotfix at the hotfix ZIP as it was downloaded");
+  }
+
+  @Test
   void should_refuse_a_readme_without_a_build_when_read() throws Exception {
     Map<String, byte[]> outer = new LinkedHashMap<>();
     outer.put("readme.txt", "Release version: 10.0.0\n".getBytes(StandardCharsets.UTF_8));
