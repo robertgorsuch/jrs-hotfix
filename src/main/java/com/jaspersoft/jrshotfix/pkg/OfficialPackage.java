@@ -2,7 +2,9 @@ package com.jaspersoft.jrshotfix.pkg;
 
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.platform.FileOps;
+import com.jaspersoft.jrshotfix.platform.Lists;
 import com.jaspersoft.jrshotfix.platform.Sums;
+import com.jaspersoft.jrshotfix.platform.Zips;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -14,7 +16,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -157,14 +158,12 @@ public final class OfficialPackage {
     try (InputStream in = Files.newInputStream(zip);
         ZipInputStream z = new ZipInputStream(in)) {
       ZipEntry e;
-      while ((e = z.getNextEntry()) != null) {
-        String name = e.getName().replace('\\', '/');
+      while ((e = Zips.nextFile(z)) != null) {
+        String name = Zips.name(e);
         if (name.equals(BUNDLE_MANIFEST)) {
           return Optional.empty();
         }
-        if (!e.isDirectory()) {
-          names.add(name);
-        }
+        names.add(name);
       }
     } catch (IOException e) {
       return Optional.empty();
@@ -301,15 +300,12 @@ public final class OfficialPackage {
     Notes notes = new Notes();
     Payload payload =
         new Payload(paths, entries, kept, vendorFiles, added, notes, decisions, webappPrefix);
-    MessageDigest whole = sha256();
+    MessageDigest whole = Sums.newDigest();
     try (InputStream in = new DigestInputStream(Files.newInputStream(source), whole);
         ZipInputStream outer = new ZipInputStream(in)) {
       ZipEntry entry;
-      while ((entry = outer.getNextEntry()) != null) {
-        if (entry.isDirectory()) {
-          continue;
-        }
-        String name = entry.getName().replace('\\', '/');
+      while ((entry = Zips.nextFile(outer)) != null) {
+        String name = Zips.name(entry);
         switch (shape.kind(name)) {
           case README -> header = Header.parse(readLines(outer));
           case WEBAPP_ZIP -> readmes.add(inner(outer, name, webappPrefix, payload));
@@ -449,11 +445,8 @@ public final class OfficialPackage {
     Readme readme = Readme.empty();
     ZipInputStream zip = new ZipInputStream(source);
     ZipEntry entry;
-    while ((entry = zip.getNextEntry()) != null) {
-      if (entry.isDirectory()) {
-        continue;
-      }
-      String name = entry.getName().replace('\\', '/');
+    while ((entry = Zips.nextFile(zip)) != null) {
+      String name = Zips.name(entry);
       if (name.equalsIgnoreCase(README)) {
         readme = Readme.parse(prefix, readLines(zip));
         continue;
@@ -595,9 +588,7 @@ public final class OfficialPackage {
       if (keys.isEmpty()) {
         return "none";
       }
-      List<String> named = keys.size() > MAX_NAMED_KEYS ? keys.subList(0, MAX_NAMED_KEYS) : keys;
-      return String.join(", ", named)
-          + (keys.size() > named.size() ? " and " + (keys.size() - named.size()) + " more" : "");
+      return Lists.firstAndMore(keys, MAX_NAMED_KEYS);
     }
   }
 
@@ -839,7 +830,7 @@ public final class OfficialPackage {
     try (InputStream in = Files.newInputStream(jar);
         ZipInputStream zip = new ZipInputStream(in)) {
       ZipEntry entry;
-      while ((entry = zip.getNextEntry()) != null) {
+      while ((entry = Zips.nextFile(zip)) != null) {
         if (entry.getName().equals("META-INF/web-fragment.xml")) {
           String xml = new String(zip.readAllBytes(), StandardCharsets.UTF_8);
           Matcher m = FRAGMENT_NAME.matcher(xml);
@@ -919,14 +910,6 @@ public final class OfficialPackage {
       lines.add(line.stripTrailing());
     }
     return lines;
-  }
-
-  private static MessageDigest sha256() {
-    try {
-      return MessageDigest.getInstance("SHA-256");
-    } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 is mandatory in every JRE", e);
-    }
   }
 
   /** What the outer readme says about the package as a whole. */

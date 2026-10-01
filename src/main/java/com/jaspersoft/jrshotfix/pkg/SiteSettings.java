@@ -1,15 +1,13 @@
 package com.jaspersoft.jrshotfix.pkg;
 
+import com.jaspersoft.jrshotfix.platform.Sums;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -125,7 +123,7 @@ public final class SiteSettings {
     return Optional.of(
         new Merged(
             text,
-            sha256(text.getBytes(StandardCharsets.ISO_8859_1)),
+            Sums.of(text.getBytes(StandardCharsets.ISO_8859_1)).sha256(),
             result.kept(),
             result.carried()));
   }
@@ -137,13 +135,5 @@ public final class SiteSettings {
       lines.remove(lines.size() - 1);
     }
     return lines;
-  }
-
-  static String sha256(byte[] bytes) {
-    try {
-      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-    } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 is mandatory in every JRE", e);
-    }
   }
 }

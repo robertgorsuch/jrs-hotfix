@@ -45,7 +45,7 @@ final class ForgetCommand extends AppCommand {
                   + " out of the ledger. Do it only when the webapp no longer holds the hotfix: a"
                   + " redeploy from a WAR, or a removal by hand. The snapshot stays until `runs"
                   + " prune`.");
-      if (!Confirm.ask(out(), "Forget " + id + "? [y/N] ")) {
+      if (!Prompter.yes(out(), "Forget " + id + "? [y/N] ", false)) {
         return ExitCodes.fail(
             err(),
             ExitCodes.PRECHECK_FAILED,

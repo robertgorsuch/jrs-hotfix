@@ -16,7 +16,6 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Clock;
 import java.time.Instant;
@@ -166,13 +165,7 @@ public final class FileJournal implements Journal {
   private void write(String runId, ObjectNode n) {
     Path file = home.runDir(runId).resolve(RUN);
     try {
-      Files.createDirectories(file.getParent());
-      Path tmp = file.resolveSibling(RUN + ".tmp");
-      Files.writeString(tmp, Json.writePretty(n), StandardCharsets.UTF_8);
-      Durability.sync(tmp);
-      Durability.move(
-          tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-      Durability.syncDirectory(file.toAbsolutePath().getParent());
+      Durability.writeAtomically(file, Json.writePretty(n));
     } catch (IOException e) {
       throw new JournalException("cannot write " + file + ": " + e.getMessage(), e);
     }

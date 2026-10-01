@@ -130,11 +130,7 @@ final class PlanExecutor {
     try (RunLock unused = new RunLock(boot.home(), what, boot.clock().instant())) {
       return body.getAsInt();
     } catch (LockHeldException held) {
-      return ExitCodes.fail(
-          err,
-          ExitCodes.LOCK_HELD,
-          "the run lock is held by run " + held.holderRunId() + " (pid " + held.holderPid() + ")",
-          Optional.of("wait for that jrs-hotfix process to finish, then run this again"));
+      return lockHeld(held.holderRunId(), held.holderPid());
     }
   }
 
@@ -258,20 +254,20 @@ final class PlanExecutor {
     return changed;
   }
 
+  /** Reports the run lock held by another process: exit 9. */
+  private int lockHeld(String runId, String pid) {
+    return ExitCodes.fail(
+        err,
+        ExitCodes.LOCK_HELD,
+        "the run lock is held by run " + runId + " (pid " + pid + ")",
+        Optional.of("wait for that jrs-hotfix process to finish, then run this again"));
+  }
+
   /** Exit 9 when the run lock is held; with {@code pendingToo}, exit 8 for a pending run. */
   private Optional<Integer> blocked(boolean pendingToo) {
     Optional<RunLock.Holder> holder = runs.lockHolder();
     if (holder.isPresent()) {
-      return Optional.of(
-          ExitCodes.fail(
-              err,
-              ExitCodes.LOCK_HELD,
-              "the run lock is held by run "
-                  + holder.get().runId()
-                  + " (pid "
-                  + holder.get().pid()
-                  + ")",
-              Optional.of("wait for that jrs-hotfix process to finish, then run this again")));
+      return Optional.of(lockHeld(holder.get().runId(), holder.get().pid()));
     }
     if (!pendingToo) {
       return Optional.empty();
@@ -316,7 +312,7 @@ final class PlanExecutor {
               Optional.of("pass --yes to run without asking, or --plan to only show the plan")));
     }
     out.println();
-    if (!Confirm.ask(out, question)) {
+    if (!Prompter.yes(out, question, false)) {
       out.println("not run; nothing has changed");
       out.flush();
       return Optional.of(ExitCodes.SUCCESS);
@@ -377,16 +373,7 @@ final class PlanExecutor {
     RuntimeException thrown = failure.get();
     if (thrown != null) {
       if (thrown instanceof LockHeldException held) {
-        int code =
-            ExitCodes.fail(
-                err,
-                ExitCodes.LOCK_HELD,
-                "the run lock is held by run "
-                    + held.holderRunId()
-                    + " (pid "
-                    + held.holderPid()
-                    + ")",
-                Optional.of("wait for it to finish, then run this again"));
+        int code = lockHeld(held.holderRunId(), held.holderPid());
         guard.rendered(code);
         return code;
       }

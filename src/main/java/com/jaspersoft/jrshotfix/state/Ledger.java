@@ -9,7 +9,6 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -100,13 +99,7 @@ public final class Ledger {
 
   private void write(List<LedgerEntry> all) {
     try {
-      Files.createDirectories(file.getParent());
-      Path tmp = file.resolveSibling("ledger.json.tmp");
-      Files.writeString(tmp, Json.writePretty(all), StandardCharsets.UTF_8);
-      Durability.sync(tmp);
-      Durability.move(
-          tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-      Durability.syncDirectory(file.toAbsolutePath().getParent());
+      Durability.writeAtomically(file, Json.writePretty(all));
     } catch (IOException e) {
       throw new UncheckedIOException("cannot write " + file, e);
     }

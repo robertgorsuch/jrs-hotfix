@@ -36,7 +36,6 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -210,14 +209,8 @@ final class RunService {
     }
     Path file = boot.home().notesFile(runId);
     try {
-      Files.createDirectories(file.getParent());
-      Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
-      String text = String.join(System.lineSeparator(), notes) + System.lineSeparator();
-      Files.writeString(tmp, text, StandardCharsets.UTF_8);
-      Durability.sync(tmp);
-      Durability.move(
-          tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-      Durability.syncDirectory(file.toAbsolutePath().getParent());
+      Durability.writeAtomically(
+          file, String.join(System.lineSeparator(), notes) + System.lineSeparator());
     } catch (IOException e) {
       // before any step has run: a precheck-class refusal (exit 2), not an unexplained exit 4
       throw new HotfixException(

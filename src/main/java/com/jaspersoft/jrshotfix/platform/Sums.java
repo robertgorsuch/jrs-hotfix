@@ -106,7 +106,8 @@ public record Sums(String sha256, String textSha256, long size) {
     }
   }
 
-  private static MessageDigest newDigest() {
+  /** A new SHA-256 digest. */
+  public static MessageDigest newDigest() {
     try {
       return MessageDigest.getInstance("SHA-256");
     } catch (NoSuchAlgorithmException e) {

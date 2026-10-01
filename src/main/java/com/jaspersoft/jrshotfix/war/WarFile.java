@@ -7,6 +7,7 @@ import com.jaspersoft.jrshotfix.platform.Durability;
 import com.jaspersoft.jrshotfix.platform.FileOps;
 import com.jaspersoft.jrshotfix.platform.Sums;
 import com.jaspersoft.jrshotfix.platform.Trees;
+import com.jaspersoft.jrshotfix.platform.Zips;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -65,10 +66,7 @@ public final class WarFile {
     try (InputStream in = Files.newInputStream(war);
         ZipInputStream zip = new ZipInputStream(in)) {
       ZipEntry entry;
-      while ((entry = zip.getNextEntry()) != null) {
-        if (entry.isDirectory()) {
-          continue;
-        }
+      while ((entry = Zips.nextFile(zip)) != null) {
         String path = checked(war, entry.getName());
         Path target = root.resolve(path.replace('/', java.io.File.separatorChar)).normalize();
         if (!target.startsWith(root)) {
@@ -124,10 +122,7 @@ public final class WarFile {
         InputStream i = Files.newInputStream(in);
         ZipInputStream source = new ZipInputStream(i)) {
       ZipEntry entry;
-      while ((entry = source.getNextEntry()) != null) {
-        if (entry.isDirectory()) {
-          continue;
-        }
+      while ((entry = Zips.nextFile(source)) != null) {
         String path = checked(in, entry.getName());
         if (dropped.contains(path) || staged.containsKey(path)) {
           continue;
@@ -160,12 +155,9 @@ public final class WarFile {
     try (InputStream i = Files.newInputStream(war);
         ZipInputStream zip = new ZipInputStream(i)) {
       ZipEntry entry;
-      while ((entry = zip.getNextEntry()) != null) {
-        if (entry.isDirectory()) {
-          continue;
-        }
+      while ((entry = Zips.nextFile(zip)) != null) {
         count++;
-        String path = entry.getName().replace('\\', '/');
+        String path = Zips.name(entry);
         if (expected.hashes().containsKey(path) || expected.absent().contains(path)) {
           found.put(path, Sums.of(zip).sha256());
         }
@@ -197,10 +189,8 @@ public final class WarFile {
     try (InputStream i = Files.newInputStream(war);
         ZipInputStream zip = new ZipInputStream(i)) {
       ZipEntry entry;
-      while ((entry = zip.getNextEntry()) != null) {
-        if (!entry.isDirectory()) {
-          out.add(checked(war, entry.getName()));
-        }
+      while ((entry = Zips.nextFile(zip)) != null) {
+        out.add(checked(war, entry.getName()));
       }
     }
     return out;
