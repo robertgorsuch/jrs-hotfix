@@ -30,7 +30,7 @@ final class ForgetCommand extends AppCommand {
   }
 
   private int forget(Bootstrap boot) {
-    if (!global.yes()) {
+    if (!global().yes()) {
       if (!boot.interactive()) {
         return ExitCodes.fail(
             err(),

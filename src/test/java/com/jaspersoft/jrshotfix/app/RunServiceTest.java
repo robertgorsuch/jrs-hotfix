@@ -51,7 +51,7 @@ class RunServiceTest {
     hf.ledger.updateState("HF-GONE", HotfixState.ROLLED_BACK);
 
     Bootstrap boot = boot(hf, Clock.fixed(now, ZoneOffset.UTC));
-    RunService.PruneResult result = new RunService(boot).prune(Duration.ofDays(30));
+    RunService.PruneResult result = new RunService(boot).prune(Duration.ofDays(30), false);
 
     assertThat(result.runsRemoved()).containsExactlyInAnyOrder("r-old", "r-inst");
     assertThat(Files.exists(hf.home.runDir("r-old"))).isFalse();

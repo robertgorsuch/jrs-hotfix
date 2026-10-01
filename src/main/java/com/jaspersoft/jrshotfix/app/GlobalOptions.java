@@ -3,17 +3,21 @@ package com.jaspersoft.jrshotfix.app;
 import java.nio.file.Path;
 import java.util.Optional;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.ScopeType;
 
 /**
- * Options every command accepts, mixed into each subcommand so they may be given after the command
- * name. Invariants: {@code --yes} is the only flag that answers a confirmation, and it implies
- * {@code --non-interactive}; {@code --non-interactive} alone never confirms anything, so a prompt
- * it suppresses fails closed; colour is decided by {@link Ansi}, never here.
+ * Options every command accepts, mixed into the root command and inherited by every subcommand, so
+ * they may be given before or after a command's name and land in this one object (given both before
+ * and after the name, the later value wins). Invariants: {@code --yes} is the only flag that
+ * answers a confirmation, and it implies {@code --non-interactive}; {@code --non-interactive} alone
+ * never confirms anything, so a prompt it suppresses fails closed; colour is decided by {@link
+ * Ansi}, never here.
  */
 public final class GlobalOptions {
 
   @Option(
       names = "--home",
+      scope = ScopeType.INHERIT,
       paramLabel = "<dir>",
       description =
           "jrs-hotfix home: settings, ledger, snapshots, runs and logs live here (default:"
@@ -22,17 +26,22 @@ public final class GlobalOptions {
 
   @Option(
       names = "--yes",
+      scope = ScopeType.INHERIT,
       description = "Answer yes to confirmations without asking; implies --non-interactive.")
   boolean yes;
 
   @Option(
       names = "--non-interactive",
+      scope = ScopeType.INHERIT,
       description =
           "Never prompt; exit 2 where a confirmation is needed. Does not confirm anything: pair"
               + " it with --yes to run unattended.")
   boolean nonInteractive;
 
-  @Option(names = "--no-color", description = "Disable ANSI colour in text output.")
+  @Option(
+      names = "--no-color",
+      scope = ScopeType.INHERIT,
+      description = "Disable ANSI colour in text output.")
   boolean noColor;
 
   public Optional<Path> home() {
@@ -51,20 +60,5 @@ public final class GlobalOptions {
 
   public boolean noColor() {
     return noColor;
-  }
-
-  /**
-   * Takes what {@code outer} (the same options given before this command's name) set and this
-   * command did not: {@code jrs-hotfix --home <dir> apply ...} must mean the same as {@code
-   * jrs-hotfix apply ... --home <dir>}. A value given on this command wins; a flag set on either is
-   * set.
-   */
-  void inheritFrom(GlobalOptions outer) {
-    if (home == null) {
-      home = outer.home;
-    }
-    yes |= outer.yes;
-    nonInteractive |= outer.nonInteractive;
-    noColor |= outer.noColor;
   }
 }

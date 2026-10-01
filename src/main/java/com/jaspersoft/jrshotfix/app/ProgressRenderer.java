@@ -150,9 +150,7 @@ final class ProgressRenderer implements EventSink {
     for (String[] row : ordered) {
       table.row("  " + row[0], row[1]);
     }
-    for (String line : table.lines()) {
-      println(line);
-    }
+    table.lines().forEach(this::println);
   }
 
   // ---- text helpers ---------------------------------------------------------------------------

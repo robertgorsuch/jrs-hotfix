@@ -51,9 +51,9 @@ final class Bootstrap {
     Bootstrap open(GlobalOptions options);
   }
 
-  static final String NO_SETTINGS = "no settings found";
+  private static final String NO_SETTINGS = "no settings found";
 
-  static final String NO_SETTINGS_REMEDIATION =
+  private static final String NO_SETTINGS_REMEDIATION =
       "pass `--home <installDir>/jrs-hotfix` or set `JRS_HOTFIX_HOME`, or run `jrs-hotfix settings"
           + " detect` to set up this installation";
 
@@ -264,28 +264,23 @@ final class Bootstrap {
    * any {@code --war} command has been run there. Nothing is written by this.
    */
   HotfixRuntime runtimeOrWarLike() {
-    if (settings.isPresent()) {
-      return runtime();
-    }
-    Settings s = warSettings(home, home.root().resolve("jasperserver-pro.war"));
-    ensureHome();
-    return new HotfixRuntime(
-        home,
-        s,
-        platform,
-        new Ledger(home),
-        new SnapshotStore(home, platform.files(), clock),
-        clock,
-        Sleeper.system(),
-        ServerProbe.http(s.baseUrl()));
+    return runtime(
+        settings.orElseGet(() -> warSettings(home, home.root().resolve("jasperserver-pro.war"))));
   }
 
   HotfixRuntime runtime() {
-    Settings s =
-        settings.orElseThrow(
-            () ->
-                new HotfixException(
-                    HotfixException.PRECHECK, NO_SETTINGS, NO_SETTINGS_REMEDIATION));
+    return runtime(requiredSettings());
+  }
+
+  /**
+   * The settings; a precheck failure telling the operator how to create them when there are none.
+   */
+  Settings requiredSettings() {
+    return settings.orElseThrow(
+        () -> new HotfixException(HotfixException.PRECHECK, NO_SETTINGS, NO_SETTINGS_REMEDIATION));
+  }
+
+  private HotfixRuntime runtime(Settings s) {
     ensureHome();
     return new HotfixRuntime(
         home,

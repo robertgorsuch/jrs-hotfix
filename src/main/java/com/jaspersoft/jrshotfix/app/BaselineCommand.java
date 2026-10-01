@@ -12,12 +12,8 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
-import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * {@code jrs-hotfix baseline}: the vendor's files this installation is compared with. Invariants:
@@ -35,17 +31,7 @@ import picocli.CommandLine.Spec;
       BaselineCommand.Add.class,
       BaselineCommand.Remove.class
     })
-final class BaselineCommand implements Callable<Integer> {
-
-  @Spec CommandSpec spec;
-
-  @Mixin GlobalOptions global;
-
-  @Override
-  public Integer call() {
-    spec.commandLine().usage(spec.commandLine().getErr());
-    return ExitCodes.USAGE;
-  }
+final class BaselineCommand extends GroupCommand {
 
   /** {@code baseline list}. */
   @Command(
@@ -64,7 +50,7 @@ final class BaselineCommand implements Callable<Integer> {
         out.flush();
         return ExitCodes.SUCCESS;
       }
-      TextTable table = new TextTable(Terminal.width(Env.vars()));
+      TextTable table = table();
       table.row("ID", "KIND", "RELEASE", "BUILD", "FILES", "MERGEABLE", "ADDED");
       for (BaselineManifest b : all) {
         table.row(
@@ -76,9 +62,7 @@ final class BaselineCommand implements Callable<Integer> {
             String.valueOf(b.files().stream().filter(BaselineManifest.BaseFile::payload).count()),
             b.createdAt().toString());
       }
-      for (String line : table.lines()) {
-        out.println(line);
-      }
+      table.printTo(out);
       out.flush();
       return ExitCodes.SUCCESS;
     }

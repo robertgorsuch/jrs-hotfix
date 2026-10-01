@@ -105,15 +105,21 @@ final class Prompter {
     if (override.isEmpty()) {
       Optional<LineReader> reader = jlineReader();
       if (reader.isPresent()) {
-        out.flush();
-        try {
-          return Optional.of(reader.get().readLine(prompt).strip());
-        } catch (EndOfFileException | UserInterruptException e) {
-          return Optional.empty();
-        }
+        return read(out, reader.get(), prompt, null);
       }
     }
     return line(out, prompt);
+  }
+
+  /** One line through JLine with {@code initial} (or nothing) typed, stripped; empty at its end. */
+  private static Optional<String> read(
+      PrintWriter out, LineReader reader, String prompt, String initial) {
+    out.flush();
+    try {
+      return Optional.of(reader.readLine(prompt, null, initial).strip());
+    } catch (EndOfFileException | UserInterruptException e) {
+      return Optional.empty();
+    }
   }
 
   /**
@@ -175,12 +181,7 @@ final class Prompter {
       PrintWriter out, String prompt, String initial, java.util.Collection<String> completions) {
     Optional<LineReader> reader = plainReader(completions);
     if (reader.isPresent()) {
-      out.flush();
-      try {
-        return Optional.of(reader.get().readLine(prompt, null, initial).strip());
-      } catch (EndOfFileException | UserInterruptException e) {
-        return Optional.empty();
-      }
+      return read(out, reader.get(), prompt, initial);
     }
     String shown = initial.isEmpty() ? prompt : prompt + "[" + initial + "] ";
     return line(out, shown).map(answer -> answer.isEmpty() ? initial : answer);
@@ -193,12 +194,7 @@ final class Prompter {
   static Optional<String> line(PrintWriter out, String prompt) {
     Optional<LineReader> reader = plainReader(List.of());
     if (reader.isPresent()) {
-      out.flush();
-      try {
-        return Optional.of(reader.get().readLine(prompt).strip());
-      } catch (EndOfFileException | UserInterruptException e) {
-        return Optional.empty();
-      }
+      return read(out, reader.get(), prompt, null);
     }
     Optional<Console> console = console();
     if (console.isPresent()) {

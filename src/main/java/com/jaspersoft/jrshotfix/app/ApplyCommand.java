@@ -88,7 +88,7 @@ final class ApplyCommand extends AppCommand {
     }
     Bootstrap boot = war == null ? open() : open().forWar(war);
     boolean confirmed = false;
-    if (!global.yes() && !plan && boot.interactive() && Files.isRegularFile(file)) {
+    if (!global().yes() && !plan && boot.interactive() && Files.isRegularFile(file)) {
       String sha;
       try {
         sha = boot.platform().files().sha256(file);
@@ -127,7 +127,7 @@ final class ApplyCommand extends AppCommand {
     }
     Plan p = plans.planApply(args);
     List<String> audit =
-        global.yes()
+        global().yes()
             ? List.of(HotfixPlans.AUDIT_CHECKSUM_CONFIRMED + " skipped with --yes")
             : List.of(HotfixPlans.AUDIT_CHECKSUM_CONFIRMED + " confirmed by the operator");
     return executor(boot)

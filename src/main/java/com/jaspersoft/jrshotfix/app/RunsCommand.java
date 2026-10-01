@@ -7,13 +7,9 @@ import java.io.PrintWriter;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
-import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * {@code jrs-hotfix runs}: the run history, recovery of an interrupted run, and retention.
@@ -33,17 +29,7 @@ import picocli.CommandLine.Spec;
       RunsCommand.Rollback.class,
       RunsCommand.Prune.class
     })
-final class RunsCommand implements Callable<Integer> {
-
-  @Spec CommandSpec spec;
-
-  @Mixin GlobalOptions global;
-
-  @Override
-  public Integer call() {
-    spec.commandLine().usage(spec.commandLine().getErr());
-    return ExitCodes.USAGE;
-  }
+final class RunsCommand extends GroupCommand {
 
   /** {@code runs list}. */
   @Command(
@@ -62,7 +48,7 @@ final class RunsCommand implements Callable<Integer> {
         out.flush();
         return ExitCodes.SUCCESS;
       }
-      TextTable table = new TextTable(Terminal.width(Env.vars()));
+      TextTable table = table();
       table.row("ID", "OPERATION", "STARTED", "ENDED", "STATE", "EXIT");
       for (RunRecord r : all) {
         table.row(
@@ -73,9 +59,7 @@ final class RunsCommand implements Callable<Integer> {
             r.terminalState().map(Enum::name).orElse("PENDING"),
             r.exitCode().map(String::valueOf).orElse("-"));
       }
-      for (String line : table.lines()) {
-        out.println(line);
-      }
+      table.printTo(out);
       out.flush();
       return ExitCodes.SUCCESS;
     }
@@ -115,12 +99,10 @@ final class RunsCommand implements Callable<Integer> {
       head.row("state", r.terminalState().map(Enum::name).orElse("PENDING"));
       head.row("exit", r.exitCode().map(String::valueOf).orElse("-"));
       head.row("log", boot.home().logFile(r.runId()).toString());
-      for (String line : head.lines()) {
-        out.println(line);
-      }
+      head.printTo(out);
       List<Transition> transitions = runs.journal().transitions(runId);
       out.println("transitions");
-      TextTable t = new TextTable(Terminal.width(Env.vars()));
+      TextTable t = table();
       for (Transition tr : transitions) {
         t.row(
             "  " + tr.seq(),

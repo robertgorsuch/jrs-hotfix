@@ -4,18 +4,13 @@ import com.jaspersoft.jrshotfix.home.Detection;
 import com.jaspersoft.jrshotfix.home.Home;
 import com.jaspersoft.jrshotfix.home.Settings;
 import com.jaspersoft.jrshotfix.home.SettingsStore;
-import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.platform.InstallScan;
 import java.io.PrintWriter;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
-import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * {@code jrs-hotfix settings}: what the tool knows about this installation. Invariants: {@code
@@ -33,27 +28,7 @@ import picocli.CommandLine.Spec;
       SettingsCommand.Set.class,
       SettingsCommand.Detect.class
     })
-final class SettingsCommand implements Callable<Integer> {
-
-  @Spec CommandSpec spec;
-
-  @Mixin GlobalOptions global;
-
-  @Override
-  public Integer call() {
-    spec.commandLine().usage(spec.commandLine().getErr());
-    return ExitCodes.USAGE;
-  }
-
-  static Settings required(Bootstrap boot) {
-    return boot.settings()
-        .orElseThrow(
-            () ->
-                new HotfixException(
-                    HotfixException.PRECHECK,
-                    Bootstrap.NO_SETTINGS,
-                    Bootstrap.NO_SETTINGS_REMEDIATION));
-  }
+final class SettingsCommand extends GroupCommand {
 
   static void print(PrintWriter out, Home home, Settings settings) {
     TextTable table = new TextTable();
@@ -61,9 +36,7 @@ final class SettingsCommand implements Callable<Integer> {
       table.row(e.getKey(), e.getValue().isEmpty() ? "-" : e.getValue());
     }
     table.row("(home)", home.root().toString());
-    for (String line : table.lines()) {
-      out.println(line);
-    }
+    table.printTo(out);
     out.flush();
   }
 
@@ -77,7 +50,7 @@ final class SettingsCommand implements Callable<Integer> {
     @Override
     public Integer call() {
       Bootstrap boot = open();
-      print(out(), boot.home(), required(boot));
+      print(out(), boot.home(), boot.requiredSettings());
       return ExitCodes.SUCCESS;
     }
   }
@@ -105,7 +78,7 @@ final class SettingsCommand implements Callable<Integer> {
     }
 
     private int set(Bootstrap boot) {
-      Settings current = required(boot);
+      Settings current = boot.requiredSettings();
       Settings updated;
       try {
         updated = current.withKey(key, value);
@@ -142,7 +115,7 @@ final class SettingsCommand implements Callable<Integer> {
       if (boot.interactive()) {
         return wizard(boot);
       }
-      if (boot.settings().isPresent() && !global.yes()) {
+      if (boot.settings().isPresent() && !global().yes()) {
         return ExitCodes.fail(
             err(),
             ExitCodes.PRECHECK_FAILED,

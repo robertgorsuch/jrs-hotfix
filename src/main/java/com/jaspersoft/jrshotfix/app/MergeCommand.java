@@ -15,13 +15,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
-import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * {@code jrs-hotfix merge}: preparing a merge of a hotfix into a customized server before the
@@ -43,17 +39,7 @@ import picocli.CommandLine.Spec;
       MergeCommand.Resolve.class,
       MergeCommand.Discard.class
     })
-final class MergeCommand implements Callable<Integer> {
-
-  @Spec CommandSpec spec;
-
-  @Mixin GlobalOptions global;
-
-  @Override
-  public Integer call() {
-    spec.commandLine().usage(spec.commandLine().getErr());
-    return ExitCodes.USAGE;
-  }
+final class MergeCommand extends GroupCommand {
 
   /** The conflict rule to use: the option, else the setting, else by whether someone can answer. */
   static MergeWorkspace.OnConflict fallback(Bootstrap boot) {
@@ -161,7 +147,7 @@ final class MergeCommand implements Callable<Integer> {
           out.flush();
           return ExitCodes.SUCCESS;
         }
-        TextTable table = new TextTable(Terminal.width(Env.vars()));
+        TextTable table = table();
         table.row("ID", "HOTFIX", "PREPARED", "FILES", "WAITING");
         for (MergeDoc doc : all) {
           table.row(
@@ -171,7 +157,7 @@ final class MergeCommand implements Callable<Integer> {
               String.valueOf(doc.files().size()),
               String.valueOf(doc.blocking().size()));
         }
-        table.lines().forEach(out::println);
+        table.printTo(out);
         out.flush();
         return ExitCodes.SUCCESS;
       }
@@ -285,36 +271,6 @@ final class MergeCommand implements Callable<Integer> {
                     "run `jrs-hotfix merge status " + doc.id() + "` for the paths"));
   }
 
-  private static int resolved(
-      AppCommand cmd,
-      Bootstrap boot,
-      String id,
-      String path,
-      MergeWorkspace.Choice choice,
-      Optional<Path> file) {
-    MergeDoc doc;
-    try {
-      doc =
-          boot.runtime()
-              .merges()
-              .resolve(id, path.replace('\\', '/'), choice, file, System.getProperty("user.name"));
-    } catch (IOException e) {
-      throw new HotfixException(
-          HotfixException.PRECHECK,
-          "cannot record the decision: " + e.getMessage(),
-          "check permissions under " + boot.home().merges(),
-          e);
-    }
-    PrintWriter out = cmd.out();
-    MergeDoc.Item item = doc.file(path.replace('\\', '/')).orElseThrow();
-    out.println(
-        item.path() + ": " + item.state().name().toLowerCase(Locale.ROOT).replace('_', ' '));
-    out.println(doc.blocking().size() + " file(s) still wait for a decision");
-    printNext(out, doc);
-    out.flush();
-    return ExitCodes.SUCCESS;
-  }
-
   /** {@code merge resolve <mergeId> <path> --merged [<file>] | --mine | --theirs}. */
   @Command(
       name = "resolve",
@@ -374,7 +330,28 @@ final class MergeCommand implements Callable<Integer> {
               : Optional.of(Path.of(UserPaths.expand(merged, Env.vars())));
       // the runtime is opened so a home without settings is refused as everywhere else
       boot.plans().merge(id);
-      return resolved(this, boot, id, path, choice, file);
+      String wanted = path.replace('\\', '/');
+      MergeDoc doc;
+      try {
+        doc =
+            boot.runtime()
+                .merges()
+                .resolve(id, wanted, choice, file, System.getProperty("user.name"));
+      } catch (IOException e) {
+        throw new HotfixException(
+            HotfixException.PRECHECK,
+            "cannot record the decision: " + e.getMessage(),
+            "check permissions under " + boot.home().merges(),
+            e);
+      }
+      PrintWriter out = out();
+      MergeDoc.Item item = doc.file(wanted).orElseThrow();
+      out.println(
+          item.path() + ": " + item.state().name().toLowerCase(Locale.ROOT).replace('_', ' '));
+      out.println(doc.blocking().size() + " file(s) still wait for a decision");
+      printNext(out, doc);
+      out.flush();
+      return ExitCodes.SUCCESS;
     }
   }
 
