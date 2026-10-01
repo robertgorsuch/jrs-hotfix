@@ -1,5 +1,6 @@
 package com.jaspersoft.jrshotfix.home;
 
+import com.jaspersoft.jrshotfix.platform.DefaultHome;
 import com.jaspersoft.jrshotfix.platform.Diag;
 import com.jaspersoft.jrshotfix.platform.Durability;
 import java.io.IOException;
@@ -21,7 +22,6 @@ import java.util.Optional;
  */
 public final class LastHome {
 
-  static final String DIR = "jrs-hotfix";
   static final String FILE = "last-home";
 
   private LastHome() {}
@@ -40,7 +40,7 @@ public final class LastHome {
               .map(Path::of)
               .orElseGet(() -> userHome(env).resolve(".config"));
     }
-    return config.resolve(DIR).resolve(FILE);
+    return config.resolve(DefaultHome.DIR).resolve(FILE);
   }
 
   /** The home the pointer names; empty when there is no pointer or it cannot be read. */

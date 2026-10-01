@@ -17,16 +17,25 @@ import java.util.Set;
 import java.util.stream.Stream;
 
 /**
- * Shared behaviour of {@link WindowsPlatform} and {@link LinuxPlatform}: controller selection by
- * {@code service.kind}, Tomcat layout detection and candidate de-duplication. Invariants: {@link
- * #detectTomcat} is pure inspection (no writes) and returns empty unless a {@code jasperserver} or
- * {@code jasperserver-pro} webapp is found; candidate lists contain only existing directories, each
- * once, running-Tomcat locations first.
+ * {@link Platform} for Windows or Linux: controller selection by {@code service.kind}, Tomcat
+ * layout detection and candidate de-duplication are the same on both; the OS decides only the
+ * system base of the default home and the well-known install locations, while its {@link FileOps}
+ * and process finder are given. Invariants: {@link #detectTomcat} is pure inspection (no writes)
+ * and returns empty unless a {@code jasperserver} or {@code jasperserver-pro} webapp is found;
+ * candidate lists contain only existing directories, each once, running-Tomcat locations first,
+ * then the well-known ones (Windows: {@code C:\Jaspersoft} and {@code %ProgramFiles%}; Linux:
+ * {@code /opt}, {@code /usr/local} and every home directory). The default home is {@code
+ * %ProgramData%\jrs-hotfix} or {@code /var/lib/jrs-hotfix} when it exists or can be created, and
+ * {@code ~/.jrs-hotfix} only when no system home exists; a system home this user cannot write to is
+ * refused by the resolver, never silently replaced by a per-user one. The Uninstall registry keys
+ * were queried too on Windows until 0.4.0: the bundled installer's directory is always one of the
+ * well-known ones, and the operator can type any other.
  */
-abstract class AbstractPlatform implements Platform {
+final class OsPlatform implements Platform {
 
   private static final int ANCESTOR_LEVELS = 4;
 
+  private final OsFamily os;
   private final Arch arch;
   private final ProcessRunner runner;
   private final FileOps files;
@@ -34,13 +43,26 @@ abstract class AbstractPlatform implements Platform {
   private final Optional<Path> installDir;
   private final TomcatProcessFinder tomcats;
 
-  AbstractPlatform(
+  /** With the process finder shared by this platform and its file operations (issue #38). */
+  OsPlatform(
+      OsFamily os,
+      Arch arch,
+      ProcessRunner runner,
+      FileOps files,
+      OperatorPrompt prompt,
+      TomcatProcessFinder tomcats) {
+    this(os, arch, runner, files, prompt, Optional.empty(), tomcats);
+  }
+
+  private OsPlatform(
+      OsFamily os,
       Arch arch,
       ProcessRunner runner,
       FileOps files,
       OperatorPrompt prompt,
       Optional<Path> installDir,
       TomcatProcessFinder tomcats) {
+    this.os = requireNonNull(os, "os");
     this.arch = requireNonNull(arch, "arch");
     this.runner = requireNonNull(runner, "runner");
     this.files = requireNonNull(files, "files");
@@ -51,42 +73,72 @@ abstract class AbstractPlatform implements Platform {
 
   /** A copy that watches the Tomcat under {@code installDir} for {@code service.kind: manual}. */
   @Override
-  public abstract Platform withInstallDir(Path installDir);
+  public Platform withInstallDir(Path installDir) {
+    return new OsPlatform(os, arch, runner, files, prompt, Optional.of(installDir), tomcats);
+  }
 
   @Override
-  public final Arch arch() {
+  public OsFamily os() {
+    return os;
+  }
+
+  @Override
+  public Arch arch() {
     return arch;
   }
 
   @Override
-  public final FileOps files() {
+  public FileOps files() {
     return files;
   }
 
   @Override
-  public final ProcessRunner processes() {
+  public ProcessRunner processes() {
     return runner;
   }
 
-  final OperatorPrompt prompt() {
-    return prompt;
+  @Override
+  public Path defaultHome() {
+    return homeOrFallback(
+        switch (os) {
+          case WINDOWS -> Path.of(env("ProgramData", "C:\\ProgramData"));
+          case LINUX -> Path.of("/var/lib");
+        });
   }
 
-  final Optional<Path> installDir() {
-    return installDir;
+  /** The well-known places to look after the running Tomcats, most likely first. */
+  private List<Path> wellKnownInstallDirs() {
+    List<Path> candidates = new ArrayList<>();
+    switch (os) {
+      case WINDOWS -> {
+        candidates.addAll(glob(Path.of("C:\\Jaspersoft"), "*"));
+        Path programFiles = Path.of(env("ProgramFiles", "C:\\Program Files"));
+        candidates.addAll(glob(programFiles, "jasperreports-server*"));
+        candidates.addAll(glob(programFiles.resolve("Jaspersoft"), "*"));
+      }
+      case LINUX -> {
+        candidates.addAll(glob(Path.of("/opt"), "jasperreports-server*"));
+        candidates.addAll(glob(Path.of("/opt/jaspersoft"), "*"));
+        candidates.addAll(glob(Path.of("/usr/local"), "jasperreports-server*"));
+        for (Path home : glob(Path.of("/home"), "*")) {
+          candidates.addAll(glob(home, "jasperreports-server*"));
+        }
+      }
+    }
+    return candidates;
   }
 
-  final TomcatProcessFinder tomcats() {
-    return tomcats;
+  private static String env(String name, String fallback) {
+    return Optional.ofNullable(System.getenv(name)).orElse(fallback);
   }
 
   @Override
-  public final RunningTomcats runningTomcats(Path dir) {
+  public RunningTomcats runningTomcats(Path dir) {
     return RunningTomcats.scan(tomcats, requireNonNull(dir, "dir").toAbsolutePath().normalize());
   }
 
   @Override
-  public final ServiceController services(ServiceConfig cfg) {
+  public ServiceController services(ServiceConfig cfg) {
     requireNonNull(cfg, "cfg");
     return switch (cfg.kind()) {
       case WINDOWS_SERVICE -> new WindowsServiceController(runner, required(cfg.name(), "name"));
@@ -118,7 +170,7 @@ abstract class AbstractPlatform implements Platform {
   }
 
   @Override
-  public final Optional<TomcatLayout> detectTomcat(Path installDir) {
+  public Optional<TomcatLayout> detectTomcat(Path installDir) {
     Path base = installDir.toAbsolutePath().normalize();
     if (!Files.isDirectory(base)) {
       return Optional.empty();
@@ -160,7 +212,7 @@ abstract class AbstractPlatform implements Platform {
     // sort ranks "apache-tomcat-9" above "apache-tomcat-10"), then the first path, so a plain
     // "apache-tomcat" still wins over "tomcat" as it always has
     Comparator<Path> preference =
-        Comparator.comparing(AbstractPlatform::holdsWebapp)
+        Comparator.comparing(OsPlatform::holdsWebapp)
             .thenComparing((a, b) -> NaturalOrder.compareVersions(name(a), name(b)))
             .thenComparing(NaturalOrder.PATHS.reversed());
     return matches.stream().max(preference);
@@ -177,16 +229,13 @@ abstract class AbstractPlatform implements Platform {
     return file == null ? "" : file.toString();
   }
 
-  /** The well-known places to look after the running Tomcats, most likely first. */
-  abstract List<Path> wellKnownInstallDirs();
-
   @Override
-  public final List<Path> candidateInstallDirs() {
+  public List<Path> candidateInstallDirs() {
     return scanInstallDirs().candidates();
   }
 
   @Override
-  public final InstallScan scanInstallDirs() {
+  public InstallScan scanInstallDirs() {
     FromProcesses fromProcesses = installDirsFromProcesses();
     List<Path> all = new ArrayList<>(fromProcesses.dirs());
     all.addAll(wellKnownInstallDirs());
@@ -293,7 +342,7 @@ abstract class AbstractPlatform implements Platform {
   }
 
   /** Keeps existing directories only, first occurrence wins, order preserved. */
-  final List<Path> existingUnique(List<Path> candidates) {
+  private List<Path> existingUnique(List<Path> candidates) {
     Map<String, Path> unique = new LinkedHashMap<>();
     for (Path candidate : candidates) {
       Path normalised = candidate.toAbsolutePath().normalize();
@@ -315,7 +364,7 @@ abstract class AbstractPlatform implements Platform {
    * own directory is warned about every time, because it means state and the run lock are no longer
    * shared between operators of the same installation.
    */
-  final Path homeOrFallback(Path base) {
+  private Path homeOrFallback(Path base) {
     DefaultHome.Choice choice = DefaultHome.choose(base);
     if (choice.systemHomeUnwritable()) {
       Diag.warn(

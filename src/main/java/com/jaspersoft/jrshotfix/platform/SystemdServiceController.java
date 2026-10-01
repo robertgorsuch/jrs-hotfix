@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -55,7 +56,8 @@ public final class SystemdServiceController extends PollingServiceController {
     }
     // is-active exits non-zero for every state but active; the text is what matters
     State parsed = parseState(query.get().text());
-    if (parsed == State.STOPPED && TomcatState.of(processes, installDir) == State.RUNNING) {
+    if (parsed == State.STOPPED
+        && RunningTomcats.state(processes, installDir, Set.of()) == State.RUNNING) {
       // A unit with KillMode=none (common in hand-written units whose ExecStop is shutdown.sh)
       // reports inactive while the JVM is still going down; until it is gone the files under
       // WEB-INF are not free to swap, so the state is "stopping" (assessment item H5).

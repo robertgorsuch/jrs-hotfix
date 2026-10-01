@@ -340,16 +340,19 @@ class WindowsTomcatProcessesTest {
     TomcatProcessFinder.TomcatProcess ours = FakeTomcatProcessFinder.tomcatUnder(install);
     Set<Integer> watched = Set.of(8006, 8082);
 
-    assertThat(TomcatState.of(blind, Optional.of(install), watched)).isEqualTo(State.UNKNOWN);
-    assertThat(TomcatState.of(() -> List.of(opaqueOn8082), Optional.of(install), watched))
+    assertThat(RunningTomcats.state(blind, Optional.of(install), watched)).isEqualTo(State.UNKNOWN);
+    assertThat(RunningTomcats.state(() -> List.of(opaqueOn8082), Optional.of(install), watched))
         .isEqualTo(State.UNKNOWN);
-    assertThat(TomcatState.of(() -> List.of(opaqueOn8082), Optional.of(install), Set.of(9000)))
+    assertThat(
+            RunningTomcats.state(() -> List.of(opaqueOn8082), Optional.of(install), Set.of(9000)))
         .isEqualTo(State.STOPPED);
-    assertThat(TomcatState.of(() -> List.of(opaqueOn8082), Optional.of(install), Set.of()))
+    assertThat(RunningTomcats.state(() -> List.of(opaqueOn8082), Optional.of(install), Set.of()))
         .as("ports unknown: stay conservative")
         .isEqualTo(State.UNKNOWN);
-    assertThat(TomcatState.of(() -> List.of(opaqueOn8082, ours), Optional.of(install), watched))
+    assertThat(
+            RunningTomcats.state(() -> List.of(opaqueOn8082, ours), Optional.of(install), watched))
         .isEqualTo(State.RUNNING);
-    assertThat(TomcatState.of(List::of, Optional.of(install), watched)).isEqualTo(State.STOPPED);
+    assertThat(RunningTomcats.state(List::of, Optional.of(install), watched))
+        .isEqualTo(State.STOPPED);
   }
 }

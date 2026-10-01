@@ -1,5 +1,6 @@
 package com.jaspersoft.jrshotfix.home;
 
+import com.jaspersoft.jrshotfix.platform.DefaultHome;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
@@ -23,6 +24,6 @@ public final class HomeResolver {
       return new Home(Path.of(fromEnv));
     }
     return new Home(
-        installDir.map(d -> d.resolve("jrs-hotfix")).orElseGet(() -> Path.of("jrs-hotfix")));
+        installDir.map(d -> d.resolve(DefaultHome.DIR)).orElseGet(() -> Path.of(DefaultHome.DIR)));
   }
 }

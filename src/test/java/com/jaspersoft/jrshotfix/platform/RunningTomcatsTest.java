@@ -75,7 +75,8 @@ class RunningTomcatsTest {
   @Test
   void should_scan_through_the_platform_when_asked_for_a_directory() {
     Platform windows =
-        new WindowsPlatform(
+        new OsPlatform(
+            Platform.OsFamily.WINDOWS,
             Platform.Arch.X86_64,
             new FakeProcessRunner(),
             new DefaultFileOps(),

@@ -52,21 +52,35 @@ public final class Detection {
     String webapp = layout.get().webappName();
     int port = ServerXml.httpPort(tomcat.resolve("conf").resolve("server.xml")).orElse(8080);
     URI base = URI.create("http://localhost:" + port + "/" + webapp);
+    Service service = service(platform, installDir, tomcat);
+    return Optional.of(
+        new Settings(
+            installDir,
+            tomcat,
+            webapp,
+            service.kind(),
+            service.name(),
+            service.script(),
+            180,
+            Optional.empty(),
+            base));
+  }
+
+  /** How Tomcat is controlled: a service name, a script, or neither for a manual install. */
+  private record Service(ServiceConfig.Kind kind, Optional<String> name, Optional<Path> script) {}
+
+  /**
+   * The first that applies: a Windows service or systemd unit named for JasperReports Server or
+   * Tomcat, the install's {@code ctlscript}, Tomcat's {@code catalina} script, else manual.
+   */
+  private static Service service(Platform platform, Path installDir, Path tomcat) {
     if (platform.os() == Platform.OsFamily.WINDOWS) {
       Optional<String> svc =
           windowsServices(platform.processes()).stream()
               .filter(n -> lower(n).contains("jasper") && lower(n).contains("tomcat"))
               .findFirst();
       if (svc.isPresent()) {
-        return Optional.of(
-            of(
-                installDir,
-                tomcat,
-                webapp,
-                ServiceConfig.Kind.WINDOWS_SERVICE,
-                svc,
-                Optional.empty(),
-                base));
+        return new Service(ServiceConfig.Kind.WINDOWS_SERVICE, svc, Optional.empty());
       }
     } else {
       Optional<String> unit =
@@ -74,52 +88,22 @@ public final class Detection {
               .filter(n -> lower(n).contains("jasper") || lower(n).contains("tomcat"))
               .findFirst();
       if (unit.isPresent()) {
-        return Optional.of(
-            of(
-                installDir,
-                tomcat,
-                webapp,
-                ServiceConfig.Kind.SYSTEMD,
-                unit,
-                Optional.empty(),
-                base));
+        return new Service(ServiceConfig.Kind.SYSTEMD, unit, Optional.empty());
       }
     }
     for (String s : List.of("ctlscript.sh", "ctlscript.bat")) {
-      if (Files.isRegularFile(installDir.resolve(s))) {
-        return Optional.of(
-            of(
-                installDir,
-                tomcat,
-                webapp,
-                ServiceConfig.Kind.CTLSCRIPT,
-                Optional.empty(),
-                Optional.of(installDir.resolve(s)),
-                base));
+      Path script = installDir.resolve(s);
+      if (Files.isRegularFile(script)) {
+        return new Service(ServiceConfig.Kind.CTLSCRIPT, Optional.empty(), Optional.of(script));
       }
     }
     for (String s : List.of("catalina.sh", "catalina.bat")) {
-      if (Files.isRegularFile(tomcat.resolve("bin").resolve(s))) {
-        return Optional.of(
-            of(
-                installDir,
-                tomcat,
-                webapp,
-                ServiceConfig.Kind.CATALINA,
-                Optional.empty(),
-                Optional.of(tomcat.resolve("bin").resolve(s)),
-                base));
+      Path script = tomcat.resolve("bin").resolve(s);
+      if (Files.isRegularFile(script)) {
+        return new Service(ServiceConfig.Kind.CATALINA, Optional.empty(), Optional.of(script));
       }
     }
-    return Optional.of(
-        of(
-            installDir,
-            tomcat,
-            webapp,
-            ServiceConfig.Kind.MANUAL,
-            Optional.empty(),
-            Optional.empty(),
-            base));
+    return new Service(ServiceConfig.Kind.MANUAL, Optional.empty(), Optional.empty());
   }
 
   /**
@@ -149,16 +133,5 @@ public final class Detection {
 
   private static String lower(String s) {
     return s.toLowerCase(Locale.ROOT);
-  }
-
-  private static Settings of(
-      Path install,
-      Path tomcat,
-      String webapp,
-      ServiceConfig.Kind kind,
-      Optional<String> name,
-      Optional<Path> script,
-      URI base) {
-    return new Settings(install, tomcat, webapp, kind, name, script, 180, Optional.empty(), base);
   }
 }

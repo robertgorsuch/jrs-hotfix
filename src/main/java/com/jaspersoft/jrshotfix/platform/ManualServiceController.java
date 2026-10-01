@@ -22,11 +22,6 @@ public final class ManualServiceController extends PollingServiceController {
   private final Optional<Path> installDir;
   private final TomcatProcessFinder processes;
 
-  public ManualServiceController(
-      ProcessRunner runner, OperatorPrompt prompt, Optional<Path> installDir) {
-    this(runner, prompt, installDir, TomcatProcesses.INSTANCE, DEFAULT_POLL_INTERVAL);
-  }
-
   ManualServiceController(
       ProcessRunner runner,
       OperatorPrompt prompt,
@@ -41,7 +36,7 @@ public final class ManualServiceController extends PollingServiceController {
 
   @Override
   public State state() {
-    return TomcatState.of(
+    return RunningTomcats.state(
         processes, installDir, installDir.map(ServerXml::portsUnder).orElse(Set.of()));
   }
 
@@ -52,19 +47,7 @@ public final class ManualServiceController extends PollingServiceController {
 
   @Override
   public State stop(Duration timeout, BooleanSupplier cancelled) {
-    if (state() == State.STOPPED) {
-      return State.STOPPED;
-    }
-    if (!prompt.interactive()) {
-      return State.UNKNOWN;
-    }
-    prompt.instruct(
-        "Stop the JasperReports Server Tomcat"
-            + installDir.map(d -> " under " + d).orElse("")
-            + " now; jrs-hotfix will continue once it is no longer running (waiting up to "
-            + timeout.toSeconds()
-            + " s).");
-    return await(State.STOPPED, timeout, cancelled);
+    return askOperator(State.STOPPED, "Stop", "is no longer running", timeout, cancelled);
   }
 
   @Override
@@ -74,19 +57,28 @@ public final class ManualServiceController extends PollingServiceController {
 
   @Override
   public State start(Duration timeout, BooleanSupplier cancelled) {
-    if (state() == State.RUNNING) {
-      return State.RUNNING;
+    return askOperator(State.RUNNING, "Start", "is running", timeout, cancelled);
+  }
+
+  /** Asks the operator to bring Tomcat to {@code wanted}, then waits to see it happen. */
+  private State askOperator(
+      State wanted, String verb, String until, Duration timeout, BooleanSupplier cancelled) {
+    if (state() == wanted) {
+      return wanted;
     }
     if (!prompt.interactive()) {
       return State.UNKNOWN;
     }
     prompt.instruct(
-        "Start the JasperReports Server Tomcat"
+        verb
+            + " the JasperReports Server Tomcat"
             + installDir.map(d -> " under " + d).orElse("")
-            + " now; jrs-hotfix will continue once it is running (waiting up to "
+            + " now; jrs-hotfix will continue once it "
+            + until
+            + " (waiting up to "
             + timeout.toSeconds()
             + " s).");
-    return await(State.RUNNING, timeout, cancelled);
+    return await(wanted, timeout, cancelled);
   }
 
   @Override
