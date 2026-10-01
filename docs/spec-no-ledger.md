@@ -1,6 +1,6 @@
 # jrs-hotfix 0.6: no ledger, one undo
 
-Status: draft for review, 2026-10-01. Changes `docs/spec.md` (the 0.1 design; cited as "spec
+Status: decided 2026-10-01, for 0.6.0. Changes `docs/spec.md` (the 0.1 design; cited as "spec
 3", "spec 4.2") and `docs/spec-customized-servers.md` where they read the ledger. Two rulings of
 the maintainer, 2026-10-01, are its starting point:
 
@@ -106,9 +106,9 @@ converges from a crash between any two of the four: `undo/` already naming this 
 done; `undo.old/` present means finish steps 3 and 4. `promote` has no compensation, as
 `record` had none.
 
-**Rollback.** `rollback` takes no argument and undoes what `undo/` holds. `rollback <id>` is
-still accepted, so a script that names the hotfix keeps working, and is refused (exit 2) unless
-`<id>` is the one in `undo/`; `--cascade` is removed. The plan:
+**Rollback.** `rollback` takes no argument and undoes what `undo/` holds; the plan preview
+names the hotfix, and the operator confirms it as for every plan. `--cascade` is removed. The
+plan:
 
 | # | Step | Does | Compensation |
 |---|---|---|---|
@@ -173,13 +173,13 @@ latest-only ruling.
 |---|---|
 | `record <package.zip>` | removed: the build the webapp states replaces it |
 | `forget <id>` | removed: nothing to forget |
-| `rollback <id> [--cascade]` | `rollback [<id>]`: the latest apply only; `--cascade` removed |
+| `rollback <id> [--cascade]` | `rollback`: the latest apply, no argument; `--cascade` removed |
 | `list` | the build and the undo (section 5) |
 | menu entry 6, "Record a hotfix applied by hand" | removed; the entries after it move up |
 | menu "Roll back a hotfix" with the cascade question | "Undo the latest hotfix (`<id>`)", shown only while `undo/` exists |
 
-A script that runs `record`, `forget` or `--cascade` gets exit 1 (unknown command or option)
-and must drop it. The release notes say so, as 0.4.0's did. The exit codes and their meanings
+A script that runs `record` or `forget`, or passes an id or `--cascade` to `rollback`, gets
+exit 1 (unknown command, option or parameter) and must drop it. The release notes say so, as 0.4.0's did. The exit codes and their meanings
 are unchanged (spec 6).
 
 ## 7. Homes written by 0.1 to 0.5
@@ -223,8 +223,8 @@ tests, against perhaps 300 new (the undo store, `promote`, the conversion).
 - **Unit.**
   - Applicability by build: equal, newer, older, absent with and without the files in place.
   - `promote`: a crash simulated after each of its four renames converges on the next run.
-  - Rollback preflight: refuses a changed file, a re-added deleted file, a missing `undo/`, and
-    an id that is not the latest.
+  - Rollback preflight: refuses a changed file, a re-added deleted file, and a missing `undo/`.
+  - Applicability: a package older than the webapp's build is refused with exit 2.
   - Snapshot deletion on exit 0, 3 and 5, and kept on exit 4.
   - Conversion of 0.5 homes: an installed entry with its snapshot; rolled-back and recorded
     entries only; a pending run; a crash part-way.
@@ -238,10 +238,9 @@ tests, against perhaps 300 new (the undo store, `promote`, the conversion).
 - **Live.** The 0.2 sequence on the two real servers: apply, rollback, apply over a hotfix
   applied by hand.
 
-## Open points
+## Decided 2026-10-01
 
-1. Refusing a package older than the webapp's build (section 1) is new. 0.5 applied it if the
-   ledger did not know better. Taking a server back is what rollback is for, so the refusal
-   stands unless the maintainer wants a `--downgrade` escape hatch.
-2. Whether `rollback <id>` (accepted when it matches) is worth keeping over a bare `rollback`.
-   It costs nothing and keeps scripts that name the hotfix working; it can go in 0.7.
+1. A package older than the build the webapp states is refused (exit 2), with no escape hatch.
+   0.5 applied it if the ledger did not know better. Taking a server back is what `rollback`
+   is for.
+2. `rollback` takes no argument. It undoes the latest apply, which the plan preview names.
