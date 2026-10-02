@@ -37,7 +37,10 @@ import java.util.function.Predicate;
 final class SettingsWizard {
 
   private static final List<String> KINDS =
-      Arrays.stream(ServiceConfig.Kind.values()).map(SettingsWizard::kindName).toList();
+      Arrays.stream(ServiceConfig.Kind.values())
+          .filter(k -> k != ServiceConfig.Kind.NONE)
+          .map(SettingsWizard::kindName)
+          .toList();
 
   private static final String KINDS_HINT = "please answer " + String.join(", ", KINDS);
 
@@ -222,7 +225,7 @@ final class SettingsWizard {
             s.withKey("service.scriptPath", UserPaths.expand(script.get(), Env.vars()))
                 .withKey("service.name", "");
       }
-      case MANUAL -> s = s.withKey("service.name", "").withKey("service.scriptPath", "");
+      case MANUAL, NONE -> s = s.withKey("service.name", "").withKey("service.scriptPath", "");
     }
     Optional<String> timeout =
         ask(

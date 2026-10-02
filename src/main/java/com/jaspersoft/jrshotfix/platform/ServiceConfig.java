@@ -27,6 +27,11 @@ public record ServiceConfig(
     SYSTEMD,
     CTLSCRIPT,
     CATALINA,
-    MANUAL
+    MANUAL,
+    /**
+     * No service at all: a build host, which holds the distribution and deploys from it (0.7
+     * design, section 2.1), or a home made for WARs. No plan for it has a service step.
+     */
+    NONE
   }
 }

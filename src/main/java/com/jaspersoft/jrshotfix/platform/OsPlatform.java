@@ -161,6 +161,9 @@ final class OsPlatform implements Platform {
       case MANUAL ->
           new ManualServiceController(
               runner, prompt, installDir, tomcats, PollingServiceController.DEFAULT_POLL_INTERVAL);
+      case NONE ->
+          throw new IllegalArgumentException(
+              "service.kind is none: there is no service here to control");
     };
   }
 

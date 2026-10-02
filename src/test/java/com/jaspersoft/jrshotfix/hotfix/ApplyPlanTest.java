@@ -235,5 +235,13 @@ class ApplyPlanTest {
   void should_round_trip_the_apply_arguments_through_json() {
     HotfixPlans.ApplyArgs args = new HotfixPlans.ApplyArgs(tmp.resolve("hf.zip"), true);
     assertThat(HotfixPlans.applyArgs(HotfixPlans.applyArgsJson(args))).isEqualTo(args);
+    HotfixPlans.ApplyArgs war =
+        args.intoWar(tmp.resolve("in.war"), tmp.resolve("out.war"))
+            .asGeneric()
+            .withInstallOut(tmp.resolve("buildomatic-tree"));
+    assertThat(HotfixPlans.applyArgs(HotfixPlans.applyArgsJson(war))).isEqualTo(war);
+    assertThatThrownBy(() -> args.withInstallOut(tmp))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("--install-out needs --war");
   }
 }

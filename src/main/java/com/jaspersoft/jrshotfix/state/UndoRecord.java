@@ -14,7 +14,9 @@ import java.util.Optional;
  * before (from the run's snapshot) and after the swap; {@code kept} lists the files the package
  * ships that were left as the site has them, which a rollback does not touch; {@code mergeId} names
  * the prepared merge the hotfix was applied with and {@code baselines} the vendor's files it was
- * compared with, both empty for an apply without a baseline.
+ * compared with, both empty for an apply without a baseline; {@code war} is the WAR a build host's
+ * apply replaced in place (0.7 design, section 2.1), whose earlier copy is in the undo's {@code
+ * war/} directory, empty for every other apply.
  */
 public record UndoRecord(
     String id,
@@ -27,7 +29,8 @@ public record UndoRecord(
     List<OwnedFile> files,
     List<KeptFile> kept,
     Optional<String> mergeId,
-    List<String> baselines) {
+    List<String> baselines,
+    Optional<OwnedFile> war) {
 
   public UndoRecord {
     requireNonNull(id, "id");
@@ -41,6 +44,45 @@ public record UndoRecord(
     kept = kept == null ? List.of() : List.copyOf(kept);
     mergeId = mergeId == null ? Optional.empty() : mergeId;
     baselines = baselines == null ? List.of() : List.copyOf(baselines);
+    war = war == null ? Optional.empty() : war;
+  }
+
+  /** The record of an apply that replaced no WAR. */
+  public UndoRecord(
+      String id,
+      String release,
+      String edition,
+      String build,
+      String title,
+      String runId,
+      Instant appliedAt,
+      List<OwnedFile> files,
+      List<KeptFile> kept,
+      Optional<String> mergeId,
+      List<String> baselines) {
+    this(
+        id,
+        release,
+        edition,
+        build,
+        title,
+        runId,
+        appliedAt,
+        files,
+        kept,
+        mergeId,
+        baselines,
+        Optional.empty());
+  }
+
+  /** Every file the apply wrote, the WAR it replaced last. */
+  public List<OwnedFile> allFiles() {
+    if (war.isEmpty()) {
+      return files;
+    }
+    List<OwnedFile> all = new java.util.ArrayList<>(files);
+    all.add(war.get());
+    return List.copyOf(all);
   }
 
   /**

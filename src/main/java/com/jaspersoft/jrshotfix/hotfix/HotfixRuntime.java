@@ -15,6 +15,7 @@ import com.jaspersoft.jrshotfix.service.ServerProbe;
 import com.jaspersoft.jrshotfix.service.ServiceRuntime;
 import com.jaspersoft.jrshotfix.snapshot.SnapshotStore;
 import com.jaspersoft.jrshotfix.state.UndoStore;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
@@ -64,6 +65,22 @@ public record HotfixRuntime(
   /** The vendor's webapp at the level this installation states, or why it is not known. */
   public BaseView.Resolution baseView() {
     return BaseView.resolve(baselines(), settings.webappDir(), files());
+  }
+
+  /**
+   * This runtime with {@code dir} as the installation tree: an apply into a WAR with {@code
+   * --install-out}, whose home's settings never name it (0.7 design, section 2.1).
+   */
+  public HotfixRuntime withInstallDir(Path dir) {
+    return new HotfixRuntime(
+        home,
+        settings.withKey("installDir", dir.toAbsolutePath().normalize().toString()),
+        platform,
+        undo,
+        snapshots,
+        clock,
+        sleeper,
+        probe);
   }
 
   public PackagePaths paths() {

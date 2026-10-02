@@ -85,6 +85,23 @@ public record Settings(
     return tomcatDir.resolve("webapps").resolve(webappName);
   }
 
+  /**
+   * True when there is no service to stop or start: a build host, or a home made for WARs ({@code
+   * service.kind} none).
+   */
+  public boolean serverless() {
+    return serviceKind == ServiceConfig.Kind.NONE;
+  }
+
+  /**
+   * On a build host, the distribution's WAR that buildomatic deploys, {@code
+   * <installDir>/<webappName>.war} (0.7 design, section 2.1); its unpacked copy is {@link
+   * #webappDir()}. Empty with a service. A home made for WARs names one too, which never exists.
+   */
+  public Optional<Path> distributionWar() {
+    return serverless() ? Optional.of(installDir.resolve(webappName + ".war")) : Optional.empty();
+  }
+
   public ServiceConfig toServiceConfig() {
     return new ServiceConfig(
         serviceKind,

@@ -117,7 +117,7 @@ public final class ScriptServiceController extends PollingServiceController {
     return switch (kind) {
       case CTLSCRIPT -> parent;
       case CATALINA -> Optional.ofNullable(parent.getParent()).orElse(parent);
-      case WINDOWS_SERVICE, SYSTEMD, MANUAL ->
+      case WINDOWS_SERVICE, SYSTEMD, MANUAL, NONE ->
           throw new IllegalArgumentException("not a script kind: " + kind);
     };
   }
@@ -218,7 +218,7 @@ public final class ScriptServiceController extends PollingServiceController {
     return switch (kind) {
       case CATALINA -> List.of(watchedDir);
       case CTLSCRIPT -> List.of(watchedDir.resolve("apache-tomcat"), watchedDir.resolve("tomcat"));
-      case WINDOWS_SERVICE, SYSTEMD, MANUAL -> throw new IllegalStateException(kind.name());
+      case WINDOWS_SERVICE, SYSTEMD, MANUAL, NONE -> throw new IllegalStateException(kind.name());
     };
   }
 
@@ -290,7 +290,7 @@ public final class ScriptServiceController extends PollingServiceController {
     return switch (kind) {
       case CTLSCRIPT -> List.of(script.toString(), operation, "tomcat");
       case CATALINA -> List.of(script.toString(), operation);
-      case WINDOWS_SERVICE, SYSTEMD, MANUAL -> throw new IllegalStateException(kind.name());
+      case WINDOWS_SERVICE, SYSTEMD, MANUAL, NONE -> throw new IllegalStateException(kind.name());
     };
   }
 
@@ -299,7 +299,7 @@ public final class ScriptServiceController extends PollingServiceController {
     return switch (kind) {
       case CTLSCRIPT -> "ctlscript " + script;
       case CATALINA -> "catalina script " + script;
-      case WINDOWS_SERVICE, SYSTEMD, MANUAL -> throw new IllegalStateException(kind.name());
+      case WINDOWS_SERVICE, SYSTEMD, MANUAL, NONE -> throw new IllegalStateException(kind.name());
     };
   }
 }

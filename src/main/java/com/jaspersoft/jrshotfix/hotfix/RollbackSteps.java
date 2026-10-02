@@ -34,6 +34,7 @@ import java.util.Optional;
 final class RollbackSteps {
 
   static final String PHASE = "rollback";
+  static final String CHECK_UNDO = "check-undo";
   static final String RESTORE_SNAPSHOT = "restore-snapshot";
   static final String DISCARD_UNDO = "discard-undo";
   static final String PRE_ROLLBACK_PREFIX = "pre-rollback-";
@@ -78,33 +79,92 @@ final class RollbackSteps {
         rt,
         PHASE,
         ServiceSteps.STOP,
-        () -> {
-          CheckResult snapshot = restore.snapshotCheck();
-          if (snapshot instanceof CheckResult.Fail) {
-            return snapshot;
-          }
-          List<String> changed = changedSinceApply(rt, in.undo());
-          if (!changed.isEmpty()) {
-            return CheckResult.fail(
-                changedProblem(in.undo(), changed),
-                "the server was changed after the hotfix was applied, so jrs-hotfix does not put"
-                    + " its files back; the files it replaced are under "
-                    + rt.home().undo()
-                    + " for whoever puts the server back by hand");
-          }
-          return CheckResult.pass();
-        },
+        () -> undoCheck(rt, in, restore),
         () -> ApplySteps.baseUrlCheck(rt));
   }
 
   /**
+   * Refuses when the undo's snapshot is missing or damaged, or a file changed since the apply: what
+   * the stop step checks before the outage, and the first step checks where there is none.
+   */
+  private static CheckResult undoCheck(HotfixRuntime rt, Input in, RestoreSnapshot restore) {
+    CheckResult snapshot = restore.snapshotCheck();
+    if (snapshot instanceof CheckResult.Fail) {
+      return snapshot;
+    }
+    List<String> changed = changedSinceApply(rt, in.undo());
+    if (!changed.isEmpty()) {
+      return CheckResult.fail(
+          changedProblem(in.undo(), changed),
+          "the files were changed after the hotfix was applied, so jrs-hotfix does not put"
+              + " them back; the files it replaced are under "
+              + rt.home().undo()
+              + " for whoever puts them back by hand");
+    }
+    return CheckResult.pass();
+  }
+
+  /**
+   * The first step of a rollback where there is no service, on a build host or in a home made for
+   * WARs (0.7 design, section 2.1): the stop step's refusals, without a stop.
+   */
+  static final class CheckUndo extends HotfixStep<Input> {
+    private final RestoreSnapshot restore;
+
+    CheckUndo(HotfixRuntime rt, Input in, RestoreSnapshot restore) {
+      super(rt, in);
+      this.restore = restore;
+    }
+
+    @Override
+    public String id() {
+      return CHECK_UNDO;
+    }
+
+    @Override
+    public String title() {
+      return "check the undo of " + in.id();
+    }
+
+    @Override
+    public String phase() {
+      return PHASE;
+    }
+
+    @Override
+    public String detail() {
+      return "the snapshot verifies, and every file is as the apply left it";
+    }
+
+    @Override
+    public boolean mutating() {
+      return false;
+    }
+
+    @Override
+    public CheckResult precheck(Context ctx) {
+      return undoCheck(rt, in, restore);
+    }
+
+    @Override
+    public StepResult execute(Context ctx, EventSink out) {
+      return StepResult.ok();
+    }
+
+    @Override
+    public StepResult compensate(Context ctx, EventSink out) {
+      return StepResult.ok();
+    }
+  }
+
+  /**
    * The files that are no longer as the apply left them: a file it wrote that now has another hash
-   * or is gone, and a file it deleted that is there again. Each as "path is hash" or "path is
-   * absent"; empty when the server is as the apply left it.
+   * or is gone, a file it deleted that is there again, and on a build host the WAR it replaced.
+   * Each as "path is hash" or "path is absent"; empty when all is as the apply left it.
    */
   static List<String> changedSinceApply(HotfixRuntime rt, UndoRecord undo) {
     List<String> changed = new ArrayList<>();
-    for (OwnedFile f : undo.files()) {
+    for (OwnedFile f : undo.allFiles()) {
       Optional<String> actual = FileTarget.hashOf(rt.files(), f.path());
       if (!actual.equals(f.afterSha256())) {
         changed.add(f.path() + " is " + actual.orElse("absent"));

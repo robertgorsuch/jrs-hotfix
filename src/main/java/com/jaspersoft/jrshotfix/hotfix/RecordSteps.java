@@ -88,6 +88,15 @@ final class RecordSteps {
             "the snapshot of run " + ctx.runId() + " is gone",
             "without it this apply cannot be undone; the hotfix is applied");
       }
+      Optional<OwnedFile> war;
+      try {
+        // on a build host, the WAR the swap replaced, kept beside the snapshot
+        war = WarSteps.Swap.read(snapshot.get().dir()).map(WarSteps.Swap::owned);
+      } catch (IOException e) {
+        return Failures.recoverable(
+            "cannot read the swap of the WAR in run " + ctx.runId() + ": " + e.getMessage(),
+            "without it the WAR could not be put back by a rollback");
+      }
       try {
         // what this package ships is the vendor's level from now on: the base of the next merge.
         // Staging wrote it before the outage, so this finds it there and reads nothing; a run
@@ -121,7 +130,8 @@ final class RecordSteps {
                     rows(before),
                     kept(),
                     in.merge().map(MergeDoc::id),
-                    in.merge().map(MergeDoc::baselines).orElse(List.of())));
+                    in.merge().map(MergeDoc::baselines).orElse(List.of()),
+                    war));
       } catch (IOException | UncheckedIOException e) {
         return Failures.recoverable(
             "cannot keep the undo of " + c.id() + ": " + e.getMessage(),

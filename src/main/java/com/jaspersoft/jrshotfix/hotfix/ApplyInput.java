@@ -49,6 +49,17 @@ public record ApplyInput(
     return out;
   }
 
+  /**
+   * The directory the snapshot is taken relative to: the installation tree when no target lies
+   * under the webapp (beside a WAR, only those are swapped in place), else the directory both trees
+   * share.
+   */
+  public Path snapshotBase() {
+    return targets.stream().noneMatch(t -> t.packagePath().startsWith(PackagePaths.WEBAPPS_PREFIX))
+        ? paths.installDir()
+        : paths.commonBase();
+  }
+
   public List<Path> touched() {
     return targets.stream().map(FileTarget::target).toList();
   }

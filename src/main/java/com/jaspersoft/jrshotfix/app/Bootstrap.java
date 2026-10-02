@@ -68,6 +68,7 @@ final class Bootstrap {
   private final boolean interactive;
   private final boolean explicitHome;
   private final Path lastHome;
+  private final boolean turned;
 
   private Bootstrap(
       Home home,
@@ -77,7 +78,8 @@ final class Bootstrap {
       Clock clock,
       boolean interactive,
       boolean explicitHome,
-      Path lastHome) {
+      Path lastHome,
+      boolean turned) {
     this.home = home;
     this.settings = settings;
     this.platform = platform;
@@ -86,6 +88,7 @@ final class Bootstrap {
     this.interactive = interactive;
     this.explicitHome = explicitHome;
     this.lastHome = lastHome;
+    this.turned = turned;
   }
 
   static Bootstrap open(GlobalOptions options, Map<String, String> env, Clock clock) {
@@ -141,7 +144,7 @@ final class Bootstrap {
     }
     Platform platform = settings.map(s -> detected.withInstallDir(s.installDir())).orElse(detected);
     return new Bootstrap(
-        home, settings, platform, Redactor.global(), clock, interactive, explicit, pointer);
+        home, settings, platform, Redactor.global(), clock, interactive, explicit, pointer, false);
   }
 
   Home home() {
@@ -209,9 +212,19 @@ final class Bootstrap {
    * under the home as the webapp, with no service; the input is unpacked or copied there unless the
    * copy is of this input already; the input itself is never written. A home that has no settings
    * gets these written, so {@code baseline add} and the other commands work in it without {@code
-   * --war}. A server's own settings are never replaced.
+   * --war}; so do settings written for WARs before 0.7, which named a manual service. A server's
+   * own settings are never replaced.
    */
   Bootstrap forWar(Path war) {
+    return forWar(war, Optional.empty());
+  }
+
+  /**
+   * As {@link #forWar(Path)}, with {@code installOut} as the installation tree when given: the
+   * package's buildomatic and samples files are applied there (0.7 design, section 2.1, "#30
+   * without a distribution"). The settings written to the home never name it.
+   */
+  Bootstrap forWar(Path war, Optional<Path> installOut) {
     Path file = war.toAbsolutePath().normalize();
     if (!Files.isRegularFile(file) && !Files.isDirectory(file)) {
       throw new HotfixException(
@@ -227,10 +240,24 @@ final class Bootstrap {
       beside = beside.getParent();
     }
     Home warHome = explicitHome ? home : new Home(beside.resolve(DefaultHome.DIR));
-    Settings s = warSettings(warHome, file);
+    Settings saved = warSettings(warHome, file);
+    Settings s =
+        installOut
+            .map(d -> saved.withKey("installDir", d.toAbsolutePath().normalize().toString()))
+            .orElse(saved);
+    Optional<Settings> existing = SettingsStore.load(warHome);
+    boolean forWars =
+        existing.isEmpty() || existing.get().withKey("service.kind", "none").equals(saved);
+    if (installOut.isPresent() && !forWars) {
+      // the undo of the installation tree would replace the undo of the home's own installation
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          warHome.root() + " is the home of " + existing.get().installDir() + ", not one for WARs",
+          "pass --home with a directory of its own for this WAR, or leave --home out");
+    }
     Bootstrap turned =
         new Bootstrap(
-            warHome, Optional.of(s), platform, redactor, clock, interactive, true, lastHome);
+            warHome, Optional.of(s), platform, redactor, clock, interactive, true, lastHome, true);
     turned.ensureHome();
     try {
       WarFile.unpack(file, s.webappDir(), platform.files());
@@ -241,8 +268,8 @@ final class Bootstrap {
           "check the file and the free space under " + warHome.root(),
           e);
     }
-    if (SettingsStore.load(warHome).isEmpty()) {
-      SettingsStore.save(warHome, s);
+    if (forWars) {
+      SettingsStore.save(warHome, saved);
     }
     return turned;
   }
@@ -262,7 +289,7 @@ final class Bootstrap {
         wars,
         wars,
         stem,
-        ServiceConfig.Kind.MANUAL,
+        ServiceConfig.Kind.NONE,
         Optional.empty(),
         Optional.empty(),
         60,
@@ -292,8 +319,24 @@ final class Bootstrap {
         () -> new HotfixException(HotfixException.PRECHECK, NO_SETTINGS, NO_SETTINGS_REMEDIATION));
   }
 
+  /**
+   * The runtime over {@code s}. On a build host the distribution's WAR is unpacked first under the
+   * home, unless the copy there is of it already, so every command reads the webapp it holds.
+   */
   private HotfixRuntime runtime(Settings s) {
     ensureHome();
+    Optional<Path> war = s.distributionWar().filter(w -> !turned && Files.isRegularFile(w));
+    if (war.isPresent()) {
+      try {
+        WarFile.unpack(war.get(), s.webappDir(), platform.files());
+      } catch (IOException e) {
+        throw new HotfixException(
+            HotfixException.PRECHECK,
+            "cannot unpack " + war.get() + ": " + e.getMessage(),
+            "check the file and the free space under " + home.root(),
+            e);
+      }
+    }
     return new HotfixRuntime(
         home,
         s,
