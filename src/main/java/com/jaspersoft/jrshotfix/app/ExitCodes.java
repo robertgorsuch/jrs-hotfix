@@ -28,6 +28,13 @@ public final class ExitCodes {
   public static final int FAILED_ROLLBACK_INCOMPLETE = 4;
   public static final int CANCELLED = 5;
   public static final int UNSUPPORTED = 6;
+
+  /**
+   * A warning, not a failure: {@code compare} ran and its inputs differ, or a three-way comparison
+   * has conflicts (0.7 design, section 3). Only {@code compare} exits with it.
+   */
+  public static final int DIFFERENT = 7;
+
   public static final int RECOVERY_REQUIRED = 8;
   public static final int LOCK_HELD = 9;
 
