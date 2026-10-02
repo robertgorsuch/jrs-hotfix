@@ -43,6 +43,28 @@ public class WarFileTest {
   }
 
   @Test
+  void should_copy_a_webapp_directory_and_assemble_a_war_from_it() throws Exception {
+    Path dir = tmp.resolve("webapps/jasperserver-pro");
+    Wars.install(dir, Wars.vendor());
+    Path webapp = tmp.resolve("wars/webapps/jasperserver-pro");
+
+    WarFile.Unpacked copied = WarFile.unpack(dir, webapp, files);
+
+    assertThat(copied.entries()).isEqualTo(Wars.vendor().size());
+    assertThat(copied.sha256()).isEqualTo(WarFile.hash(dir, files));
+    assertThat(WarFile.paths(dir)).containsExactlyInAnyOrderElementsOf(Wars.vendor().keySet());
+    Path out = tmp.resolve("out.war");
+    int count = WarFile.assemble(dir, out, Set.of(Wars.LOGO), Map.of());
+    assertThat(count).isEqualTo(Wars.vendor().size() - 1);
+    assertThat(entries(out)).doesNotContainKey(Wars.LOGO).containsKey(Wars.WEB_XML);
+    // a directory that is not a webapp is refused, not copied
+    Path notAWebapp = Files.createDirectories(tmp.resolve("other"));
+    assertThatThrownBy(() -> WarFile.unpack(notAWebapp, webapp, files))
+        .isInstanceOf(HotfixException.class)
+        .hasMessageContaining("no WEB-INF");
+  }
+
+  @Test
   void should_unpack_once_and_reuse_the_copy_while_the_war_is_the_same() throws Exception {
     Path war = Wars.war(tmp.resolve("in.war"), Wars.vendor());
     Path webapp = tmp.resolve("wars/webapps/jasperserver-pro");

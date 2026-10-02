@@ -96,7 +96,7 @@ final class MergeCommand extends GroupCommand {
 
     @Option(
         names = "--war",
-        paramLabel = "<file.war>",
+        paramLabel = "<file.war | dir>",
         description =
             "Merge into this WAR instead of the server; the same WAR is then given to `apply"
                 + " --war`. The home is --home, else jrs-hotfix beside the WAR.")

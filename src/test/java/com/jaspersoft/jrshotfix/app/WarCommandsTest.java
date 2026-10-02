@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.jaspersoft.jrshotfix.baseline.Wars;
 import com.jaspersoft.jrshotfix.hotfix.SiteFixture;
 import com.jaspersoft.jrshotfix.pkg.Packages;
+import com.jaspersoft.jrshotfix.platform.DefaultFileOps;
+import com.jaspersoft.jrshotfix.war.WarFile;
 import com.jaspersoft.jrshotfix.war.WarFileTest;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -214,6 +216,105 @@ class WarCommandsTest {
     assertThat(f.out()).contains(SiteFixture.HOTFIX_ID);
     assertThat(f.run("scan", "--war", out.toString())).isEqualTo(0);
     assertThat(f.out()).contains("baseline: " + Wars.RELEASE_ID + " + " + SiteFixture.HOTFIX_ID);
+  }
+
+  /** A deployed webapp: the vendor's files as an installer leaves them, in Tomcat's webapps. */
+  private Path deployedWebapp() throws Exception {
+    Path webapp = tmp.resolve("srv/apache-tomcat/webapps/jasperserver-pro");
+    Wars.install(webapp, Wars.vendor());
+    Wars.installAsTheInstallerDoes(webapp);
+    return webapp;
+  }
+
+  @Test
+  void should_turn_a_deployed_webapp_into_a_hotfixed_war_and_never_write_the_directory()
+      throws Exception {
+    CommandsTest.Fixture f = fixture();
+    Path webapp = deployedWebapp();
+    String before = WarFile.hash(webapp, new DefaultFileOps());
+    Path out = tmp.resolve("wars/from-dir.war");
+    Files.createDirectories(out.getParent());
+
+    assertThat(
+            f.runExactly(
+                List.of(
+                    "apply",
+                    hotfix().toString(),
+                    "--war",
+                    webapp.toString(),
+                    "--out",
+                    out.toString(),
+                    "--yes")))
+        .as("stdout: %s; stderr: %s", f.out(), f.err())
+        .isEqualTo(0);
+
+    Map<String, String> result = WarFileTest.entries(out);
+    // the deployed configuration stays: the container's context, the scheduler's site value
+    assertThat(result.get(Wars.CONTAINER)).contains("jasperdb");
+    assertThat(result.get(Wars.QUARTZ)).doesNotContain("@@BITROCK");
+    assertThat(result.get(Packages.LIB + "foo-1.2.3.jar")).isEqualTo("patched foo");
+    assertThat(result).doesNotContainKey(Packages.LIB + "bar-0.9.jar");
+    assertThat(WarFile.hash(webapp, new DefaultFileOps())).isEqualTo(before);
+    // the home is beside Tomcat's webapps, never inside it, where Tomcat would deploy it
+    assertThat(tmp.resolve("srv/apache-tomcat/jrs-hotfix")).isDirectory();
+    assertThat(tmp.resolve("srv/apache-tomcat/webapps/jrs-hotfix")).doesNotExist();
+  }
+
+  @Test
+  void should_write_the_vendors_installer_files_into_a_generic_war() throws Exception {
+    CommandsTest.Fixture f = fixture();
+    Map<String, String> edits = new LinkedHashMap<>();
+    edits.put("META-INF/site-jdbc.xml", "<jdbc url=\"jdbc:postgresql://db/site\"/>\n");
+    edits.put(Wars.SECURITY, Wars.vendor().get(Wars.SECURITY).replace("a,b", "a,b,c"));
+    Path in = siteWar("generic.war", edits);
+    Path out = tmp.resolve("wars/generic-out.war");
+    // a hotfix that ships the scheduler's settings and not the container's context
+    Map<String, String> payload = new LinkedHashMap<>(SiteFixture.hotfixPayload());
+    payload.remove(Wars.CONTAINER);
+    Map<String, byte[]> outer = new LinkedHashMap<>();
+    outer.put("readme.txt", Packages.OUTER_README.getBytes(StandardCharsets.UTF_8));
+    outer.put("jasperserver-pro.zip", Packages.zipBytes(payload, null));
+    Path zip = Packages.zip(tmp.resolve("dl/hotfix-generic.zip"), outer);
+    List<String> apply =
+        List.of(
+            "apply",
+            zip.toString(),
+            "--war",
+            in.toString(),
+            "--out",
+            out.toString(),
+            "--generic",
+            "--yes");
+
+    // the vendor's copies come from the release baseline: none, no generic WAR
+    assertThat(f.run(apply.toArray(String[]::new))).isEqualTo(2);
+    assertThat(f.err()).contains("--generic");
+    assertThat(
+            f.run(
+                "baseline",
+                "add",
+                Wars.war(tmp.resolve("dl/vendor.war"), Wars.vendor()).toString()))
+        .isEqualTo(0);
+    assertThat(f.run(apply.toArray(String[]::new)))
+        .as("stdout: %s; stderr: %s", f.out(), f.err())
+        .isEqualTo(0);
+    assertThat(f.out()).contains("as the vendor ships them (--generic)");
+
+    Map<String, String> result = WarFileTest.entries(out);
+    // the package's copy, the vendor's copy, and the site's own data source left out
+    assertThat(result.get(Wars.QUARTZ)).contains("localhost:8080");
+    assertThat(result.get(Wars.CONTAINER)).isEqualTo(Wars.vendor().get(Wars.CONTAINER));
+    assertThat(result).doesNotContainKey("META-INF/site-jdbc.xml");
+    // every other change of the site is kept or merged as without --generic
+    assertThat(result.get(Wars.SECURITY)).contains("allow.list=a,b,c").contains("fresh=1");
+  }
+
+  @Test
+  void should_refuse_generic_without_a_war() throws Exception {
+    CommandsTest.Fixture f = fixture();
+    assertThat(f.runExactly(List.of("apply", hotfix().toString(), "--generic", "--yes")))
+        .isEqualTo(1);
+    assertThat(f.err()).contains("--generic is for a WAR target");
   }
 
   @Test

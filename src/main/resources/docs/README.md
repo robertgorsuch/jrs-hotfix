@@ -22,12 +22,12 @@ about to run, so using the menu also teaches the scripted form.
 ```
 jrs-hotfix                                   menu at a terminal; usage otherwise
 jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--keep-superseded] [--plan] [--yes]
-jrs-hotfix apply <package.zip> --war <in.war> --out <out.war> [--merge <mergeId>]
+jrs-hotfix apply <package.zip> --war <in.war | dir> --out <out.war> [--merge <mergeId>] [--generic]
 jrs-hotfix rollback [--plan] [--yes]
-jrs-hotfix verify <package.zip> [--war <file.war>]
-jrs-hotfix scan [--war <file.war>]
+jrs-hotfix verify <package.zip> [--war <file.war | dir>]
+jrs-hotfix scan [--war <file.war | dir>]
 jrs-hotfix baseline [list | add <war | dir | package.zip> | remove <id>]
-jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war>] | list | status <mergeId>
+jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war | dir>] | list | status <mergeId>
                   | show <mergeId> <path>
                   | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
                   | discard <mergeId>]
@@ -136,7 +136,10 @@ every file the package ships is replaced, as before.
 `apply <package.zip> --war <in.war> --out <out.war>` does the same to a WAR
 instead of a server: no service, no snapshot; the input is never modified, the
 output is the one file written, and the home is `jrs-hotfix` beside the WAR
-unless `--home` says otherwise. `scan --war` and
+unless `--home` says otherwise. `--war` also takes a deployed or exploded webapp
+directory, whose configuration the output keeps; `--generic` writes the vendor's
+`META-INF/context.xml`, `*-jdbc.xml` and installer-written settings instead, for
+a WAR deployed with its own database configuration (it needs a release baseline). `scan --war` and
 `merge prepare --war` read the site's files from the WAR. Files of
 `js-install.zip` are not part of a WAR and are left out.
 

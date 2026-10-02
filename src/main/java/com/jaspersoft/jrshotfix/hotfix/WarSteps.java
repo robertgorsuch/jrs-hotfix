@@ -26,12 +26,13 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * The steps of an apply whose target is a WAR (0.2 design, section 7): the input WAR is never
- * modified, the hotfixed WAR is written beside the output path and renamed only once checked, and
- * there is no undo (a WAR has no server to put back): the output's own build file and the hotfix
- * baseline in the home say what it carries. Invariants: every step re-checks the state on disk
- * before it acts, so a resumed run converges; the only files written outside the home are the
- * output and its temporary name; there is no service, no snapshot and no rollback.
+ * The steps of an apply whose target is a WAR (0.2 design, section 7), or a deployed or exploded
+ * webapp directory turned into one (0.7 design, section 2.2): the input is never modified, the
+ * hotfixed WAR is written beside the output path and renamed only once checked, and there is no
+ * undo (a WAR has no server to put back): the output's own build file and the hotfix baseline in
+ * the home say what it carries. Invariants: every step re-checks the state on disk before it acts,
+ * so a resumed run converges; the only files written outside the home are the output and its
+ * temporary name; there is no service, no snapshot and no rollback.
  */
 final class WarSteps {
 
@@ -43,11 +44,26 @@ final class WarSteps {
 
   private WarSteps() {}
 
-  /** What a WAR apply was asked to do, beside the package. */
-  record Target(Path war, Path out, String webappName) {
+  /**
+   * What a WAR apply was asked to do, beside the package: with {@code --generic}, the files that
+   * take the vendor's copy ({@code vendorCopies}, webapp path to the baseline's file) and those
+   * left out because the vendor has none ({@code vendorDropped}).
+   */
+  record Target(
+      Path war,
+      Path out,
+      String webappName,
+      Map<String, Path> vendorCopies,
+      Set<String> vendorDropped) {
     Target {
       war = war.toAbsolutePath().normalize();
       out = out.toAbsolutePath().normalize();
+      vendorCopies = Map.copyOf(vendorCopies);
+      vendorDropped = Set.copyOf(vendorDropped);
+    }
+
+    Target(Path war, Path out, String webappName) {
+      this(war, out, webappName, Map.of(), Set.of());
     }
 
     Path temporary() {
@@ -102,12 +118,12 @@ final class WarSteps {
       if (Files.exists(target.out())) {
         problems.add(target.out() + " exists already; the output is never overwritten");
       }
-      if (!Files.isRegularFile(target.war())) {
+      if (!Files.exists(target.war())) {
         problems.add(target.war() + " is gone");
       }
       long size = 0;
       try {
-        size = Files.size(target.war()) + Files.size(in.packageFile());
+        size = WarFile.size(target.war()) + Files.size(in.packageFile());
       } catch (IOException e) {
         problems.add("cannot size the inputs: " + e.getMessage());
       }
@@ -204,6 +220,8 @@ final class WarSteps {
           staged.put(path.get(), in.staged(ctx, t));
         }
       }
+      staged.putAll(target.vendorCopies());
+      dropped.addAll(target.vendorDropped());
       if (skipped > 0) {
         log(
             ctx,
@@ -304,6 +322,15 @@ final class WarSteps {
           if (!inputPaths.contains(path.get())) {
             count++;
           }
+        }
+      }
+      for (Map.Entry<String, Path> e : target.vendorCopies().entrySet()) {
+        hashes.put(e.getKey(), FileTarget.hashOf(rt.files(), e.getValue()).orElse(""));
+      }
+      for (String path : target.vendorDropped()) {
+        absent.add(path);
+        if (inputPaths.contains(path)) {
+          count--;
         }
       }
       return new WarFile.Expected(hashes, absent, count);
