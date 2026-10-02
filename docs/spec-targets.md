@@ -205,6 +205,17 @@ Nothing is removed or renamed; every 0.6 command line keeps working.
 The four phases are one release, 0.7.0 (decided 2026-10-01); each is its own pull request,
 merged into `main` in this order.
 
+## Phase 1 as built (#42)
+
+The installation area is `baseline/Area`, `BaselineManifest.installFiles` and `installDeleted`,
+`BaseView.installation()`, `Scan` over both areas, and `MergeDoc.Item.area`. A release baseline
+from the distribution's directory or ZIP records both areas; a hotfix baseline records its
+`js-install.zip`; `scan` prints the installation as a second section; `verify` and `merge
+prepare` judge both. The installation is compared only where the installation directory holds
+`buildomatic/` or `samples/`, so a WAR target, whose settings name a scratch directory, is
+unaffected. The site files and generated directories of open point 1 are a provisional list in
+`Area`, the one place to change once measured.
+
 ## Decided 2026-10-01
 
 1. **#30 without a distribution:** `apply --war ... --install-out <dir>` is wanted (section
