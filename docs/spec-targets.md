@@ -1,7 +1,8 @@
 # jrs-hotfix 0.7: customizations wherever a hotfix goes
 
-Status: decided 2026-10-01, for 0.7.0; phases 1 to 4 built, phase 2 on the assumptions of
-the open points, which are still to be measured before the release. Extends `docs/spec-customized-servers.md` (the 0.2
+Status: decided 2026-10-01, for 0.7.0; phases 1 to 4 built; open point 2 confirmed and open
+point 1 measured on a 10.0.0 installation (2026-10-01), one check on a WAR-file distribution
+left. Extends `docs/spec-customized-servers.md` (the 0.2
 design, cited as "0.2 design 4.2") and `docs/spec-no-ledger.md` (the 0.6 design). Source:
 issues #30 to #34, and the maintainer's ruling of 2026-10-01:
 
@@ -239,9 +240,8 @@ settings are a server's or a build host's, whose undo it would replace. Homes ma
 have `service.kind` `none` too, and settings written for WARs before (a manual service) are
 rewritten so, so their rollback has no service step.
 
-Built on the open points' assumptions: `Area`'s provisional lists for point 1, and for point 2
-that buildomatic deploys `<distribution>/jasperserver-pro.war` itself. If it deploys from a copy,
-`Settings.distributionWar` is the one place that names the target.
+Built on the open points' assumptions, since measured (see Open points): point 2 holds as
+built; point 1 added four installer-written files to `Area`.
 
 ## Decided 2026-10-01
 
@@ -256,11 +256,33 @@ that buildomatic deploys `<distribution>/jasperserver-pro.war` itself. If it dep
 
 ## Open points
 
-These are facts to measure on a real JasperReports Server 10.0.0 distribution before phase 1
-and phase 2 are built, not choices:
+Facts to measure on a real JasperReports Server 10.0.0 distribution, not choices; measured
+2026-10-01 on the 10.0.0 installation at `C:\Jaspersoft\jasperreports-server-10.0.0`, made by
+the bundled installer (the vendor's files are dated 2026-01-22; what the installer wrote,
+2026-05-28; what `js-ant` wrote later):
 
 1. **The installation's installer-written and generated files**, after `js-install` has run:
    which files buildomatic writes from `default_master.properties`, and whether any shipped
    file holds site values the way the webapp's four properties files do (0.2 design 4.4).
 2. **That buildomatic deploys the distribution's own `jasperserver-pro.war`**, and from which
    path. If it unpacks the WAR somewhere first, that copy is the target instead.
+
+**Point 2, confirmed.** `deploy-webapp` in `buildomatic/bin/app-server.xml` reads
+`${basedir}/../jasperserver-pro.war`, the WAR at the distribution's root, and unzips it straight
+into the application server's webapp; only when it is absent does it copy
+`buildomatic/install_resources/war/jasperserver-pro/`, a tree built from source, which is not a
+distribution in the sense of section 2.1. `Settings.distributionWar` is right as built.
+
+**Point 1, measured.** The installer wrote 18 files under buildomatic, `js-ant` wrote
+`build_conf/` and `logs/` (generated, as assumed), and nothing under `samples/`. Of the
+installer's, these hold this site's values and are now site files in `Area`, kept by every
+merge: `default_master.properties`; `keystore.init.properties` (the keystore's location);
+`bin/js-import-export.sh` (the install path in `JAVA_EXEC`); `install_resources/export/js-catalog/`
+(the sample data sources and XMLA connections, with the database's address, the server's port
+and encrypted passwords). `conf_source/iePro/lib/iecp.jar`, a jar of a manifest only, is
+generated. An installer-written script or binary is now kept with the hotfix's copy in the
+workspace as `theirs`, as an installer-written XML file already was. The other eleven `js-*.sh`
+scripts the installer rewrote stay ordinary files: their changes could not be told from the
+vendor's without a copy of the vendor's, and a hotfix may well fix one. The cumulative hotfix
+of 2026-07-30 ships none of the 18. Left to check: what `js-install` writes on a WAR-file
+distribution, which the bundled installer measured here may exceed.
