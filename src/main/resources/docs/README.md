@@ -22,7 +22,7 @@ about to run, so using the menu also teaches the scripted form.
 ```
 jrs-hotfix                                   menu at a terminal; usage otherwise
 jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--keep-superseded] [--plan] [--yes]
-jrs-hotfix apply <package.zip> --war <in.war | dir> --out <out.war> [--merge <mergeId>] [--generic]
+jrs-hotfix apply <package.zip> --war <in.war | dir> --out <out.war> [--merge <mergeId>] [--generic] [--install-out <dir>]
 jrs-hotfix rollback [--plan] [--yes]
 jrs-hotfix verify <package.zip> [--war <file.war | dir>]
 jrs-hotfix scan [--war <file.war | dir>]
@@ -142,14 +142,24 @@ directory, whose configuration the output keeps; `--generic` writes the vendor's
 `META-INF/context.xml`, `*-jdbc.xml` and installer-written settings instead, for
 a WAR deployed with its own database configuration (it needs a release baseline). `scan --war` and
 `merge prepare --war` read the site's files from the WAR. Files of
-`js-install.zip` are not part of a WAR and are left out.
+`js-install.zip` are not part of a WAR and are left out, unless `--install-out
+<dir>` names an installation tree to apply them to, with an undo in a home of its
+own.
+
+On a build host, an unpacked distribution that deploys with buildomatic and runs
+no server, `settings detect` in the distribution's directory writes settings
+with `service.kind` `none`. `apply` then hotfixes `jasperserver-pro.war` in
+place, checked before it replaces the old one, and swaps the buildomatic and
+samples files, with no service; the old WAR moves into the home as part of the
+undo. Deploying with `js-ant deploy-webapp-pro` is yours; jrs-hotfix never runs
+buildomatic.
 
 ## Rollback
 
 `jrs-hotfix rollback` undoes the latest apply, from `undo/`: replaced files come
 back, files the hotfix added are removed, and files it deleted are restored.
 There is one level of undo: the rollback uses it up and the next apply replaces
-it. Before the service is stopped every file is checked against what the apply
+it. On a build host it puts the WAR back too, and there is no service to stop. Before the service is stopped every file is checked against what the apply
 left; if the server changed since, the rollback is refused (exit 2) and names
 the files. Restore is per file and idempotent, so a crash mid-restore resumes
 cleanly. The JSP cache is removed after the restore, as it is after a swap.
@@ -233,7 +243,7 @@ wars/webapps/<name>/          the unpacked copy of the WAR being worked on (--wa
 | `installDir` | JRS installation root | detected |
 | `tomcatDir` | Tomcat root | `<installDir>/apache-tomcat` |
 | `webappName` | `jasperserver-pro` or `jasperserver` | detected from `webapps/` |
-| `service.kind` | `windows-service`, `systemd`, `ctlscript`, `catalina`, `manual` | detected |
+| `service.kind` | `windows-service`, `systemd`, `ctlscript`, `catalina`, `manual`, or `none` on a build host | detected |
 | `service.name` | service name (windows-service, systemd) | detected |
 | `service.scriptPath` | script path (ctlscript, catalina) | detected |
 | `service.stopTimeoutSeconds` | how long a stop may take | 180 |

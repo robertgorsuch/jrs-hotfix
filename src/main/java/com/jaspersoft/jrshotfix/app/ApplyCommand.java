@@ -91,6 +91,16 @@ final class ApplyCommand extends AppCommand {
               + " release baseline.")
   boolean generic;
 
+  @Option(
+      names = "--install-out",
+      paramLabel = "<dir>",
+      description =
+          "With --war: also apply the package's buildomatic and samples files to this"
+              + " installation tree, merged with this site's as on a server, after a snapshot that"
+              + " `rollback` puts back. An empty or absent directory receives them as the package"
+              + " has them. Without it they are left out.")
+  Path installOut;
+
   @Override
   public Integer call() {
     if ((war == null) != (out == null)) {
@@ -104,7 +114,15 @@ final class ApplyCommand extends AppCommand {
           "--generic is for a WAR target: it needs --war and --out",
           Optional.of("a server's installer-written files are its own configuration"));
     }
-    Bootstrap boot = war == null ? open() : open().forWar(war);
+    if (installOut != null && war == null) {
+      return ExitCodes.fail(
+          err(),
+          ExitCodes.USAGE,
+          "--install-out is for a WAR target: it needs --war and --out",
+          Optional.of(
+              "on a server or a build host the installation tree is the one in the settings"));
+    }
+    Bootstrap boot = war == null ? open() : open().forWar(war, Optional.ofNullable(installOut));
     boolean confirmed = false;
     if (!global().yes() && !plan && boot.interactive() && Files.isRegularFile(file)) {
       String sha;
@@ -145,6 +163,9 @@ final class ApplyCommand extends AppCommand {
     }
     if (generic) {
       args = args.asGeneric();
+    }
+    if (installOut != null) {
+      args = args.withInstallOut(installOut);
     }
     Plan p = plans.planApply(args);
     List<String> audit =

@@ -21,6 +21,7 @@ It comes as one download with everything it needs inside. There is nothing else 
 | Find out what the site changed in the webapp | `jrs-hotfix scan` |
 | Install a hotfix without losing the site's changes | `jrs-hotfix baseline add <vendor.war>`, then `jrs-hotfix apply <package.zip>` |
 | Make a hotfixed WAR from a WAR or a deployed webapp, with no server | `jrs-hotfix apply <package.zip> --war <in.war \| dir> --out <out.war>` |
+| Hotfix a build host, which deploys with buildomatic and runs no server | `jrs-hotfix settings detect` in the distribution, then `jrs-hotfix apply <package.zip>` |
 | Compare two WARs or webapps, or see what two of them each changed from a third | `jrs-hotfix compare <a> <b>` / `jrs-hotfix compare <base> <mine> <theirs>` |
 | Finish or undo an interrupted job | `jrs-hotfix runs resume <id>` / `jrs-hotfix runs undo <id>` |
 
@@ -28,7 +29,7 @@ It comes as one download with everything it needs inside. There is nothing else 
 
 ## Before you start
 
-- **Run jrs-hotfix on the JasperReports Server machine itself**, except when the target is a WAR file (`--war`), which needs no server at all.
+- **Run jrs-hotfix on the JasperReports Server machine itself**, except when the target is a WAR file (`--war`) or a build host, which need no server at all.
 - **Use the account that owns the installation:** on Linux, the user that installed JasperReports Server and runs its Tomcat (`root` when a systemd unit controls it); on Windows, open **Command Prompt** with **Run as administrator**.
 - **Have the hotfix package as Jaspersoft Support published it:** a `.zip` holding `readme.txt` plus one or both of `jasperserver-pro.zip` (paths under the webapp) and `js-install.zip` (paths under the installation). Do not unpack or repack it. Have the package's checksum from the support portal at hand: `apply` prints the SHA-256 of the file and asks whether it matches.
 - **No Java to install.** The download includes its own Java, used only by jrs-hotfix. The server's Java is neither used nor changed, and no `JAVA_HOME` is needed.
@@ -149,7 +150,7 @@ The hotfix packages are cumulative, so the build the webapp states about itself 
 jrs-hotfix rollback
 ```
 
-There is one level of undo: the latest apply. Replaced files come back exactly as they were, files the hotfix added are removed, and files it deleted are restored; the JSP cache is cleared after it as after a swap, and the restore is per file and idempotent, so a crash mid-restore resumes cleanly. Before the service is stopped, every file is checked against what the apply left: if the server changed since (a redeploy, a file edited by hand), the rollback is refused with exit 2 and names the files, and the files the hotfix replaced are under `undo/payload` in the home for whoever puts the server back by hand.
+There is one level of undo: the latest apply. Replaced files come back exactly as they were, files the hotfix added are removed, and files it deleted are restored (on a build host, the WAR too, with no service to stop); the JSP cache is cleared after it as after a swap, and the restore is per file and idempotent, so a crash mid-restore resumes cleanly. Before the service is stopped, every file is checked against what the apply left: if the server changed since (a redeploy, a file edited by hand), the rollback is refused with exit 2 and names the files, and the files the hotfix replaced are under `undo/payload` in the home for whoever puts the server back by hand.
 
 The undo is used up by the rollback, and replaced by the next apply: after either, the hotfix before cannot be taken out with jrs-hotfix. An apply that fails and is undone leaves the previous undo as it was. A hotfix applied by hand has no undo; the server is simply at its build.
 
@@ -228,6 +229,22 @@ The home is `--home` (or `JRS_HOTFIX_HOME`), else `jrs-hotfix` beside the WAR, a
 
 Files of `js-install.zip` (`buildomatic`, `samples`) are not part of a WAR: the plan says how many were left out, and they are applied on the server the WAR is deployed to. A WAR has no undo: `apply --war` leaves the home's `undo/` alone, and the server that deploys the output states the hotfix's build like any other.
 
+To patch a buildomatic kept elsewhere at the same time, add `--install-out <dir>`: the package's `buildomatic` and `samples` files are applied to that installation tree, merged with the site's as on a server when the home has the distribution as a baseline, after a snapshot, and `jrs-hotfix rollback --home <home>` puts them back (the output WAR stays; it is yours). An empty or absent directory receives them as the package has them. `--install-out` needs a home of its own: the home of a server or a build host is refused, since its undo is that installation's.
+
+### Hotfix a build host
+
+```bash
+cd C:\build\jasperreports-server-pro-10.0.0      # buildomatic\, samples\, jasperserver-pro.war
+jrs-hotfix settings detect
+jrs-hotfix baseline add C:\Downloads\jasperreports-server-pro-10.0.0.zip
+jrs-hotfix apply C:\Downloads\hotfix_....zip
+js-ant deploy-webapp-pro                         # from buildomatic, as always: jrs-hotfix never runs it
+```
+
+A build host holds the unpacked distribution, `buildomatic/`, `samples/` and `jasperserver-pro.war`, and deploys to application servers elsewhere; it runs no server. `settings detect` run in the distribution's directory (or with `--home <distribution>\jrs-hotfix`) recognizes one and writes settings with `service.kind` `none`. Then `apply` does to the distribution what it does to a server, without a service: the WAR is hotfixed as `--war` does it, beside itself, checked entry by entry and only then put in place of the old one, and the `buildomatic` and `samples` files are swapped in place. With the distribution as a baseline, the site's changes in both, the webapp's configuration files inside the WAR and buildomatic's, are kept and merged as on a server.
+
+The old WAR is moved into the home, not copied, and is the undo with the installation files: `jrs-hotfix rollback` puts both back, after checking that nothing changed since the apply, the WAR included. Deploying is yours: the plan ends by naming `js-ant deploy-webapp-pro`, and after a rollback the earlier WAR is deployed the same way. `list`, `scan` and `verify` read the WAR the distribution holds.
+
 ### Compare WARs, webapps and distributions
 
 ```bash
@@ -293,7 +310,7 @@ The full command list:
 ```
 jrs-hotfix                                   menu at a terminal; usage otherwise
 jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--keep-superseded] [--plan] [--yes]
-jrs-hotfix apply <package.zip> --war <in.war | dir> --out <out.war> [--merge <mergeId>] [--generic]
+jrs-hotfix apply <package.zip> --war <in.war | dir> --out <out.war> [--install-out <dir>] [--merge <mergeId>] [--generic]
 jrs-hotfix rollback [--plan] [--yes]
 jrs-hotfix verify <package.zip> [--war <file.war | dir>]
 jrs-hotfix scan [--war <file.war | dir>]
@@ -359,7 +376,7 @@ wars/webapps/<name>/          the copy of the WAR or webapp directory being work
 | `installDir` | JRS installation root | detected |
 | `tomcatDir` | Tomcat root | `<installDir>/apache-tomcat` |
 | `webappName` | `jasperserver-pro` or `jasperserver` | detected from `webapps/` |
-| `service.kind` | `windows-service`, `systemd`, `ctlscript`, `catalina`, `manual` | detected |
+| `service.kind` | `windows-service`, `systemd`, `ctlscript`, `catalina`, `manual`, or `none` on a build host | detected |
 | `service.name` | service name (windows-service, systemd) | detected |
 | `service.scriptPath` | script path (ctlscript, catalina) | detected |
 | `service.stopTimeoutSeconds` | how long a stop may take | 180 |

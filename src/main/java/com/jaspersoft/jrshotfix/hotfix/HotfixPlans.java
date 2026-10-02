@@ -82,6 +82,7 @@ public final class HotfixPlans {
    * What {@code apply} was asked to do; stored with the run so the plan can be rebuilt. {@code
    * mergeId} names the prepared merge that says what happens to the files this site changed; empty
    * means there was no baseline to compare with, and the package is applied as 0.1 applied it.
+   * {@code installOut} is the installation tree an apply into a WAR also patches.
    */
   public record ApplyArgs(
       Path packageFile,
@@ -90,18 +91,42 @@ public final class HotfixPlans {
       Optional<Path> war,
       Optional<Path> out,
       boolean keepSuperseded,
-      boolean generic) {
+      boolean generic,
+      Optional<Path> installOut) {
     public ApplyArgs {
       Objects.requireNonNull(packageFile, "packageFile");
       Objects.requireNonNull(mergeId, "mergeId");
       Objects.requireNonNull(war, "war");
       Objects.requireNonNull(out, "out");
+      installOut = installOut == null ? Optional.empty() : installOut;
       if (war.isPresent() != out.isPresent()) {
         throw new IllegalArgumentException("--war and --out go together");
       }
       if (generic && war.isEmpty()) {
         throw new IllegalArgumentException("--generic needs --war");
       }
+      if (installOut.isPresent() && war.isEmpty()) {
+        throw new IllegalArgumentException("--install-out needs --war");
+      }
+    }
+
+    public ApplyArgs(
+        Path packageFile,
+        boolean checksumConfirmed,
+        Optional<String> mergeId,
+        Optional<Path> war,
+        Optional<Path> out,
+        boolean keepSuperseded,
+        boolean generic) {
+      this(
+          packageFile,
+          checksumConfirmed,
+          mergeId,
+          war,
+          out,
+          keepSuperseded,
+          generic,
+          Optional.empty());
     }
 
     public ApplyArgs(
@@ -129,7 +154,8 @@ public final class HotfixPlans {
 
     /** These arguments with superseded libraries left where they are. */
     public ApplyArgs keepingSuperseded() {
-      return new ApplyArgs(packageFile, checksumConfirmed, mergeId, war, out, true, generic);
+      return new ApplyArgs(
+          packageFile, checksumConfirmed, mergeId, war, out, true, generic, installOut);
     }
 
     /**
@@ -137,7 +163,24 @@ public final class HotfixPlans {
      * instead of the site's (0.7 design, section 2.2).
      */
     public ApplyArgs asGeneric() {
-      return new ApplyArgs(packageFile, checksumConfirmed, mergeId, war, out, keepSuperseded, true);
+      return new ApplyArgs(
+          packageFile, checksumConfirmed, mergeId, war, out, keepSuperseded, true, installOut);
+    }
+
+    /**
+     * These arguments with {@code dir} as the installation tree the package's buildomatic and
+     * samples files are applied to beside the WAR (0.7 design, section 2.1).
+     */
+    public ApplyArgs withInstallOut(Path dir) {
+      return new ApplyArgs(
+          packageFile,
+          checksumConfirmed,
+          mergeId,
+          war,
+          out,
+          keepSuperseded,
+          generic,
+          Optional.of(dir.toAbsolutePath().normalize()));
     }
 
     public ApplyArgs(Path packageFile, boolean checksumConfirmed) {
@@ -153,7 +196,8 @@ public final class HotfixPlans {
           Optional.of(warFile),
           Optional.of(outFile),
           keepSuperseded,
-          generic);
+          generic,
+          installOut);
     }
   }
 
@@ -238,11 +282,20 @@ public final class HotfixPlans {
 
   /**
    * The nine-step apply plan: preflight, snapshot, stage (before the outage), stop, swap, clear the
-   * JSP cache, start, wait, and keep the snapshot as the undo.
+   * JSP cache, start, wait, and keep the snapshot as the undo. Into a WAR, see {@link
+   * #planApplyWar}; on a build host, {@link #planApplyBuildHost}.
    */
   public Plan planApply(ApplyArgs args) {
+    Optional<Path> installOut = args.installOut();
+    if (installOut.isPresent() && !installOut.get().equals(rt.settings().installDir())) {
+      // a resumed run opens the home's settings, which never name the tree
+      return new HotfixPlans(rt.withInstallDir(installOut.get())).planApply(args);
+    }
     if (args.war().isPresent()) {
       return planApplyWar(args);
+    }
+    if (rt.settings().serverless()) {
+      return planApplyBuildHost(args);
     }
     Prepared p = prepareApply(args, "changed", List.of());
     ApplyInput in = p.in();
@@ -370,7 +423,9 @@ public final class HotfixPlans {
    * The five-step plan that hotfixes a WAR instead of a server (0.2 design, section 7): preflight,
    * stage, assemble the output from the input and the staged files, check it, name it and write its
    * record. The runtime must be turned towards the WAR (its unpacked copy is the webapp); the input
-   * WAR is never modified, and there is no service, no snapshot and no rollback.
+   * WAR is never modified, and there is no service. With {@code --install-out} the package's
+   * installation files are also swapped into that tree, after a snapshot that becomes the undo, as
+   * on a build host (0.7 design, section 2.1); without it they are left out, and there is no undo.
    */
   private Plan planApplyWar(ApplyArgs args) {
     String webappName = rt.settings().webappName();
@@ -395,12 +450,23 @@ public final class HotfixPlans {
     if (args.generic()) {
       p.changes().addAll(vendor.changes());
     }
+    Optional<ApplyInput> installation = args.installOut().map(d -> installationOnly(in, target));
     long outside = in.targets().stream().filter(t -> target.pathOf(t).isEmpty()).count();
-    if (outside > 0) {
+    if (outside > 0 && installation.isEmpty()) {
       warnings.add(
           outside
               + " file(s) of the package belong to the installation tree (js-install.zip), not to"
-              + " a WAR, and are left out; apply them on the server the WAR is deployed to");
+              + " a WAR, and are left out; apply them on the server the WAR is deployed to, or"
+              + " name a buildomatic with --install-out");
+    }
+    if (installation.isPresent()) {
+      warnings.add(
+          outside
+              + " file(s) of the installation tree are applied in "
+              + rt.settings().installDir()
+              + " after a snapshot; `jrs-hotfix rollback --home "
+              + rt.home().root()
+              + "` puts them back");
     }
     warnings.add(
         "no server is touched: "
@@ -410,16 +476,31 @@ public final class HotfixPlans {
             + " is written; the package's files go into the home as the hotfix's baseline");
 
     List<Step> steps = new ArrayList<>();
-    steps.add(new WarSteps.Preflight(rt, in, target));
+    steps.add(new WarSteps.Preflight(rt, in, target, installation));
+    installation.ifPresent(i -> steps.add(new ApplyPhaseSteps.TakeSnapshot(rt, i)));
     steps.add(new ApplyPhaseSteps.StageFiles(rt, in));
-    steps.add(new WarSteps.Assemble(rt, in, target));
-    steps.add(new WarSteps.Check(rt, in, target));
+    // phases are contiguous: beside a swap of installation files, the WAR is assembled in its phase
+    String assemble = installation.isPresent() ? ApplySteps.APPLY : WarSteps.PHASE_ASSEMBLE;
+    steps.add(new WarSteps.Assemble(rt, in, target, assemble));
+    steps.add(new WarSteps.Check(rt, in, target, assemble));
+    installation.ifPresent(i -> steps.add(new ApplyPhaseSteps.AtomicSwap(rt, i)));
     steps.add(new WarSteps.WriteOut(rt, in, target));
+    installation.ifPresent(i -> steps.add(new RecordSteps.PromoteUndo(rt, i)));
 
     Map<String, String> rollbackPoints = new LinkedHashMap<>();
     rollbackPoints.put(ApplySteps.VERIFY, "nothing written");
-    rollbackPoints.put(ApplySteps.APPLY, "staging removed; the input WAR was never modified");
-    rollbackPoints.put(WarSteps.PHASE_ASSEMBLE, "the temporary output removed");
+    if (installation.isPresent()) {
+      rollbackPoints.put(ApplySteps.BACKUP, "snapshot written, nothing changed");
+    }
+    if (installation.isPresent()) {
+      rollbackPoints.put(
+          ApplySteps.APPLY,
+          "staging and the temporary output removed, the installation files restored; the input"
+              + " WAR was never modified");
+    } else {
+      rollbackPoints.put(ApplySteps.APPLY, "staging removed; the input WAR was never modified");
+      rollbackPoints.put(WarSteps.PHASE_ASSEMBLE, "the temporary output removed");
+    }
     rollbackPoints.put(ApplySteps.RECORD, "the output and its record removed");
     PlanSummary summary =
         new PlanSummary(
@@ -428,7 +509,9 @@ public final class HotfixPlans {
             in.touched(),
             List.of(),
             false,
-            List.of(),
+            installation.isPresent()
+                ? List.of(ApplySteps.snapshotDir(rt.home(), "{runId}"))
+                : List.of(),
             rollbackPoints,
             "official-package",
             warnings,
@@ -440,8 +523,92 @@ public final class HotfixPlans {
     if (args.generic()) {
       inputs.put("generic", "true");
     }
+    args.installOut().ifPresent(d -> inputs.put("installOut", d.toString()));
     return new Plan(
         "hotfix-apply-war-" + RunIds.next(rt.clock()), steps, summary, PlanFingerprint.of(inputs));
+  }
+
+  /**
+   * The plan that hotfixes a build host (0.7 design, section 2.1): the distribution's WAR is
+   * hotfixed as a WAR target is, beside it, and replaced once checked; its buildomatic and samples
+   * files are swapped in place as a server's are. No service is touched, and jrs-hotfix never runs
+   * buildomatic: deploying the hotfixed WAR is the operator's. Preflight, snapshot the installation
+   * files, stage, assemble, check, swap the installation files, replace the WAR, and keep the
+   * snapshot and the earlier WAR as the undo.
+   */
+  private Plan planApplyBuildHost(ApplyArgs args) {
+    Path war = rt.settings().distributionWar().orElseThrow();
+    if (!Files.isRegularFile(war)) {
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          "these settings name no server and " + war + " does not exist",
+          "for a WAR, pass --war and --out; for a build host, run `jrs-hotfix settings detect` in"
+              + " the distribution's directory");
+    }
+    Prepared p = prepareApply(args, "changed", List.of());
+    ApplyInput in = p.in();
+    WarSteps.Target target = new WarSteps.Target(war, war, rt.settings().webappName());
+    ApplyInput installation = installationOnly(in, target);
+    List<String> warnings = p.warnings();
+    warnings.add(
+        "no server is touched: "
+            + war
+            + " is replaced and the installation files under "
+            + rt.settings().installDir()
+            + " are changed in place; deploy the hotfixed WAR with buildomatic (`js-ant"
+            + " deploy-webapp-pro`), which jrs-hotfix never runs");
+
+    List<Step> steps = new ArrayList<>();
+    steps.add(new WarSteps.Preflight(rt, in, target, Optional.of(installation)));
+    steps.add(new ApplyPhaseSteps.TakeSnapshot(rt, installation));
+    steps.add(new ApplyPhaseSteps.StageFiles(rt, in));
+    steps.add(new WarSteps.Assemble(rt, in, target, ApplySteps.APPLY));
+    steps.add(new WarSteps.Check(rt, in, target, ApplySteps.APPLY));
+    steps.add(new ApplyPhaseSteps.AtomicSwap(rt, installation));
+    steps.add(new WarSteps.SwapWar(rt, in, target));
+    steps.add(new RecordSteps.PromoteUndo(rt, installation));
+
+    Path snapshotDir = ApplySteps.snapshotDir(rt.home(), "{runId}");
+    Map<String, String> rollbackPoints = new LinkedHashMap<>();
+    rollbackPoints.put(ApplySteps.VERIFY, "nothing changed");
+    rollbackPoints.put(ApplySteps.BACKUP, "snapshot written, nothing changed");
+    rollbackPoints.put(
+        ApplySteps.APPLY,
+        "the temporary WAR removed, the installation files restored from "
+            + snapshotDir
+            + ", the WAR put back");
+    rollbackPoints.put(ApplySteps.RECORD, "as apply, the previous undo kept");
+    List<Path> touched = new ArrayList<>(installation.touched());
+    touched.add(war);
+    PlanSummary summary =
+        new PlanSummary(
+            APPLY,
+            in.contents().id() + " " + in.contents().title(),
+            touched,
+            List.of(),
+            false,
+            List.of(snapshotDir),
+            rollbackPoints,
+            "official-package",
+            warnings,
+            p.changes());
+    Map<String, String> inputs = p.inputs();
+    inputs.put("war", warHash(war));
+    return new Plan(
+        "hotfix-apply-" + RunIds.next(rt.clock()), steps, summary, PlanFingerprint.of(inputs));
+  }
+
+  /**
+   * {@code in} with only the files outside the WAR: those of the installation tree, which are
+   * snapshotted, swapped in place and undone beside a WAR.
+   */
+  private static ApplyInput installationOnly(ApplyInput in, WarSteps.Target target) {
+    return new ApplyInput(
+        in.packageFile(),
+        in.contents(),
+        in.paths(),
+        in.targets().stream().filter(t -> target.pathOf(t).isEmpty()).toList(),
+        in.merge());
   }
 
   private String warHash(Path war) {
@@ -762,7 +929,8 @@ public final class HotfixPlans {
    * The rollback of the latest apply (0.6 design, section 3): stop, restore the undo's snapshot,
    * clear the JSP cache, start, wait, use the undo up. Refuses (exit 2) when there is nothing to
    * undo; the first stop refuses before the outage when the snapshot is damaged or a file changed
-   * since the apply.
+   * since the apply. Without a service (a build host, a home made for WARs) there is no stop, start
+   * or wait: a check, the restore, the earlier WAR put back on a build host, and the undo used up.
    */
   public Plan planRollback() {
     UndoRecord undo =
@@ -799,12 +967,21 @@ public final class HotfixPlans {
   private Plan planRollback(UndoRecord undo) {
     RollbackSteps.Input in = new RollbackSteps.Input(undo);
     RollbackSteps.RestoreSnapshot restore = new RollbackSteps.RestoreSnapshot(rt, in);
+    boolean serverless = rt.settings().serverless();
     List<Step> steps = new ArrayList<>();
-    steps.add(RollbackSteps.stop(rt, in, restore));
-    steps.add(restore);
-    steps.add(new JspCacheStep(rt, RollbackSteps.PHASE, JspCacheStep.ID));
-    steps.add(ServiceSteps.start(rt, RollbackSteps.PHASE, ServiceSteps.START));
-    steps.add(ServiceSteps.waitForServer(rt, RollbackSteps.PHASE, ServiceSteps.WAIT));
+    if (serverless) {
+      steps.add(new RollbackSteps.CheckUndo(rt, in, restore));
+      steps.add(restore);
+      if (undo.war().isPresent()) {
+        steps.add(new WarSteps.RestoreWar(rt, in));
+      }
+    } else {
+      steps.add(RollbackSteps.stop(rt, in, restore));
+      steps.add(restore);
+      steps.add(new JspCacheStep(rt, RollbackSteps.PHASE, JspCacheStep.ID));
+      steps.add(ServiceSteps.start(rt, RollbackSteps.PHASE, ServiceSteps.START));
+      steps.add(ServiceSteps.waitForServer(rt, RollbackSteps.PHASE, ServiceSteps.WAIT));
+    }
     steps.add(new RollbackSteps.DiscardUndo(rt, in));
 
     List<String> warnings = new ArrayList<>();
@@ -817,19 +994,24 @@ public final class HotfixPlans {
     Map<String, String> fingerprint = new LinkedHashMap<>();
     fingerprint.put("settings", rt.settings().fingerprintInput());
     fingerprint.put("hotfix:" + undo.id(), undo.runId());
-    for (OwnedFile f : undo.files()) {
+    for (OwnedFile f : undo.allFiles()) {
       fingerprint.put("file:" + f.path(), FileTarget.hashOf(rt.files(), f.path()).orElse("absent"));
     }
     Map<String, String> rollbackPoints = new LinkedHashMap<>();
     rollbackPoints.put(
-        RollbackSteps.PHASE, "re-apply from the pre-rollback snapshot, restart service");
+        RollbackSteps.PHASE,
+        serverless
+            ? "re-apply from the pre-rollback snapshot"
+            : "re-apply from the pre-rollback snapshot, restart service");
+    List<Path> touched = new ArrayList<>(in.touched());
+    undo.war().ifPresent(w -> touched.add(w.path()));
     PlanSummary summary =
         new PlanSummary(
             ROLLBACK,
             undo.id(),
-            in.touched(),
+            touched,
             List.of(),
-            true,
+            !serverless,
             List.of(rt.home().undo()),
             rollbackPoints,
             "snapshot",
@@ -1052,6 +1234,7 @@ public final class HotfixPlans {
     if (a.generic()) {
       m.put("generic", true);
     }
+    a.installOut().ifPresent(d -> m.put("installOut", d.toString()));
     return Json.write(m);
   }
 
@@ -1069,7 +1252,10 @@ public final class HotfixPlans {
         n.hasNonNull("war") ? Optional.of(Path.of(n.get("war").asText())) : Optional.empty(),
         n.hasNonNull("out") ? Optional.of(Path.of(n.get("out").asText())) : Optional.empty(),
         n.path("keepSuperseded").asBoolean(false),
-        n.path("generic").asBoolean(false));
+        n.path("generic").asBoolean(false),
+        n.hasNonNull("installOut")
+            ? Optional.of(Path.of(n.get("installOut").asText()))
+            : Optional.empty());
   }
 
   public static String rollbackArgsJson(RollbackArgs a) {

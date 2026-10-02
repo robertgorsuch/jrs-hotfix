@@ -1,6 +1,7 @@
 # jrs-hotfix 0.7: customizations wherever a hotfix goes
 
-Status: decided 2026-10-01, for 0.7.0; two facts are still to be measured (open points). Extends `docs/spec-customized-servers.md` (the 0.2
+Status: decided 2026-10-01, for 0.7.0; phases 1 to 4 built, phase 2 on the assumptions of
+the open points, which are still to be measured before the release. Extends `docs/spec-customized-servers.md` (the 0.2
 design, cited as "0.2 design 4.2") and `docs/spec-no-ledger.md` (the 0.6 design). Source:
 issues #30 to #34, and the maintainer's ruling of 2026-10-01:
 
@@ -215,6 +216,32 @@ prepare` judge both. The installation is compared only where the installation di
 `buildomatic/` or `samples/`, so a WAR target, whose settings name a scratch directory, is
 unaffected. The site files and generated directories of open point 1 are a provisional list in
 `Area`, the one place to change once measured.
+
+## Phase 2 as built
+
+A build host is settings with `service.kind` `none` (`ServiceConfig.Kind.NONE`), which `settings
+detect` writes when the home's parent or the working directory holds `buildomatic/` and
+`jasperserver-pro.war` and no `webapps/` (`Detection.distribution`): the installation directory
+is the distribution, and the webapp is the WAR's copy under `<home>/wars/`, unpacked again by
+every command whose runtime it needs once the WAR has changed. `HotfixPlans.planApplyBuildHost`
+is the section 2.1 plan: preflight, a snapshot of the installation files only, staging, the WAR
+assembled beside itself and checked (in the apply phase, so the phases stay contiguous), the
+installation files swapped, `swap-war`, and `promote-undo`. `swap-war` records both hashes in
+the snapshot's `war/war.json` before it moves anything, moves the old WAR into `war/`, and its
+compensation moves it back; `UndoRecord.war` lists the WAR beside the installation files, so the
+rollback's check refuses a WAR changed since the apply. The rollback without a service is
+`check-undo`, `restore-snapshot`, `restore-war` and `discard-undo`.
+
+`--install-out <dir>` turns the WAR plan's runtime towards that tree (`HotfixRuntime.
+withInstallDir`, also on a resumed run, whose home's settings never name it) and adds the
+snapshot, the swap and the undo of the installation files. It is refused in a home whose
+settings are a server's or a build host's, whose undo it would replace. Homes made for WARs now
+have `service.kind` `none` too, and settings written for WARs before (a manual service) are
+rewritten so, so their rollback has no service step.
+
+Built on the open points' assumptions: `Area`'s provisional lists for point 1, and for point 2
+that buildomatic deploys `<distribution>/jasperserver-pro.war` itself. If it deploys from a copy,
+`Settings.distributionWar` is the one place that names the target.
 
 ## Decided 2026-10-01
 

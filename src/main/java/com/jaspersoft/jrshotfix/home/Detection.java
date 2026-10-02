@@ -66,6 +66,36 @@ public final class Detection {
             base));
   }
 
+  /**
+   * The settings of a build host (0.7 design, section 2.1) when {@code dir} is the root of an
+   * unpacked distribution: {@code buildomatic/} and the WAR beside it, and no {@code webapps/}. The
+   * distribution is the installation, the copy of its WAR under {@code home} is the webapp, and
+   * there is no service.
+   */
+  public static Optional<Settings> distribution(Path dir, Path home) {
+    Path root = dir.toAbsolutePath().normalize();
+    if (!Files.isDirectory(root.resolve("buildomatic"))
+        || Files.isDirectory(root.resolve("webapps"))) {
+      return Optional.empty();
+    }
+    for (String name : List.of("jasperserver-pro", "jasperserver")) {
+      if (Files.isRegularFile(root.resolve(name + ".war"))) {
+        return Optional.of(
+            new Settings(
+                root,
+                home.resolve("wars"),
+                name,
+                ServiceConfig.Kind.NONE,
+                Optional.empty(),
+                Optional.empty(),
+                60,
+                Optional.empty(),
+                URI.create("http://localhost/" + name)));
+      }
+    }
+    return Optional.empty();
+  }
+
   /** How Tomcat is controlled: a service name, a script, or neither for a manual install. */
   private record Service(ServiceConfig.Kind kind, Optional<String> name, Optional<Path> script) {}
 

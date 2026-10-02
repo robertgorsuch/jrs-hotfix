@@ -45,7 +45,7 @@ public final class CompanionDatabase {
         // so this and home.Detection.windowsServices no longer carry two copies of the systemd
         // side.
       case SYSTEMD -> pick(LinuxInit.systemdUnits(runner));
-      case CTLSCRIPT, CATALINA, MANUAL -> Optional.empty();
+      case CTLSCRIPT, CATALINA, MANUAL, NONE -> Optional.empty();
     };
   }
 

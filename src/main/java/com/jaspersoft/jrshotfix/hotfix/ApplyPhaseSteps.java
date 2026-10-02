@@ -87,7 +87,7 @@ final class ApplyPhaseSteps {
       List<Path> paths = in.touched().stream().filter(Files::isRegularFile).distinct().toList();
       try {
         Snapshot snapshot =
-            rt.snapshots().create(ctx.runId(), ApplySteps.SNAPSHOT, paths, in.paths().commonBase());
+            rt.snapshots().create(ctx.runId(), ApplySteps.SNAPSHOT, paths, in.snapshotBase());
         log(ctx, out, Event.Log.Level.INFO, paths.size() + " file(s) saved to " + snapshot.dir());
         return StepResult.ok();
       } catch (IOException | RuntimeException e) {

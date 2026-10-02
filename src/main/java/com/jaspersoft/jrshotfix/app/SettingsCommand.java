@@ -7,6 +7,7 @@ import com.jaspersoft.jrshotfix.home.SettingsStore;
 import com.jaspersoft.jrshotfix.platform.InstallScan;
 import java.io.PrintWriter;
 import java.nio.file.Path;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
 import picocli.CommandLine.Command;
@@ -17,7 +18,9 @@ import picocli.CommandLine.Parameters;
  * show} is read-only; {@code set} changes one known key and refuses anything else with exit 1 and
  * the key list; {@code detect} never replaces existing settings without {@code --yes} or, at a
  * terminal, the operator's yes, and at a terminal asks for every value through {@link
- * SettingsWizard}.
+ * SettingsWizard}; a build host, an unpacked distribution beside the home or in the working
+ * directory, is looked for before any server, and at a terminal confirmed (0.7 design, section
+ * 2.1).
  */
 @Command(
     name = "settings",
@@ -112,6 +115,10 @@ final class SettingsCommand extends GroupCommand {
     }
 
     private int detect(Bootstrap boot) {
+      Optional<Integer> buildHost = buildHost(boot);
+      if (buildHost.isPresent()) {
+        return buildHost.get();
+      }
       if (boot.interactive()) {
         return wizard(boot);
       }
@@ -142,6 +149,56 @@ final class SettingsCommand extends GroupCommand {
           "no JasperReports Server installation found"
               + scan.processScanLimit().map(l -> " (" + l + ")").orElse(""),
           Optional.of("run jrs-hotfix on the server where JasperReports Server is installed"));
+    }
+
+    /**
+     * The settings of a build host, when the home's parent or the working directory is an unpacked
+     * distribution; empty when neither is, or when the operator at a terminal says it is not one
+     * (an unpacked distribution deployed to a server on this machine). Existing settings are
+     * replaced only with {@code --yes} or the operator's yes.
+     */
+    private Optional<Integer> buildHost(Bootstrap boot) {
+      java.util.Set<Path> dirs = new LinkedHashSet<>();
+      Optional.ofNullable(boot.home().root().getParent()).ifPresent(dirs::add);
+      dirs.add(Path.of("").toAbsolutePath());
+      for (Path dir : dirs) {
+        Home home = boot.homeFor(dir);
+        Optional<Settings> found = Detection.distribution(dir, home.root());
+        if (found.isEmpty()) {
+          continue;
+        }
+        out()
+            .println(
+                "a build host: "
+                    + dir
+                    + " holds buildomatic and "
+                    + found.get().webappName()
+                    + ".war, and no server");
+        if (boot.interactive()
+            && !Prompter.yes(
+                out(), "Set it up as a build host? (no: look for a server instead) [Y/n] ", true)) {
+          return Optional.empty();
+        }
+        if (SettingsStore.load(home).isPresent()
+            && !global().yes()
+            && !(boot.interactive()
+                && Prompter.yes(
+                    out(), "Replace the settings in " + home.root() + "? [y/N] ", false))) {
+          return Optional.of(
+              ExitCodes.fail(
+                  err(),
+                  ExitCodes.PRECHECK_FAILED,
+                  "settings exist already in " + home.root(),
+                  Optional.of(
+                      "pass --yes to replace them, or change one with `jrs-hotfix settings set`")));
+        }
+        SettingsStore.save(home, found.get());
+        boot.remember(home);
+        out().println("settings written to " + home.settingsFile());
+        print(out(), home, found.get());
+        return Optional.of(ExitCodes.SUCCESS);
+      }
+      return Optional.empty();
     }
 
     /**
