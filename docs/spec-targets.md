@@ -1,8 +1,7 @@
 # jrs-hotfix 0.7: customizations wherever a hotfix goes
 
-Status: decided 2026-10-01, for 0.7.0; phases 1 to 4 built; open point 2 confirmed and open
-point 1 measured on a 10.0.0 installation (2026-10-01), one check on a WAR-file distribution
-left. Extends `docs/spec-customized-servers.md` (the 0.2
+Status: decided 2026-10-01, for 0.7.0; phases 1 to 4 built; both open points closed
+(2026-10-02) by comparing the 10.0.0 installer's own buildomatic with an installation's. Extends `docs/spec-customized-servers.md` (the 0.2
 design, cited as "0.2 design 4.2") and `docs/spec-no-ledger.md` (the 0.6 design). Source:
 issues #30 to #34, and the maintainer's ruling of 2026-10-01:
 
@@ -267,22 +266,37 @@ the bundled installer (the vendor's files are dated 2026-01-22; what the install
 2. **That buildomatic deploys the distribution's own `jasperserver-pro.war`**, and from which
    path. If it unpacks the WAR somewhere first, that copy is the target instead.
 
-**Point 2, confirmed.** `deploy-webapp` in `buildomatic/bin/app-server.xml` reads
+**Point 2, closed.** `deploy-webapp` in `buildomatic/bin/app-server.xml` reads
 `${basedir}/../jasperserver-pro.war`, the WAR at the distribution's root, and unzips it straight
 into the application server's webapp; only when it is absent does it copy
 `buildomatic/install_resources/war/jasperserver-pro/`, a tree built from source, which is not a
 distribution in the sense of section 2.1. `Settings.distributionWar` is right as built.
 
-**Point 1, measured.** The installer wrote 18 files under buildomatic, `js-ant` wrote
-`build_conf/` and `logs/` (generated, as assumed), and nothing under `samples/`. Of the
-installer's, these hold this site's values and are now site files in `Area`, kept by every
-merge: `default_master.properties`; `keystore.init.properties` (the keystore's location);
-`bin/js-import-export.sh` (the install path in `JAVA_EXEC`); `install_resources/export/js-catalog/`
-(the sample data sources and XMLA connections, with the database's address, the server's port
-and encrypted passwords). `conf_source/iePro/lib/iecp.jar`, a jar of a manifest only, is
-generated. An installer-written script or binary is now kept with the hotfix's copy in the
-workspace as `theirs`, as an installer-written XML file already was. The other eleven `js-*.sh`
-scripts the installer rewrote stay ordinary files: their changes could not be told from the
-vendor's without a copy of the vendor's, and a hotfix may well fix one. The cumulative hotfix
-of 2026-07-30 ships none of the 18. Left to check: what `js-install` writes on a WAR-file
-distribution, which the bundled installer measured here may exceed.
+**Point 1, closed.** First measured by the files' dates: the installer wrote 18 files under
+buildomatic, `js-ant` wrote `build_conf/` and `logs/` (generated, as assumed), and nothing under
+`samples/`. Then (2026-10-02) closed by content: the vendor's own buildomatic, 3,865 files, was
+extracted from the bundled installer (`js-jrs_10.0.0_win_x86_64.exe`, its InstallBuilder
+archive) and compared byte for byte with the installation's, leaving out what the cumulative
+hotfix of 2026-07-30 replaced. Seven files differ and two exist in the installation only, and
+that is all a site writes:
+
+| File | Written with | In `Area` |
+|---|---|---|
+| `default_master.properties` | the database's host, port and password, Tomcat's path, in place of the vendor's placeholders | site file |
+| `keystore.init.properties` | the keystore's location; not in the vendor's buildomatic | site file |
+| `bin/js-import-export.sh` | the install's Java in `JAVA_EXEC` | site file |
+| four XML files under `install_resources/export/js-catalog/` | the server's port and the database's user, in place of `@@BITROCK_…@@` | site files (the directory) |
+| `js-mvn` | this site's `build_conf/default` paths, in place of the vendor's build machine's; written by `js-ant` | generated |
+| `conf_source/iePro/lib/iecp.jar` | a manifest only; not in the vendor's buildomatic | generated |
+
+Site files are kept by every merge (a properties file merged by key with what a hotfix adds;
+an installer-written script, binary or XML file kept, with the hotfix's copy in the workspace
+as `theirs`). The eleven `js-*.sh` scripts whose dates the installer changed are byte for byte
+the vendor's: ordinary files, which a hotfix may replace. The cumulative hotfix ships none of
+these files.
+
+What `js-install` writes on a WAR-file distribution was not run. It is covered all the same:
+everything buildomatic writes from `default_master.properties` lands in `build_conf/`, `logs/`
+or `js-mvn`, all generated, and the installer's own files above are a superset of what a site
+fills in by hand on a WAR-file distribution (`default_master.properties`, made from a
+`sample_conf/` template).

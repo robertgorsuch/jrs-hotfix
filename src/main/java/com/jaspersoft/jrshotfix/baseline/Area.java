@@ -35,12 +35,14 @@ public enum Area {
   /**
    * Installation files buildomatic or the installer builds from the site's settings, or writes at
    * run time: counted and never merged. As above, with {@code /} for a directory; measured as the
-   * site files are, {@code iecp.jar} being a manifest-only jar written at install.
+   * site files are, {@code iecp.jar} being a manifest-only jar written at install and {@code
+   * js-mvn} the Maven launcher {@code js-ant} writes with this site's paths.
    */
   private static final List<String> INSTALLATION_GENERATED =
       List.of(
           "buildomatic/build_conf/",
           "buildomatic/logs/",
+          "buildomatic/js-mvn",
           "buildomatic/conf_source/iepro/lib/iecp.jar");
 
   /** How a file of this area is compared and merged. */
