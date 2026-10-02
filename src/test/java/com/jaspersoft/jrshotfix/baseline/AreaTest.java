@@ -34,6 +34,8 @@ class AreaTest {
         .isTrue();
     assertThat(Area.INSTALLATION.generated("buildomatic/logs/js-export.log")).isTrue();
     assertThat(Area.INSTALLATION.generated("buildomatic/conf_source/iePro/lib/iecp.jar")).isTrue();
+    assertThat(Area.INSTALLATION.generated("buildomatic/js-mvn")).isTrue();
+    assertThat(Area.INSTALLATION.generated("buildomatic/js-mvn.bat")).isFalse();
     assertThat(Area.INSTALLATION.generated("buildomatic/conf_source/iePro/lib/other.jar"))
         .isFalse();
   }
