@@ -19,7 +19,7 @@ It comes as one download with everything it needs inside. There is nothing else 
 | Take the latest hotfix out again | `jrs-hotfix rollback` |
 | See the build this server is at, and what `rollback` would undo | `jrs-hotfix list` |
 | Find out what the site changed in the webapp | `jrs-hotfix scan` |
-| Install a hotfix without losing the site's changes | `jrs-hotfix baseline add <vendor.war>`, then `jrs-hotfix apply <package.zip>` |
+| Install a hotfix without losing the site's changes | `jrs-hotfix baseline add <distribution.zip \| vendor.war>`, then `jrs-hotfix apply <package.zip>` |
 | Make a hotfixed WAR from a WAR or a deployed webapp, with no server | `jrs-hotfix apply <package.zip> --war <in.war \| dir> --out <out.war>` |
 | Hotfix a build host, which deploys with buildomatic and runs no server | `jrs-hotfix settings detect` in the distribution, then `jrs-hotfix apply <package.zip>` |
 | Compare two WARs or webapps, or see what two of them each changed from a third | `jrs-hotfix compare <a> <b>` / `jrs-hotfix compare <base> <mine> <theirs>` |
@@ -168,7 +168,7 @@ jrs-hotfix baseline remove <id>
 
 The release is best given as the vendor's distribution the server was installed from: its ZIP, or the directory it was unpacked into (`buildomatic/` beside `jasperserver-pro.war`). Its WAR gives the webapp, and its `buildomatic/` and `samples/` the installation, so what the site changed in buildomatic is kept or merged too. The WAR alone (the directory that holds it, or an unpacked copy, will do) gives the webapp only; the installation's files are then replaced as without a baseline, and the plan says so. Either is read as a stream; the baseline keeps a hash of every file and the content of the files that can be merged: settings, XML, pages, and buildomatic's scripts and SQL. When a hotfix is on the server, its package is needed too, because the files it replaced are the vendor's and not the site's. A hotfix's baseline holds its `js-install.zip` files as well.
 
-In the installation, the files written for this site are never replaced: `buildomatic/default_master.properties`, `keystore.init.properties` (the keystore's location), `bin/js-import-export.sh` (the install path) and the sample data sources under `install_resources/export/js-catalog/` keep the site's values, a properties file merged by key with what the hotfix adds. What buildomatic builds or logs (`build_conf/`, `logs/`, `js-mvn`) is counted, not listed.
+In the installation, the files written for this site are never replaced: `buildomatic/default_master.properties`, `keystore.init.properties` (the keystore's location), `bin/js-import-export.sh` (the install's Java) and the sample data sources under `install_resources/export/js-catalog/` keep the site's values, a properties file merged by key with what the hotfix adds. What buildomatic builds or logs (`build_conf/`, `logs/`, `js-mvn`) is counted, not listed.
 
 Then see what the site changed:
 
@@ -356,15 +356,18 @@ runs/<runId>/staging/         payload extracted before the outage; removed at th
 runs/<runId>/stop-service.stopped   marker: this run stopped the service
 runs/<runId>/<step>/manifest.json   the run's snapshot while it runs (an apply's: snapshot/, a rollback's: pre-rollback-<id>/)
 runs/<runId>/<step>/payload/...     replaced and deleted files, at their relative paths
+runs/<runId>/snapshot/war/          on a build host, the WAR the run replaced, until the run makes it the undo
 undo/undo.json                what the latest apply did: every file it wrote or deleted, with its hash before and after
 undo/manifest.json            the latest apply's snapshot, until the next apply or a rollback
 undo/payload/...
-baselines/<id>/manifest.json  the vendor's files: a hash for every file of a release's WAR or of a hotfix
-baselines/<id>/payload/...    the content of the mergeable ones (settings, XML, pages)
+undo/war/                     on a build host, the WAR the latest apply replaced (and war.json, both hashes)
+baselines/<id>/manifest.json  the vendor's files: a hash for every file of a release (WAR or distribution) or of a hotfix
+baselines/<id>/payload/...    the content of the webapp's mergeable ones (settings, XML, pages)
+baselines/<id>/install-payload/...   the same for buildomatic and samples
 merges/<mergeId>/merge.json   a prepared merge: what an apply does with every file the package ships
 merges/<mergeId>/report.txt   the same, as `merge status` prints it
 merges/<mergeId>/files/<path>/base|mine|theirs|merged   the three sides of a file that needed a merge, and the result
-wars/webapps/<name>/          the copy of the WAR or webapp directory being worked on (--war); may be deleted at any time
+wars/webapps/<name>/          the copy of the WAR or webapp directory being worked on (--war), or of a build host's WAR; may be deleted at any time
 ```
 
 ### Settings
