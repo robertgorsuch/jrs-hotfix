@@ -202,20 +202,31 @@ final class Bootstrap {
   }
 
   /**
-   * This bootstrap turned towards a WAR instead of a server (0.2 design, section 7): the home is
-   * the one given, else {@code jrs-hotfix} beside the WAR; the settings name the unpacked copy of
-   * the WAR under the home as the webapp, with no service; the WAR is unpacked there unless the
-   * copy is of this WAR already. A home that has no settings gets these written, so {@code baseline
-   * add} and the other commands work in it without {@code --war}. A server's own settings are never
-   * replaced.
+   * This bootstrap turned towards a WAR instead of a server (0.2 design, section 7), or towards a
+   * deployed or exploded webapp directory (0.7 design, section 2.2): the home is the one given,
+   * else {@code jrs-hotfix} beside the input, and beside a deployed webapp's {@code webapps/}
+   * rather than inside it, where Tomcat would deploy it; the settings name the copy of the input
+   * under the home as the webapp, with no service; the input is unpacked or copied there unless the
+   * copy is of this input already; the input itself is never written. A home that has no settings
+   * gets these written, so {@code baseline add} and the other commands work in it without {@code
+   * --war}. A server's own settings are never replaced.
    */
   Bootstrap forWar(Path war) {
     Path file = war.toAbsolutePath().normalize();
-    if (!Files.isRegularFile(file)) {
+    if (!Files.isRegularFile(file) && !Files.isDirectory(file)) {
       throw new HotfixException(
-          HotfixException.PRECHECK, file + " does not exist", "point --war at the WAR file");
+          HotfixException.PRECHECK,
+          file + " does not exist",
+          "point --war at the WAR file, or at a deployed or exploded webapp directory");
     }
-    Home warHome = explicitHome ? home : new Home(file.getParent().resolve(DefaultHome.DIR));
+    Path beside = file.getParent();
+    if (Files.isDirectory(file)
+        && beside.getFileName() != null
+        && beside.getFileName().toString().equals("webapps")
+        && beside.getParent() != null) {
+      beside = beside.getParent();
+    }
+    Home warHome = explicitHome ? home : new Home(beside.resolve(DefaultHome.DIR));
     Settings s = warSettings(warHome, file);
     Bootstrap turned =
         new Bootstrap(

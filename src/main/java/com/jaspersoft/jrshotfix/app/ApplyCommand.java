@@ -69,10 +69,11 @@ final class ApplyCommand extends AppCommand {
 
   @Option(
       names = "--war",
-      paramLabel = "<in.war>",
+      paramLabel = "<in.war | dir>",
       description =
-          "Hotfix this WAR instead of a server: no service, no snapshot; the input is never"
-              + " modified. Needs --out. The home is --home, else jrs-hotfix beside the WAR.")
+          "Hotfix this WAR, or a deployed or exploded webapp directory, instead of a server: no"
+              + " service, no snapshot; the input is never modified. Needs --out. The home is"
+              + " --home, else jrs-hotfix beside the input.")
   Path war;
 
   @Option(
@@ -81,11 +82,27 @@ final class ApplyCommand extends AppCommand {
       description = "Where the hotfixed WAR is written.")
   Path out;
 
+  @Option(
+      names = "--generic",
+      description =
+          "With --war: write the vendor's META-INF/context.xml, *-jdbc.xml and installer-written"
+              + " settings files into the output instead of this site's, for a WAR deployed with"
+              + " its own database configuration. Every other change of the site is kept. Needs a"
+              + " release baseline.")
+  boolean generic;
+
   @Override
   public Integer call() {
     if ((war == null) != (out == null)) {
       return ExitCodes.fail(
           err(), ExitCodes.USAGE, "--war and --out go together", Optional.empty());
+    }
+    if (generic && war == null) {
+      return ExitCodes.fail(
+          err(),
+          ExitCodes.USAGE,
+          "--generic is for a WAR target: it needs --war and --out",
+          Optional.of("a server's installer-written files are its own configuration"));
     }
     Bootstrap boot = war == null ? open() : open().forWar(war);
     boolean confirmed = false;
@@ -125,6 +142,9 @@ final class ApplyCommand extends AppCommand {
     }
     if (keepSuperseded) {
       args = args.keepingSuperseded();
+    }
+    if (generic) {
+      args = args.asGeneric();
     }
     Plan p = plans.planApply(args);
     List<String> audit =

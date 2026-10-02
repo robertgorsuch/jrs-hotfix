@@ -18,10 +18,12 @@ import com.jaspersoft.jrshotfix.pkg.OfficialPackage;
 import com.jaspersoft.jrshotfix.pkg.PackageContents;
 import com.jaspersoft.jrshotfix.pkg.PackagePaths;
 import com.jaspersoft.jrshotfix.pkg.SiteDecisions;
+import com.jaspersoft.jrshotfix.pkg.SiteSettings;
 import com.jaspersoft.jrshotfix.scan.Scan;
 import com.jaspersoft.jrshotfix.service.ServiceSteps;
 import com.jaspersoft.jrshotfix.state.OwnedFile;
 import com.jaspersoft.jrshotfix.state.UndoRecord;
+import com.jaspersoft.jrshotfix.war.WarFile;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -30,6 +32,7 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -86,7 +89,8 @@ public final class HotfixPlans {
       Optional<String> mergeId,
       Optional<Path> war,
       Optional<Path> out,
-      boolean keepSuperseded) {
+      boolean keepSuperseded,
+      boolean generic) {
     public ApplyArgs {
       Objects.requireNonNull(packageFile, "packageFile");
       Objects.requireNonNull(mergeId, "mergeId");
@@ -95,6 +99,19 @@ public final class HotfixPlans {
       if (war.isPresent() != out.isPresent()) {
         throw new IllegalArgumentException("--war and --out go together");
       }
+      if (generic && war.isEmpty()) {
+        throw new IllegalArgumentException("--generic needs --war");
+      }
+    }
+
+    public ApplyArgs(
+        Path packageFile,
+        boolean checksumConfirmed,
+        Optional<String> mergeId,
+        Optional<Path> war,
+        Optional<Path> out,
+        boolean keepSuperseded) {
+      this(packageFile, checksumConfirmed, mergeId, war, out, keepSuperseded, false);
     }
 
     public ApplyArgs(
@@ -112,7 +129,15 @@ public final class HotfixPlans {
 
     /** These arguments with superseded libraries left where they are. */
     public ApplyArgs keepingSuperseded() {
-      return new ApplyArgs(packageFile, checksumConfirmed, mergeId, war, out, true);
+      return new ApplyArgs(packageFile, checksumConfirmed, mergeId, war, out, true, generic);
+    }
+
+    /**
+     * These arguments with the vendor's copies of the installer-written files in the output WAR
+     * instead of the site's (0.7 design, section 2.2).
+     */
+    public ApplyArgs asGeneric() {
+      return new ApplyArgs(packageFile, checksumConfirmed, mergeId, war, out, keepSuperseded, true);
     }
 
     public ApplyArgs(Path packageFile, boolean checksumConfirmed) {
@@ -127,7 +152,8 @@ public final class HotfixPlans {
           mergeId,
           Optional.of(warFile),
           Optional.of(outFile),
-          keepSuperseded);
+          keepSuperseded,
+          generic);
     }
   }
 
@@ -277,7 +303,8 @@ public final class HotfixPlans {
     MergePlans merges = new MergePlans(rt);
     Optional<MergeDoc> merge = args.mergeId().map(merges::forApply);
     PackageContents contents =
-        readPackage(file, merge.map(merges::decisions).orElse(SiteDecisions.NONE), args);
+        readPackage(
+            file, generic(args, merge.map(merges::decisions).orElse(SiteDecisions.NONE)), args);
     merge.ifPresent(m -> merges.check(m, contents));
     List<FileTarget> targets = FileTarget.resolve(contents, rt.paths(), rt.files());
     ApplyInput in = new ApplyInput(file, contents, rt.paths(), targets, merge);
@@ -346,16 +373,28 @@ public final class HotfixPlans {
    * WAR is never modified, and there is no service, no snapshot and no rollback.
    */
   private Plan planApplyWar(ApplyArgs args) {
-    WarSteps.Target target =
-        new WarSteps.Target(
-            args.war().orElseThrow(), args.out().orElseThrow(), rt.settings().webappName());
+    String webappName = rt.settings().webappName();
     Prepared p =
         prepareApply(
             args,
             "written",
-            Files.exists(target.out()) ? List.of(target.out() + " exists") : List.of());
+            Files.exists(args.out().orElseThrow())
+                ? List.of(args.out().orElseThrow() + " exists")
+                : List.of());
     ApplyInput in = p.in();
+    VendorCopies vendor =
+        args.generic() ? vendorCopies(in.contents(), webappName) : VendorCopies.NONE;
+    WarSteps.Target target =
+        new WarSteps.Target(
+            args.war().orElseThrow(),
+            args.out().orElseThrow(),
+            webappName,
+            vendor.replaced(),
+            vendor.dropped());
     List<String> warnings = p.warnings();
+    if (args.generic()) {
+      p.changes().addAll(vendor.changes());
+    }
     long outside = in.targets().stream().filter(t -> target.pathOf(t).isEmpty()).count();
     if (outside > 0) {
       warnings.add(
@@ -396,10 +435,129 @@ public final class HotfixPlans {
             p.changes());
 
     Map<String, String> inputs = p.inputs();
-    inputs.put("war", FileTarget.hashOf(rt.files(), target.war()).orElse("absent"));
+    inputs.put("war", warHash(target.war()));
     inputs.put("out", target.out().toString());
+    if (args.generic()) {
+      inputs.put("generic", "true");
+    }
     return new Plan(
         "hotfix-apply-war-" + RunIds.next(rt.clock()), steps, summary, PlanFingerprint.of(inputs));
+  }
+
+  private String warHash(Path war) {
+    try {
+      return Files.exists(war) ? WarFile.hash(war, rt.files()) : "absent";
+    } catch (IOException e) {
+      throw new UncheckedIOException("cannot hash " + war, e);
+    }
+  }
+
+  /**
+   * With {@code --generic}, what the reader decides for an installer-written file of the webapp the
+   * package ships: it lands as the package has it, whatever the merge said (0.7 design, 2.2).
+   */
+  private SiteDecisions generic(ApplyArgs args, SiteDecisions decided) {
+    if (!args.generic()) {
+      return decided;
+    }
+    String prefix = PackagePaths.WEBAPPS_PREFIX + rt.settings().webappName() + "/";
+    return new SiteDecisions() {
+      @Override
+      public boolean active() {
+        return decided.active();
+      }
+
+      @Override
+      public Optional<Decision> of(String packagePath) {
+        if (packagePath.startsWith(prefix)
+            && installerWritten(packagePath.substring(prefix.length()))) {
+          return Optional.of(Decision.plain());
+        }
+        return decided.of(packagePath);
+      }
+    };
+  }
+
+  private static boolean installerWritten(String webappPath) {
+    return SiteSettings.holdsSiteValuesInWebapp(webappPath)
+        || SiteSettings.keptAsItIsInWebapp(webappPath);
+  }
+
+  /**
+   * What {@code --generic} puts in the output beside the package: the vendor's copy of each
+   * installer-written file the package does not ship, and the files of that kind the vendor has
+   * none of, which are left out, as from a webapp no installer ran on; and the preview's lines.
+   */
+  record VendorCopies(Map<String, Path> replaced, Set<String> dropped, List<String> changes) {
+    static final VendorCopies NONE = new VendorCopies(Map.of(), Set.of(), List.of());
+  }
+
+  /**
+   * The vendor's copies for {@code --generic}. Refuses (exit 2) without a release baseline that
+   * fits, or when the baseline knows a file but kept no content of it.
+   */
+  private VendorCopies vendorCopies(PackageContents contents, String webappName) {
+    BaseView.Resolution resolution = rt.baseView();
+    if (resolution.view().isEmpty()) {
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          "--generic takes the vendor's copies of the installer-written files from the release"
+              + " baseline, and "
+              + resolution.problem(),
+          resolution.remediation());
+    }
+    BaseView view = resolution.view().get();
+    String prefix = PackagePaths.WEBAPPS_PREFIX + webappName + "/";
+    Set<String> shipped = new HashSet<>();
+    for (PackageContents.VendorFile f : contents.vendorFiles()) {
+      if (f.path().startsWith(prefix)) {
+        shipped.add(f.path().substring(prefix.length()));
+      }
+    }
+    Path webapp = rt.settings().webappDir();
+    Map<String, Path> replaced = new LinkedHashMap<>();
+    Set<String> dropped = new LinkedHashSet<>();
+    List<String> lines = new ArrayList<>();
+    try (java.util.stream.Stream<Path> walk = Files.walk(webapp)) {
+      for (Path file : walk.filter(Files::isRegularFile).sorted().toList()) {
+        String path = webapp.relativize(file).toString().replace('\\', '/');
+        if (!installerWritten(path)) {
+          continue;
+        }
+        if (shipped.contains(path)) {
+          lines.add("  " + path + "  the package's copy");
+          continue;
+        }
+        if (view.file(path).isEmpty()) {
+          dropped.add(path);
+          lines.add("  " + path + "  left out: the vendor's webapp has none");
+          continue;
+        }
+        Path copy =
+            view.payload(path)
+                .orElseThrow(
+                    () ->
+                        new HotfixException(
+                            HotfixException.PRECHECK,
+                            "--generic needs the vendor's copy of "
+                                + path
+                                + ", and the baseline keeps only its hash",
+                            "add the vendor's WAR again with `jrs-hotfix baseline add`"));
+        if (!FileTarget.hashOf(rt.files(), file).equals(FileTarget.hashOf(rt.files(), copy))) {
+          replaced.put(path, copy);
+          lines.add("  " + path + "  the vendor's copy");
+        }
+      }
+    } catch (IOException e) {
+      throw new UncheckedIOException("cannot read " + webapp, e);
+    }
+    List<String> changes = new ArrayList<>();
+    if (!lines.isEmpty()) {
+      changes.add(
+          "Installer-written files as the vendor ships them (--generic) (" + lines.size() + ")");
+      changes.addAll(lines);
+    }
+    return new VendorCopies(Map.copyOf(replaced), Set.copyOf(dropped), changes);
   }
 
   /** The fingerprint input that names the merge an apply was planned with. */
@@ -891,6 +1049,9 @@ public final class HotfixPlans {
     if (a.keepSuperseded()) {
       m.put("keepSuperseded", true);
     }
+    if (a.generic()) {
+      m.put("generic", true);
+    }
     return Json.write(m);
   }
 
@@ -907,7 +1068,8 @@ public final class HotfixPlans {
         n.hasNonNull("mergeId") ? Optional.of(n.get("mergeId").asText()) : Optional.empty(),
         n.hasNonNull("war") ? Optional.of(Path.of(n.get("war").asText())) : Optional.empty(),
         n.hasNonNull("out") ? Optional.of(Path.of(n.get("out").asText())) : Optional.empty(),
-        n.path("keepSuperseded").asBoolean(false));
+        n.path("keepSuperseded").asBoolean(false),
+        n.path("generic").asBoolean(false));
   }
 
   public static String rollbackArgsJson(RollbackArgs a) {

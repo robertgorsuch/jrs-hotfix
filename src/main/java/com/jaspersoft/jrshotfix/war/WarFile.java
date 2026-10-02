@@ -29,10 +29,12 @@ import java.util.zip.ZipOutputStream;
 /**
  * A WAR as the target of a hotfix (0.2 design, section 7): its files unpacked under the home so
  * that the scan, the merge and the plan read them as they read a webapp, and a hotfixed WAR
- * assembled from the input WAR and the staged files. Invariants: the input WAR is never modified;
- * the unpacked copy is keyed by the WAR's hash and reused while it matches; every entry name is
- * checked before it is written anywhere; the output is written to a temporary file beside the
- * output path and renamed only once verified; entries are streamed, never held whole.
+ * assembled from the input and the staged files. The input is a WAR file, or a deployed or exploded
+ * webapp directory (0.7 design, section 2.2), which is copied instead of unpacked. Invariants: the
+ * input is never modified; the copy is keyed by the input's hash (a WAR's bytes, a directory's
+ * paths, sizes and times) and reused while it matches; every entry name is checked before it is
+ * written anywhere; the output is written to a temporary file beside the output path and renamed
+ * only once verified; entries are streamed, never held whole.
  */
 public final class WarFile {
 
@@ -44,11 +46,14 @@ public final class WarFile {
   private WarFile() {}
 
   /**
-   * Unpacks {@code war} into {@code webappDir} unless the copy there is of this WAR already, and
-   * returns the WAR's hash.
+   * Unpacks {@code war} into {@code webappDir}, or copies it there when it is a directory, unless
+   * the copy there is of this input already, and returns the input's hash.
    */
   public static Unpacked unpack(Path war, Path webappDir, FileOps files) throws IOException {
-    String sha = files.sha256(war);
+    if (Files.isDirectory(war) && !Files.isDirectory(war.resolve("WEB-INF"))) {
+      throw notAWebapp(war, "the directory holds no WEB-INF");
+    }
+    String sha = Files.isDirectory(war) ? treeHash(war) : files.sha256(war);
     Path marker = webappDir.resolveSibling(webappDir.getFileName() + "." + MARKER);
     Optional<Unpacked> existing = read(marker);
     if (existing.isPresent()
@@ -62,6 +67,27 @@ public final class WarFile {
     }
     Files.createDirectories(webappDir);
     Path root = webappDir.toAbsolutePath().normalize();
+    int count = 0;
+    if (Files.isDirectory(war)) {
+      for (String path : tree(war)) {
+        Path target = root.resolve(path.replace('/', java.io.File.separatorChar)).normalize();
+        Files.createDirectories(target.getParent());
+        Files.copy(war.resolve(path), target, StandardCopyOption.REPLACE_EXISTING);
+        count++;
+      }
+    } else {
+      count = unzip(war, root);
+    }
+    if (count == 0) {
+      throw notAWebapp(war, "it is not a readable archive");
+    }
+    Unpacked unpacked = new Unpacked(war.toString(), sha, count);
+    Files.writeString(marker, Json.writePretty(unpacked), StandardCharsets.UTF_8);
+    Durability.sync(marker);
+    return unpacked;
+  }
+
+  private static int unzip(Path war, Path root) throws IOException {
     int count = 0;
     try (InputStream in = Files.newInputStream(war);
         ZipInputStream zip = new ZipInputStream(in)) {
@@ -77,13 +103,53 @@ public final class WarFile {
         count++;
       }
     }
-    if (count == 0) {
-      throw notAWebapp(war, "it is not a readable archive");
+    return count;
+  }
+
+  /**
+   * The files under a webapp directory, as webapp paths, sorted; every name checked as an entry
+   * name would be.
+   */
+  private static List<String> tree(Path dir) throws IOException {
+    try (java.util.stream.Stream<Path> walk = Files.walk(dir)) {
+      List<String> out = new ArrayList<>();
+      for (Path f : walk.filter(Files::isRegularFile).sorted().toList()) {
+        out.add(checked(dir, dir.relativize(f).toString()));
+      }
+      return out;
     }
-    Unpacked unpacked = new Unpacked(war.toString(), sha, count);
-    Files.writeString(marker, Json.writePretty(unpacked), StandardCharsets.UTF_8);
-    Durability.sync(marker);
-    return unpacked;
+  }
+
+  /** A directory's hash: of every file's path, size and time, which a change of any alters. */
+  private static String treeHash(Path dir) throws IOException {
+    StringBuilder all = new StringBuilder();
+    for (String path : tree(dir)) {
+      Path f = dir.resolve(path);
+      all.append(path)
+          .append('\t')
+          .append(Files.size(f))
+          .append('\t')
+          .append(Files.getLastModifiedTime(f).toMillis())
+          .append('\n');
+    }
+    return Sums.of(all.toString().getBytes(StandardCharsets.UTF_8)).sha256();
+  }
+
+  /** The input's hash: a WAR's bytes, or a directory's paths, sizes and times. */
+  public static String hash(Path war, FileOps files) throws IOException {
+    return Files.isDirectory(war) ? treeHash(war) : files.sha256(war);
+  }
+
+  /** The bytes an input takes: a WAR's size, or the sum of a directory's files. */
+  public static long size(Path war) throws IOException {
+    if (!Files.isDirectory(war)) {
+      return Files.size(war);
+    }
+    long total = 0;
+    for (String path : tree(war)) {
+      total += Files.size(war.resolve(path));
+    }
+    return total;
   }
 
   private static Optional<Unpacked> read(Path marker) {
@@ -108,9 +174,9 @@ public final class WarFile {
   }
 
   /**
-   * Streams {@code in} to {@code out}: an entry of {@code dropped} is left out, every other entry
-   * is copied, and each of {@code staged} (webapp path to file) is appended. Returns how many
-   * entries the output holds.
+   * Streams {@code in}, a WAR or a webapp directory, to {@code out}: an entry of {@code dropped} is
+   * left out, every other entry is copied, and each of {@code staged} (webapp path to file) is
+   * appended. Returns how many entries the output holds.
    */
   public static int assemble(Path in, Path out, Set<String> dropped, Map<String, Path> staged)
       throws IOException {
@@ -118,8 +184,41 @@ public final class WarFile {
     int count = 0;
     Files.createDirectories(out.toAbsolutePath().getParent());
     try (OutputStream o = Files.newOutputStream(out);
-        ZipOutputStream zip = new ZipOutputStream(o);
-        InputStream i = Files.newInputStream(in);
+        ZipOutputStream zip = new ZipOutputStream(o)) {
+      if (Files.isDirectory(in)) {
+        for (String path : tree(in)) {
+          if (dropped.contains(path) || staged.containsKey(path)) {
+            continue;
+          }
+          ZipEntry copy = new ZipEntry(path);
+          copy.setTime(Files.getLastModifiedTime(in.resolve(path)).toMillis());
+          zip.putNextEntry(copy);
+          Files.copy(in.resolve(path), zip);
+          zip.closeEntry();
+          count++;
+        }
+      } else {
+        count += copyEntries(in, zip, dropped, staged);
+      }
+      for (Map.Entry<String, Path> e : staged.entrySet()) {
+        zip.putNextEntry(new ZipEntry(e.getKey()));
+        try (InputStream file = Files.newInputStream(e.getValue())) {
+          file.transferTo(zip);
+        }
+        zip.closeEntry();
+        count++;
+      }
+    }
+    Durability.sync(out);
+    return count;
+  }
+
+  /** Copies the entries of the WAR {@code in} that are neither dropped nor staged. */
+  private static int copyEntries(
+      Path in, ZipOutputStream zip, Set<String> dropped, Map<String, Path> staged)
+      throws IOException {
+    int count = 0;
+    try (InputStream i = Files.newInputStream(in);
         ZipInputStream source = new ZipInputStream(i)) {
       ZipEntry entry;
       while ((entry = Zips.nextFile(source)) != null) {
@@ -134,16 +233,7 @@ public final class WarFile {
         zip.closeEntry();
         count++;
       }
-      for (Map.Entry<String, Path> e : staged.entrySet()) {
-        zip.putNextEntry(new ZipEntry(e.getKey()));
-        try (InputStream file = Files.newInputStream(e.getValue())) {
-          file.transferTo(zip);
-        }
-        zip.closeEntry();
-        count++;
-      }
     }
-    Durability.sync(out);
     return count;
   }
 
@@ -183,8 +273,11 @@ public final class WarFile {
     return problems;
   }
 
-  /** The names of the file entries of {@code war}, as webapp paths. */
+  /** The names of the file entries of {@code war}, or the files of a directory, as webapp paths. */
   public static Set<String> paths(Path war) throws IOException {
+    if (Files.isDirectory(war)) {
+      return new java.util.LinkedHashSet<>(tree(war));
+    }
     Set<String> out = new java.util.LinkedHashSet<>();
     try (InputStream i = Files.newInputStream(war);
         ZipInputStream zip = new ZipInputStream(i)) {

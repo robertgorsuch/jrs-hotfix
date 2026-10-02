@@ -20,7 +20,7 @@ It comes as one download with everything it needs inside. There is nothing else 
 | See the build this server is at, and what `rollback` would undo | `jrs-hotfix list` |
 | Find out what the site changed in the webapp | `jrs-hotfix scan` |
 | Install a hotfix without losing the site's changes | `jrs-hotfix baseline add <vendor.war>`, then `jrs-hotfix apply <package.zip>` |
-| Make a hotfixed WAR from a WAR, with no server | `jrs-hotfix apply <package.zip> --war <in.war> --out <out.war>` |
+| Make a hotfixed WAR from a WAR or a deployed webapp, with no server | `jrs-hotfix apply <package.zip> --war <in.war \| dir> --out <out.war>` |
 | Finish or undo an interrupted job | `jrs-hotfix runs resume <id>` / `jrs-hotfix runs undo <id>` |
 
 ---
@@ -214,11 +214,16 @@ Without a baseline nothing of this applies: the package is applied as described 
 
 ```bash
 jrs-hotfix apply C:\Downloads\hotfix_....zip --war C:\build\jasperserver-pro.war --out C:\build\jasperserver-pro-hotfixed.war
+jrs-hotfix apply C:\Downloads\hotfix_....zip --war C:\Jaspersoft\apache-tomcat\webapps\jasperserver-pro --out C:\build\jasperserver-pro-hotfixed.war
 ```
+
+`--war` takes a WAR file, or a deployed or exploded webapp directory, which is read and never written. A deployed webapp gives a WAR that carries its configuration: `META-INF/context.xml`, the `META-INF/*-jdbc.xml` files and the installer-written settings files with this site's values, merged with the package's as on a server.
+
+For an environment that deploys one generic WAR with its own database configuration, add `--generic`: those files are written as the vendor ships them instead, the package's copy where the package has one, else the release baseline's, and a `*-jdbc.xml` the vendor has none of is left out. Every other change of the site is kept or merged as without it. `--generic` needs a release baseline (exit 2 without one), works with `--war` only, and the plan lists the files it takes from the vendor.
 
 This touches no server: no service, no snapshot, no rollback. The input is never modified, and the output is the one file written: what it carries is stated by its own `WEB-INF/internal/jasperserver-pro.properties`, as on a server, and the run's record is under `runs/<runId>/` in the home. The same merge applies: `scan --war <in.war>` and `merge prepare <package.zip> --war <in.war>` read the site's files from the WAR, and a merge prepared for a WAR is what `apply --war` uses, by itself or with `--merge <mergeId>`.
 
-The home is `--home` (or `JRS_HOTFIX_HOME`), else `jrs-hotfix` beside the WAR. The baseline of the release goes into that home as for a server; the hotfix's baseline is written by every `apply --war`, so the next hotfix on the output WAR is compared with it. The WAR is unpacked under `<home>/wars/` while it is worked on, one WAR at a time; that copy may be deleted at any time.
+The home is `--home` (or `JRS_HOTFIX_HOME`), else `jrs-hotfix` beside the WAR, and for a deployed webapp beside Tomcat's `webapps/`, never inside it. The baseline of the release goes into that home as for a server; the hotfix's baseline is written by every `apply --war`, so the next hotfix on the output WAR is compared with it. The WAR is unpacked, or the directory copied, under `<home>/wars/` while it is worked on, one at a time; that copy may be deleted at any time.
 
 Files of `js-install.zip` (`buildomatic`, `samples`) are not part of a WAR: the plan says how many were left out, and they are applied on the server the WAR is deployed to. A WAR has no undo: `apply --war` leaves the home's `undo/` alone, and the server that deploys the output states the hotfix's build like any other.
 
@@ -271,12 +276,12 @@ The full command list:
 ```
 jrs-hotfix                                   menu at a terminal; usage otherwise
 jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--keep-superseded] [--plan] [--yes]
-jrs-hotfix apply <package.zip> --war <in.war> --out <out.war> [--merge <mergeId>]
+jrs-hotfix apply <package.zip> --war <in.war | dir> --out <out.war> [--merge <mergeId>] [--generic]
 jrs-hotfix rollback [--plan] [--yes]
-jrs-hotfix verify <package.zip> [--war <file.war>]
-jrs-hotfix scan [--war <file.war>]
+jrs-hotfix verify <package.zip> [--war <file.war | dir>]
+jrs-hotfix scan [--war <file.war | dir>]
 jrs-hotfix baseline [list | add <war | dir | package.zip> | remove <id>]
-jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war>] | list | status <mergeId>
+jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war | dir>] | list | status <mergeId>
                   | show <mergeId> <path>
                   | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
                   | discard <mergeId>]
@@ -324,7 +329,7 @@ baselines/<id>/payload/...    the content of the mergeable ones (settings, XML, 
 merges/<mergeId>/merge.json   a prepared merge: what an apply does with every file the package ships
 merges/<mergeId>/report.txt   the same, as `merge status` prints it
 merges/<mergeId>/files/<path>/base|mine|theirs|merged   the three sides of a file that needed a merge, and the result
-wars/webapps/<name>/          the unpacked copy of the WAR being worked on (--war); may be deleted at any time
+wars/webapps/<name>/          the copy of the WAR or webapp directory being worked on (--war); may be deleted at any time
 ```
 
 ### Settings

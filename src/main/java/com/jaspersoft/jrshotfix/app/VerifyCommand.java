@@ -40,7 +40,7 @@ final class VerifyCommand extends AppCommand {
 
   @Option(
       names = "--war",
-      paramLabel = "<file.war>",
+      paramLabel = "<file.war | dir>",
       description =
           "Verify against this WAR instead of the server. The home is --home, else jrs-hotfix"
               + " beside the WAR.")
