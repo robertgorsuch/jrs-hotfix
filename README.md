@@ -154,16 +154,19 @@ The undo is used up by the rollback, and replaced by the next apply: after eithe
 
 ### Keep the site's changes on a customized server
 
-jrs-hotfix can tell what a site changed in the webapp, given the vendor's own files to compare with. They are kept in the home as baselines:
+jrs-hotfix can tell what a site changed in the webapp, and in the installation's `buildomatic` and `samples`, given the vendor's own files to compare with. They are kept in the home as baselines:
 
 ```bash
-jrs-hotfix baseline add C:\Jaspersoft\jasperserver-pro.war    # the release as the vendor shipped it
+jrs-hotfix baseline add C:\Jaspersoft\jasperreports-server-pro-10.0.0-bin.zip    # the release: the vendor's distribution, both areas
+jrs-hotfix baseline add C:\Jaspersoft\jasperserver-pro.war    # or the release's WAR alone: the webapp only
 jrs-hotfix baseline add C:\Downloads\hotfix_....zip           # a hotfix that is already on the server
 jrs-hotfix baseline list
 jrs-hotfix baseline remove <id>
 ```
 
-The WAR is the one the server was installed from (the directory that holds it, or an unpacked copy, will do). It is read as a stream; the baseline keeps a hash of every file and the content of the files that can be merged: settings, XML and pages. When a hotfix is on the server, its package is needed too, because the files it replaced are the vendor's and not the site's.
+The release is best given as the vendor's distribution the server was installed from: its ZIP, or the directory it was unpacked into (`buildomatic/` beside `jasperserver-pro.war`). Its WAR gives the webapp, and its `buildomatic/` and `samples/` the installation, so what the site changed in buildomatic is kept or merged too. The WAR alone (the directory that holds it, or an unpacked copy, will do) gives the webapp only; the installation's files are then replaced as without a baseline, and the plan says so. Either is read as a stream; the baseline keeps a hash of every file and the content of the files that can be merged: settings, XML, pages, and buildomatic's scripts and SQL. When a hotfix is on the server, its package is needed too, because the files it replaced are the vendor's and not the site's. A hotfix's baseline holds its `js-install.zip` files as well.
+
+In the installation, `buildomatic/default_master.properties` is the site's own and is never compared or touched, and what buildomatic builds from it (`buildomatic/build_conf/`) is counted, not listed. (These two rules are to be confirmed against a real 10.0.0 distribution.)
 
 Then see what the site changed:
 

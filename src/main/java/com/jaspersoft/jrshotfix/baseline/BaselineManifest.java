@@ -7,11 +7,13 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
- * What one baseline knows: the vendor's files of a release as it shipped, or of one hotfix package.
- * Invariants: paths are relative to the webapp, with {@code /}; every file of the source has a row
- * with its hash, mergeable or not; {@code deleted} is only filled for a hotfix and holds the paths
- * its readme deletes, a {@code *} standing for any run of characters inside one name; lists are
- * immutable.
+ * What one baseline knows: the vendor's files of a release as it shipped, or of one hotfix package,
+ * in two areas (0.7 design, section 1): {@code files} under the webapp, relative to it, and {@code
+ * installFiles} under the installation ({@code buildomatic/}, {@code samples/}), relative to it.
+ * Invariants: paths use {@code /}; every file of the source has a row with its hash, mergeable or
+ * not; {@code deleted} and {@code installDeleted} are only filled for a hotfix and hold the paths
+ * its readme deletes in each area, a {@code *} standing for any run of characters inside one name;
+ * a baseline written before 0.7 reads back with no installation area; lists are immutable.
  */
 public record BaselineManifest(
     String id,
@@ -22,7 +24,9 @@ public record BaselineManifest(
     Instant createdAt,
     String source,
     List<BaseFile> files,
-    List<String> deleted) {
+    List<String> deleted,
+    List<BaseFile> installFiles,
+    List<String> installDeleted) {
 
   /** A release as the vendor shipped it, or one hotfix package. */
   public enum Kind {
@@ -40,6 +44,18 @@ public record BaselineManifest(
     Objects.requireNonNull(source, "source");
     files = List.copyOf(files);
     deleted = deleted == null ? List.of() : List.copyOf(deleted);
+    installFiles = installFiles == null ? List.of() : List.copyOf(installFiles);
+    installDeleted = installDeleted == null ? List.of() : List.copyOf(installDeleted);
+  }
+
+  /** The files of one area. */
+  public List<BaseFile> files(Area area) {
+    return area == Area.WEBAPP ? files : installFiles;
+  }
+
+  /** True when this hotfix's readme deletes {@code path} of {@code area}. */
+  public boolean deletes(Area area, String path) {
+    return matches(area == Area.WEBAPP ? deleted : installDeleted, path);
   }
 
   /**
@@ -67,9 +83,13 @@ public record BaselineManifest(
     return "release-" + release + "-" + edition + "-" + build;
   }
 
-  /** True when this hotfix's readme deletes {@code path}. */
+  /** True when this hotfix's readme deletes {@code path} of the webapp. */
   public boolean deletes(String path) {
-    for (String d : deleted) {
+    return matches(deleted, path);
+  }
+
+  private static boolean matches(List<String> globs, String path) {
+    for (String d : globs) {
       if (d.indexOf('*') < 0 ? d.equals(path) : glob(d).matcher(path).matches()) {
         return true;
       }

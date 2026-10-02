@@ -149,7 +149,14 @@ class BaselineStoreTest {
     assertThat(m.id()).isEqualTo("JRSHF-10.0.0-20260730-0457");
     assertThat(m.kind()).isEqualTo(BaselineManifest.Kind.HOTFIX);
     assertThat(m.build()).isEqualTo("20260730_0457");
-    // webapp paths only: the installation's files are not merged
+    // the webapp's files, and the installation's apart from them (0.7)
+    assertThat(m.files(Area.INSTALLATION))
+        .singleElement()
+        .satisfies(
+            f -> {
+              assertThat(f.path()).isEqualTo("buildomatic/lib/tool-2.0.jar");
+              assertThat(f.payload()).isFalse();
+            });
     assertThat(m.files())
         .extracting(BaseFile::path)
         .containsExactlyInAnyOrder(
@@ -163,6 +170,62 @@ class BaselineStoreTest {
     // from the same package again: the baseline that is there stays
     assertThat(store.addHotfix(zip, contents, "jasperserver-pro").createdAt())
         .isEqualTo(m.createdAt());
+  }
+
+  @Test
+  void should_read_both_areas_of_a_distribution_zip_with_the_war_inside() throws Exception {
+    Path war = Wars.war(tmp.resolve("build/jasperserver-pro.war"), Wars.vendor());
+    String top = "jasperreports-server-pro-10.0.0-bin/";
+    Map<String, byte[]> entries = new LinkedHashMap<>();
+    entries.put(top + "docs/readme.html", "<p>docs</p>".getBytes(StandardCharsets.UTF_8));
+    entries.put(top + "jasperserver-pro.war", Files.readAllBytes(war));
+    entries.put(
+        top + "buildomatic/default_master.properties.sample",
+        "appServerType=tomcat\n".getBytes(StandardCharsets.UTF_8));
+    entries.put(
+        top + "buildomatic/conf_source/db/postgresql/db.template.properties",
+        "db.port=5432\n".getBytes(StandardCharsets.UTF_8));
+    entries.put(top + "samples/readme.txt", "samples\n".getBytes(StandardCharsets.UTF_8));
+    Path zip = Packages.zip(tmp.resolve("dl/jasperreports-server-pro-10.0.0-bin.zip"), entries);
+
+    BaselineStore store = store();
+    BaselineManifest m = store.addRelease(zip);
+
+    assertThat(m.id()).isEqualTo(Wars.RELEASE_ID);
+    assertThat(m.files()).hasSize(Wars.vendor().size());
+    assertThat(m.files(Area.INSTALLATION))
+        .extracting(BaseFile::path)
+        .containsExactlyInAnyOrder(
+            "buildomatic/default_master.properties.sample",
+            "buildomatic/conf_source/db/postgresql/db.template.properties",
+            "samples/readme.txt");
+    assertThat(
+            store.payload(
+                m.id(),
+                Area.INSTALLATION,
+                "buildomatic/conf_source/db/postgresql/db.template.properties"))
+        .hasContent("db.port=5432\n");
+    // the webapp's payload is where it always was
+    assertThat(store.payload(m.id(), Wars.WEB_XML)).exists();
+  }
+
+  @Test
+  void should_read_a_baseline_written_before_07_as_one_without_an_installation() throws Exception {
+    BaselineStore store = store();
+    BaselineManifest m =
+        store.addRelease(Wars.war(tmp.resolve("dl/jasperserver-pro.war"), Wars.vendor()));
+    Path manifest = tmp.resolve("home/baselines").resolve(m.id()).resolve("manifest.json");
+    String old =
+        Files.readString(manifest, StandardCharsets.UTF_8)
+            .replace(",\"installFiles\":[]", "")
+            .replace(",\"installDeleted\":[]", "");
+    assertThat(old).doesNotContain("installFiles").doesNotContain("installDeleted");
+    Files.writeString(manifest, old, StandardCharsets.UTF_8);
+
+    BaselineManifest read = store.find(m.id()).orElseThrow();
+
+    assertThat(read.files(Area.INSTALLATION)).isEmpty();
+    assertThat(read.files()).hasSize(m.files().size());
   }
 
   @Test

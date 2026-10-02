@@ -61,4 +61,33 @@ public enum FileClass {
     }
     return B;
   }
+
+  /**
+   * The class of a file of the installation ({@code buildomatic/}, {@code samples/}), by its path
+   * relative to the installation (0.7 design, section 1): XML (Ant builds, configuration templates)
+   * is reviewed, properties are merged by key, the scripts and SQL a site edits are text merged by
+   * line, everything else is binary. Nothing here is built output the vendor would regenerate.
+   */
+  public static FileClass ofInstallation(String installationPath) {
+    String p = installationPath.replace('\\', '/').toLowerCase(Locale.ROOT);
+    if (p.endsWith(".xml") || p.endsWith(".xsl") || p.endsWith(".xsd")) {
+      return X;
+    }
+    if (p.endsWith(".properties")) {
+      return P;
+    }
+    if (p.endsWith(".sh")
+        || p.endsWith(".bat")
+        || p.endsWith(".cmd")
+        || p.endsWith(".sql")
+        || p.endsWith(".txt")
+        || p.endsWith(".groovy")
+        || p.endsWith(".template")
+        || p.endsWith(".conf")
+        || p.endsWith(".policy")
+        || p.endsWith(".json")) {
+      return T;
+    }
+    return B;
+  }
 }

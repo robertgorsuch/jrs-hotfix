@@ -93,14 +93,16 @@ never replaced.
 Give jrs-hotfix the vendor's own files and it keeps what this site changed:
 
 ```
-jrs-hotfix baseline add <jasperserver-pro.war>   the WAR the server was installed from
+jrs-hotfix baseline add <distribution.zip>       the vendor's distribution: webapp and buildomatic
+jrs-hotfix baseline add <jasperserver-pro.war>   or the WAR the server was installed from: webapp only
 jrs-hotfix baseline add <package.zip>            a hotfix applied before there was a baseline
 jrs-hotfix scan                                  vanilla, or customized: what differs
 jrs-hotfix verify <package.zip>                  also where the site and a hotfix changed the same file
 ```
 
 With a baseline, `apply` compares every file the package ships under the
-webapp with the vendor's and the server's:
+webapp, and under `buildomatic/` and `samples/` when the baseline is the
+vendor's distribution, with the vendor's and the server's:
 
 - only the vendor changed it: replaced;
 - only the site changed it: kept;

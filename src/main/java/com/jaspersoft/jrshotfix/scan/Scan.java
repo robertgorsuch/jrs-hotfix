@@ -1,5 +1,6 @@
 package com.jaspersoft.jrshotfix.scan;
 
+import com.jaspersoft.jrshotfix.baseline.Area;
 import com.jaspersoft.jrshotfix.baseline.BaseView;
 import com.jaspersoft.jrshotfix.baseline.BaselineManifest.BaseFile;
 import com.jaspersoft.jrshotfix.baseline.FileClass;
@@ -22,12 +23,13 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Compares the webapp on disk with the vendor's files (0.2 design, section 3) and, given a package,
- * says for each file the package ships whether the site's change and the vendor's collide.
- * Invariants: read-only; paths are relative to the webapp, with {@code /}; files of a text class
- * are equal when they differ in line ends only; a file the installer fills in for one site is never
- * counted as a customization; a file written at run time, or built output the vendor does not ship,
- * is counted and not listed.
+ * Compares an area on disk, the webapp or the installation, with the vendor's files (0.2 design,
+ * section 3; 0.7 design, section 1) and, given a package, says for each file the package ships
+ * whether the site's change and the vendor's collide. Invariants: read-only; paths are relative to
+ * the area, with {@code /}, and the installation is read under its {@link Area#INSTALLATION_DIRS}
+ * only; files of a text class are equal when they differ in line ends only; a file the installer
+ * fills in for one site is never counted as a customization; a file written at run time, or built
+ * output the vendor does not ship, is counted and not listed.
  */
 public final class Scan {
 
@@ -92,27 +94,19 @@ public final class Scan {
     }
   }
 
-  /** Every file under {@code webappDir} against {@code view}. */
-  public static Report of(BaseView view, Path webappDir, FileOps files) {
+  /** Every file of {@code view}'s area under {@code root} (the webapp or the installation). */
+  public static Report of(BaseView view, Path root, FileOps files) {
+    Area area = view.area();
     List<Item> items = new ArrayList<>();
     Set<String> onDisk = new HashSet<>();
     int generated = 0;
     int unchanged = 0;
-    List<String> all;
-    try (Stream<Path> walk = Files.walk(webappDir)) {
-      // by the path as text, so the order is the same on every file system
-      all =
-          walk.filter(Files::isRegularFile)
-              .map(f -> webappDir.relativize(f).toString().replace('\\', '/'))
-              .sorted()
-              .toList();
-    } catch (IOException e) {
-      throw new UncheckedIOException("cannot read " + webappDir, e);
-    }
+    // by the path as text, so the order is the same on every file system
+    List<String> all = area == Area.WEBAPP ? walk(root, "") : installation(root);
     for (String path : all) {
-      Path file = webappDir.resolve(path);
+      Path file = root.resolve(path);
       onDisk.add(path);
-      FileClass cls = FileClass.of(path);
+      FileClass cls = area.fileClass(path);
       Optional<BaseFile> base = view.file(path);
       if (base.isEmpty()) {
         if (EXTERNAL_AUTH.matcher(path).matches()) {
@@ -120,7 +114,7 @@ public final class Scan {
         } else if (installer(view, path)) {
           // written whole by the installer, so the vendor's webapp has no copy of it
           items.add(new Item(path, cls, State.INSTALLER));
-        } else if (cls == FileClass.G || runtime(path)) {
+        } else if (generated(area, cls, path)) {
           generated++;
         } else {
           items.add(new Item(path, cls, State.ADDED));
@@ -135,19 +129,50 @@ public final class Scan {
     }
     for (String path : view.paths()) {
       if (!onDisk.contains(path)) {
-        items.add(new Item(path, FileClass.of(path), State.REMOVED));
+        items.add(new Item(path, area.fileClass(path), State.REMOVED));
       }
     }
     return new Report(view.describe(), items, generated, unchanged);
   }
 
-  private static boolean runtime(String path) {
+  /** The files under {@code root}, each as {@code prefix} + its path below root, sorted. */
+  private static List<String> walk(Path root, String prefix) {
+    if (!Files.isDirectory(root)) {
+      return List.of();
+    }
+    try (Stream<Path> walk = Files.walk(root)) {
+      return walk.filter(Files::isRegularFile)
+          .map(f -> prefix + root.relativize(f).toString().replace('\\', '/'))
+          .sorted()
+          .toList();
+    } catch (IOException e) {
+      throw new UncheckedIOException("cannot read " + root, e);
+    }
+  }
+
+  /** The files under the installation's directories a package writes, as installation paths. */
+  private static List<String> installation(Path installDir) {
+    List<String> all = new ArrayList<>();
+    for (String dir : Area.INSTALLATION_DIRS) {
+      all.addAll(walk(installDir.resolve(dir), dir + "/"));
+    }
+    return all;
+  }
+
+  /** True when a file the vendor has no copy of is built or written at run time, not the site's. */
+  private static boolean generated(Area area, FileClass cls, String path) {
+    if (area == Area.INSTALLATION) {
+      return area.generated(path);
+    }
     String p = path.toLowerCase(Locale.ROOT);
-    return RUNTIME.stream().anyMatch(p::startsWith);
+    return cls == FileClass.G || RUNTIME.stream().anyMatch(p::startsWith);
   }
 
   /** True when the installer writes {@code path} for one site, by the baseline or by name. */
   public static boolean installer(BaseView view, String path) {
+    if (view.area() == Area.INSTALLATION) {
+      return view.installer(path) || Area.INSTALLATION.siteFile(path);
+    }
     return view.installer(path)
         || SiteSettings.holdsSiteValuesInWebapp(path)
         || SiteSettings.keptAsItIsInWebapp(path);
@@ -216,8 +241,9 @@ public final class Scan {
   }
 
   /**
-   * One file the package ships under the webapp, judged against the base and the disk. The hashes
-   * are those of the bytes; {@code base} and {@code mine} are empty when there is no such file.
+   * One file the package ships, judged against the base and the disk. {@code path} is relative to
+   * {@code area}; the hashes are those of the bytes; {@code base} and {@code mine} are empty when
+   * there is no such file.
    */
   public record PackageItem(
       String path,
@@ -225,7 +251,13 @@ public final class Scan {
       Verdict verdict,
       Optional<String> base,
       Optional<String> mine,
-      String theirs) {
+      String theirs,
+      Area area) {
+
+    /** The path as the package writes it, for an area whose root is {@code webappPrefix}'s. */
+    public String packagePath(String webappPrefix) {
+      return area == Area.WEBAPP ? webappPrefix + path : path;
+    }
 
     /** True when the site's change is lost because this class of file is never merged. */
     public boolean overwritten() {
@@ -247,20 +279,52 @@ public final class Scan {
   /** Every file {@code contents} ships under the webapp, judged. */
   public static List<PackageItem> against(
       BaseView view, PackageContents contents, String webappName, Path webappDir, FileOps files) {
+    return against(view, contents, webappName, webappDir, Optional.empty(), files);
+  }
+
+  /**
+   * Every file {@code contents} ships under the webapp and, given {@code installDir} and a baseline
+   * that knows the installation, under {@code buildomatic/} and {@code samples/}, judged; the
+   * webapp's files first.
+   */
+  public static List<PackageItem> against(
+      BaseView view,
+      PackageContents contents,
+      String webappName,
+      Path webappDir,
+      Optional<Path> installDir,
+      FileOps files) {
     String prefix = PackagePaths.WEBAPPS_PREFIX + webappName + "/";
+    BaseView installation = view.installation();
+    // a WAR target's installation is a scratch directory with neither buildomatic nor samples
+    boolean install =
+        installDir.isPresent()
+            && installation.covered()
+            && Area.INSTALLATION_DIRS.stream()
+                .anyMatch(d -> Files.isDirectory(installDir.get().resolve(d)));
     List<PackageItem> out = new ArrayList<>();
+    List<PackageItem> installed = new ArrayList<>();
     for (PackageContents.VendorFile theirs : contents.vendorFiles()) {
       if (theirs.path().startsWith(prefix)) {
         String path = theirs.path().substring(prefix.length());
         out.add(judge(view, path, theirs, webappDir.resolve(path)));
+      } else if (install && installationPath(theirs.path())) {
+        installed.add(
+            judge(installation, theirs.path(), theirs, installDir.get().resolve(theirs.path())));
       }
     }
+    out.addAll(installed);
     return List.copyOf(out);
+  }
+
+  /** True when a package path is under one of the installation's directories a package writes. */
+  public static boolean installationPath(String packagePath) {
+    return Area.INSTALLATION_DIRS.stream().anyMatch(d -> packagePath.startsWith(d + "/"));
   }
 
   private static PackageItem judge(
       BaseView view, String path, PackageContents.VendorFile theirs, Path file) {
-    FileClass cls = FileClass.of(path);
+    FileClass cls = view.area().fileClass(path);
     Optional<BaseFile> base = view.file(path);
     Optional<String> baseHash = base.map(BaseFile::sha256);
     boolean theirsIsBase =
@@ -273,7 +337,8 @@ public final class Scan {
           base.isEmpty()
               ? Verdict.NEW
               : theirsIsBase ? Verdict.SITE_REMOVED : Verdict.REMOVED_COLLISION;
-      return new PackageItem(path, cls, v, baseHash, Optional.empty(), theirs.sha256());
+      return new PackageItem(
+          path, cls, v, baseHash, Optional.empty(), theirs.sha256(), view.area());
     }
     Sums mine;
     try {
@@ -297,7 +362,8 @@ public final class Scan {
     } else {
       v = Verdict.COLLISION;
     }
-    return new PackageItem(path, cls, v, baseHash, Optional.of(mine.sha256()), theirs.sha256());
+    return new PackageItem(
+        path, cls, v, baseHash, Optional.of(mine.sha256()), theirs.sha256(), view.area());
   }
 
   /**
