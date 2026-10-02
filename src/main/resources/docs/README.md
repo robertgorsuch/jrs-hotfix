@@ -225,12 +225,14 @@ runs/<runId>/<step>/payload/...     replaced and deleted files, at their relativ
 undo/undo.json                what the latest apply did: every file it wrote or deleted, before and after
 undo/manifest.json            the latest apply's snapshot, until the next apply or a rollback
 undo/payload/...
-baselines/<id>/manifest.json  the vendor's files: a hash for every file of a release's WAR or of a hotfix
-baselines/<id>/payload/...    the content of the mergeable ones (settings, XML, pages)
+undo/war/                     on a build host, the WAR the latest apply replaced (and war.json, both hashes)
+baselines/<id>/manifest.json  the vendor's files: a hash for every file of a release (WAR or distribution) or of a hotfix
+baselines/<id>/payload/...    the content of the webapp's mergeable ones (settings, XML, pages)
+baselines/<id>/install-payload/...   the same for buildomatic and samples
 merges/<mergeId>/merge.json   a prepared merge: what an apply does with every file the package ships
 merges/<mergeId>/report.txt   the same, as `merge status` prints it
 merges/<mergeId>/files/<path>/base|mine|theirs|merged   the three sides of a file that needed a merge, and the result
-wars/webapps/<name>/          the unpacked copy of the WAR being worked on (--war); may be deleted at any time
+wars/webapps/<name>/          the unpacked copy of the WAR being worked on (--war), or of a build host's WAR; may be deleted at any time
 ```
 
 ## Settings
