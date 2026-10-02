@@ -31,6 +31,7 @@ import picocli.CommandLine.Option;
       RollbackCommand.class,
       VerifyCommand.class,
       ListCommand.class,
+      CompareCommand.class,
       ScanCommand.class,
       BaselineCommand.class,
       MergeCommand.class,

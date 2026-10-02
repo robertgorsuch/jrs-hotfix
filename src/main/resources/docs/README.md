@@ -32,6 +32,7 @@ jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war 
                   | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
                   | discard <mergeId>]
 jrs-hotfix list
+jrs-hotfix compare <a> <b> [<c>] [--out <dir>] [--show <path>]
 jrs-hotfix runs [list | show <id> | resume <id> | undo <id> | prune --older-than <days> [--include-failed]]
 jrs-hotfix settings [show | set <key> <value> | detect]
 jrs-hotfix --docs | --version | --help
@@ -172,6 +173,7 @@ printed in the plan preview, printed again after the run finishes, and saved to
 | 4 | failed, rollback incomplete (the message names the files and the snapshot) |
 | 5 | cancelled |
 | 6 | unsupported input (not an official package, not a 10.x install) |
+| 7 | `compare` only: the inputs differ, or a three-way comparison has conflicts |
 | 8 | recovery required |
 | 9 | lock held |
 

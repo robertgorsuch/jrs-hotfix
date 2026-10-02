@@ -21,6 +21,7 @@ It comes as one download with everything it needs inside. There is nothing else 
 | Find out what the site changed in the webapp | `jrs-hotfix scan` |
 | Install a hotfix without losing the site's changes | `jrs-hotfix baseline add <vendor.war>`, then `jrs-hotfix apply <package.zip>` |
 | Make a hotfixed WAR from a WAR or a deployed webapp, with no server | `jrs-hotfix apply <package.zip> --war <in.war \| dir> --out <out.war>` |
+| Compare two WARs or webapps, or see what two of them each changed from a third | `jrs-hotfix compare <a> <b>` / `jrs-hotfix compare <base> <mine> <theirs>` |
 | Finish or undo an interrupted job | `jrs-hotfix runs resume <id>` / `jrs-hotfix runs undo <id>` |
 
 ---
@@ -227,6 +228,21 @@ The home is `--home` (or `JRS_HOTFIX_HOME`), else `jrs-hotfix` beside the WAR, a
 
 Files of `js-install.zip` (`buildomatic`, `samples`) are not part of a WAR: the plan says how many were left out, and they are applied on the server the WAR is deployed to. A WAR has no undo: `apply --war` leaves the home's `undo/` alone, and the server that deploys the output states the hotfix's build like any other.
 
+### Compare WARs, webapps and distributions
+
+```bash
+jrs-hotfix compare C:\Jaspersoft\jasperserver-pro.war server               # what this site changed
+jrs-hotfix compare test\jasperserver-pro.war prod\jasperserver-pro.war      # two environments
+jrs-hotfix compare vendor.war site.war hotfix.zip --out C:\merged           # three-way, with the result
+jrs-hotfix compare vendor.war site.war --show WEB-INF/web.xml               # one file's differences
+```
+
+`compare` reads any of: a WAR, a webapp directory (exploded or deployed), the vendor's distribution (its ZIP or directory, which brings the webapp and buildomatic), an official hotfix package (its files), or `server`, this home's server. It needs no settings unless one input is `server`, and it changes nothing.
+
+With two inputs it lists the files that differ or are in only one, each with its class; files that differ in line ends only are the same, and logs and buildomatic's generated configuration are counted, not listed. With three (base, mine, theirs) it says for each file whether mine changed it, theirs did, both alike, or both differently, which is merged as `merge` merges (properties by key, pages and XML by line) or is a conflict. `--out <dir>` writes that result into a new or empty directory, one directory per area, with conflict markers where a conflict is. An area is compared only when every input has it.
+
+It exits 0 when the inputs are the same, and 7, a warning, when they differ or a three-way comparison has conflicts.
+
 ---
 
 ## If something goes wrong
@@ -242,6 +258,7 @@ jrs-hotfix finishes every job by saying what happened and what to do next. The n
 | **4** | A step failed, and jrs-hotfix could not put everything back | The message names the files and the snapshot; restore them from `runs/<runId>/` in the home |
 | **5** | You cancelled it | Nothing |
 | **6** | Not an official package, or not a supported installation (not 10.x, not Tomcat) | Nothing changed. Check [Before you start](#before-you-start) |
+| **7** | `compare` only: the inputs differ, or a three-way comparison has conflicts | Read the report; it is a finding, not a failure |
 | **8** | An earlier job was interrupted (a crash, a reboot, Ctrl-C) | Run `jrs-hotfix runs resume <id>` to finish it, or `jrs-hotfix runs undo <id>` to undo it |
 | **9** | Another jrs-hotfix job is already running | Wait for it to finish |
 
@@ -286,6 +303,7 @@ jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war 
                   | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
                   | discard <mergeId>]
 jrs-hotfix list
+jrs-hotfix compare <a> <b> [<c>] [--out <dir>] [--show <path>]
 jrs-hotfix runs [list | show <id> | resume <id> | undo <id> | prune --older-than <days> [--include-failed]]
 jrs-hotfix settings [show | set <key> <value> | detect]
 jrs-hotfix --docs | --version | --help
