@@ -1,5 +1,6 @@
 package com.jaspersoft.jrshotfix.app;
 
+import com.jaspersoft.jrshotfix.baseline.Area;
 import com.jaspersoft.jrshotfix.baseline.BaseView;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
 import com.jaspersoft.jrshotfix.hotfix.HotfixRuntime;
@@ -13,6 +14,7 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -112,9 +114,18 @@ final class VerifyCommand extends AppCommand {
             contents,
             rt.settings().webappName(),
             rt.settings().webappDir(),
+            Optional.of(rt.settings().installDir()),
             rt.files());
+    long underWebapp = items.stream().filter(i -> i.area() == Area.WEBAPP).count();
     List<String> lines = new ArrayList<>();
-    lines.add("against this site (" + items.size() + " files under the webapp)");
+    lines.add(
+        "against this site ("
+            + underWebapp
+            + " files under the webapp"
+            + (items.size() > underWebapp
+                ? ", " + (items.size() - underWebapp) + " under the installation"
+                : "")
+            + ")");
     Map<Scan.Verdict, Integer> counts = new EnumMap<>(Scan.Verdict.class);
     TextTable table = new TextTable();
     boolean any = false;

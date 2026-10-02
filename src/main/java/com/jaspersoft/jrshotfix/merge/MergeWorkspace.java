@@ -1,5 +1,6 @@
 package com.jaspersoft.jrshotfix.merge;
 
+import com.jaspersoft.jrshotfix.baseline.Area;
 import com.jaspersoft.jrshotfix.baseline.BaseView;
 import com.jaspersoft.jrshotfix.baseline.BaselineStore;
 import com.jaspersoft.jrshotfix.baseline.FileClass;
@@ -161,9 +162,29 @@ public final class MergeWorkspace {
     return true;
   }
 
-  /** What {@link #prepare} needs to know about the installation. */
+  /**
+   * What {@link #prepare} needs to know about the installation. With {@code installDir}, the
+   * package's files under {@code buildomatic/} and {@code samples/} are merged too, where the
+   * baseline knows them (0.7 design, section 1).
+   */
   public record Site(
-      String webappName, Path webappDir, FileOps files, Predicate<String> knownToTheVendor) {}
+      String webappName,
+      Path webappDir,
+      FileOps files,
+      Predicate<String> knownToTheVendor,
+      Optional<Path> installDir) {
+
+    /** A site whose installation is not merged: only the webapp's files are. */
+    public Site(
+        String webappName, Path webappDir, FileOps files, Predicate<String> knownToTheVendor) {
+      this(webappName, webappDir, files, knownToTheVendor, Optional.empty());
+    }
+
+    /** Where a path of {@code area} lies on this site. */
+    Path resolve(Area area, String path) {
+      return area == Area.WEBAPP ? webappDir.resolve(path) : installDir.orElseThrow().resolve(path);
+    }
+  }
 
   /**
    * Prepares a merge of {@code contents} (read from {@code zip}) into the webapp: judges every file
@@ -195,11 +216,12 @@ public final class MergeWorkspace {
       throws IOException {
     String prefix = PackagePaths.WEBAPPS_PREFIX + site.webappName() + "/";
     List<Scan.PackageItem> items =
-        Scan.against(view, contents, site.webappName(), site.webappDir(), site.files());
+        Scan.against(
+            view, contents, site.webappName(), site.webappDir(), site.installDir(), site.files());
     Map<String, String> wanted = new LinkedHashMap<>();
     for (Scan.PackageItem item : items) {
       if (needsSides(item)) {
-        wanted.put(prefix + item.path(), item.path());
+        wanted.put(item.packagePath(prefix), item.path());
       }
     }
     Path filesDir = dir(id).resolve("files");
@@ -288,7 +310,8 @@ public final class MergeWorkspace {
         item.theirs(),
         p.merged(),
         p.checks(),
-        p.note());
+        p.note(),
+        item.area());
   }
 
   private static Proposal plain(State state, String note) {
@@ -297,11 +320,12 @@ public final class MergeWorkspace {
 
   private void copySides(String id, Scan.PackageItem item, BaseView view, Site site)
       throws IOException {
-    Path mine = site.webappDir().resolve(item.path());
+    Path mine = site.resolve(item.area(), item.path());
     if (Files.isRegularFile(mine)) {
       copy(mine, side(id, item.path(), MINE));
     }
-    Optional<Path> base = view.payload(item.path());
+    BaseView of = item.area() == view.area() ? view : view.installation();
+    Optional<Path> base = of.payload(item.path());
     if (base.isPresent()) {
       copy(base.get(), side(id, item.path(), BASE));
     }

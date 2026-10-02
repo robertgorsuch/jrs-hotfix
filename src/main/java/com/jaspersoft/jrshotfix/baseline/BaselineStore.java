@@ -38,8 +38,9 @@ import java.util.zip.ZipInputStream;
 
 /**
  * The vendor's files this installation is compared with, {@code baselines/} under the home (0.2
- * design, section 2): one directory per baseline, holding {@code manifest.json} with a hash for
- * every file of the source and {@code payload/} with the content of the mergeable ones. Invariants:
+ * design, section 2; 0.7 design, section 1): one directory per baseline, holding {@code
+ * manifest.json} with a hash for every file of the source, {@code payload/} with the content of the
+ * webapp's mergeable ones and {@code install-payload/} with that of the installation's. Invariants:
  * a baseline is visible only once its manifest exists, and it is built in a directory of its own
  * and renamed into place, so a crash leaves nothing half-written that a reader would take for a
  * baseline; a WAR is read as a stream and never unpacked whole; a file larger than {@link
@@ -56,6 +57,8 @@ public final class BaselineStore {
 
   private static final String MANIFEST = "manifest.json";
   private static final String PAYLOAD = "payload";
+  private static final String INSTALL_PAYLOAD = "install-payload";
+  private static final String DISTRIBUTION_WAR = "jasperserver-pro.war";
   private static final String EDITION = "PRO";
 
   private final Home home;
@@ -93,7 +96,16 @@ public final class BaselineStore {
 
   /** Where the content of {@code path} is stored in baseline {@code id}, whether or not it is. */
   public Path payload(String id, String path) {
-    return home.baselines().resolve(id).resolve(PAYLOAD).resolve(path);
+    return payload(id, Area.WEBAPP, path);
+  }
+
+  /** As {@link #payload(String, String)}, for a path of {@code area}. */
+  public Path payload(String id, Area area, String path) {
+    return home.baselines().resolve(id).resolve(payloadDir(area)).resolve(path);
+  }
+
+  private static String payloadDir(Area area) {
+    return area == Area.WEBAPP ? PAYLOAD : INSTALL_PAYLOAD;
   }
 
   /** Removes one baseline; false when there is none of that id. */
@@ -107,23 +119,41 @@ public final class BaselineStore {
 
   /**
    * Fills a release baseline from the vendor's webapp: a WAR, an unpacked webapp (a directory with
-   * {@code WEB-INF}), or a directory that holds {@code jasperserver-pro.war}. The release and the
-   * build are read from the webapp's own {@code WEB-INF/internal/jasperserver-pro.properties}; a
-   * baseline of the same id is replaced.
+   * {@code WEB-INF}), or a directory that holds {@code jasperserver-pro.war}. A directory that also
+   * holds {@code buildomatic/}, and a distribution ZIP, are the vendor's distribution: its WAR
+   * gives the webapp area and its {@code buildomatic/} and {@code samples/} the installation area
+   * (0.7 design, section 1). The release and the build are read from the webapp's own {@code
+   * WEB-INF/internal/jasperserver-pro.properties}; a baseline of the same id is replaced.
    */
   public BaselineManifest addRelease(Path source) throws IOException {
     Path from = source.toAbsolutePath().normalize();
+    Optional<Path> distribution = Optional.empty();
     if (Files.isDirectory(from) && !Files.isDirectory(from.resolve("WEB-INF"))) {
-      Path war = from.resolve("jasperserver-pro.war");
+      Path war = from.resolve(DISTRIBUTION_WAR);
       if (!Files.isRegularFile(war)) {
         throw notAWebapp(from, "it holds neither WEB-INF nor jasperserver-pro.war");
+      }
+      if (Files.isDirectory(from.resolve(Area.INSTALLATION_DIRS.get(0)))) {
+        distribution = Optional.of(from);
       }
       from = war;
     }
     Path building = building();
     try {
-      List<BaseFile> files =
-          Files.isDirectory(from) ? readTree(from, building) : readWar(from, building);
+      List<BaseFile> files;
+      List<BaseFile> installFiles = List.of();
+      if (Files.isDirectory(from)) {
+        files = readTree(from, "", building, Area.WEBAPP);
+      } else if (isDistributionZip(from)) {
+        List<List<BaseFile>> both = readDistributionZip(from, building);
+        files = both.get(0);
+        installFiles = both.get(1);
+      } else {
+        files = readWar(from, building);
+      }
+      if (distribution.isPresent()) {
+        installFiles = readInstallation(distribution.get(), building);
+      }
       Optional<InstalledBuild> stated = InstalledBuild.ofWebapp(building.resolve(PAYLOAD));
       if (stated.isEmpty()) {
         throw notAWebapp(
@@ -142,8 +172,10 @@ public final class BaselineStore {
               EDITION,
               build,
               clock.instant(),
-              from.toString(),
+              distribution.orElse(from).toString(),
               files,
+              List.of(),
+              installFiles,
               List.of());
       publish(building, manifest);
       return manifest;
@@ -153,9 +185,10 @@ public final class BaselineStore {
   }
 
   /**
-   * Fills the hotfix baseline of an official package from the files it ships under the webapp,
-   * whatever happens to them on this server. A baseline of the same id is left as it is when it was
-   * made from the same package, and replaced otherwise.
+   * Fills the hotfix baseline of an official package from the files it ships under the webapp and
+   * under the installation's {@code buildomatic/} and {@code samples/}, whatever happens to them on
+   * this server. A baseline of the same id is left as it is when it was made from the same package,
+   * and replaced otherwise.
    */
   public BaselineManifest addHotfix(Path zip, PackageContents contents, String webappName)
       throws IOException {
@@ -164,50 +197,57 @@ public final class BaselineStore {
       return existing.get();
     }
     String prefix = PackagePaths.WEBAPPS_PREFIX + webappName + "/";
-    Map<String, String> wanted = new LinkedHashMap<>();
+    Map<String, Path> wanted = new LinkedHashMap<>();
     List<BaseFile> files = new ArrayList<>();
+    List<BaseFile> installFiles = new ArrayList<>();
+    Path building = building();
     for (PackageContents.VendorFile f : contents.vendorFiles()) {
-      if (!f.path().startsWith(prefix)) {
+      Area area;
+      String path;
+      if (f.path().startsWith(prefix)) {
+        area = Area.WEBAPP;
+        path = f.path().substring(prefix.length());
+      } else if (installation(f.path())) {
+        area = Area.INSTALLATION;
+        path = f.path();
+      } else {
         continue;
       }
-      String path = f.path().substring(prefix.length());
-      FileClass cls = FileClass.of(path);
+      FileClass cls = area.fileClass(path);
       boolean payload = cls.mergeable() && f.size() <= MAX_PAYLOAD_BYTES;
       if (payload) {
-        wanted.put(f.path(), path);
+        wanted.put(f.path(), building.resolve(payloadDir(area)).resolve(path));
       }
-      files.add(
-          new BaseFile(
-              path,
-              f.sha256(),
-              f.size(),
-              cls.text() ? Optional.of(f.textSha256()) : Optional.empty(),
-              payload,
-              false));
+      (area == Area.WEBAPP ? files : installFiles)
+          .add(
+              new BaseFile(
+                  path,
+                  f.sha256(),
+                  f.size(),
+                  cls.text() ? Optional.of(f.textSha256()) : Optional.empty(),
+                  payload,
+                  false));
     }
     // what the readmes delete, and what the package superseded here: seen through this hotfix,
     // neither is the vendor's any more
-    List<String> deleted =
+    List<String> gone =
         java.util.stream.Stream.concat(
                 contents.deletions().stream(), contents.superseded().stream())
-            .filter(d -> d.startsWith(prefix))
-            .map(d -> d.substring(prefix.length()))
             .distinct()
             .toList();
-    Path building = building();
+    List<String> deleted =
+        gone.stream()
+            .filter(d -> d.startsWith(prefix))
+            .map(d -> d.substring(prefix.length()))
+            .toList();
+    List<String> installDeleted = gone.stream().filter(BaselineStore::installation).toList();
     try {
-      Path payloadDir = building.resolve(PAYLOAD);
-      Files.createDirectories(payloadDir);
+      Files.createDirectories(building.resolve(PAYLOAD));
       PackageStager.stage(
-          zip,
-          contents,
-          wanted.keySet(),
-          payloadDir,
-          packagePath -> payloadDir.resolve(wanted.get(packagePath)),
-          new CancellationToken());
-      for (String path : wanted.values()) {
-        if (!Files.isRegularFile(payloadDir.resolve(path))) {
-          throw new IOException(zip + " no longer holds " + path);
+          zip, contents, wanted.keySet(), building, wanted::get, new CancellationToken());
+      for (Map.Entry<String, Path> e : wanted.entrySet()) {
+        if (!Files.isRegularFile(e.getValue())) {
+          throw new IOException(zip + " no longer holds " + e.getKey());
         }
       }
       BaselineManifest manifest =
@@ -220,7 +260,9 @@ public final class BaselineStore {
               clock.instant(),
               contents.sha256(),
               files,
-              deleted);
+              deleted,
+              installFiles,
+              installDeleted);
       publish(building, manifest);
       return manifest;
     } finally {
@@ -261,20 +303,9 @@ public final class BaselineStore {
   }
 
   private static List<BaseFile> readWar(Path war, Path building) throws IOException {
-    List<BaseFile> files = new ArrayList<>();
-    Set<String> seen = new HashSet<>();
-    try (InputStream in = Files.newInputStream(war);
-        ZipInputStream zip = new ZipInputStream(in)) {
-      ZipEntry entry;
-      while ((entry = Zips.nextFile(zip)) != null) {
-        String path = Zips.name(entry);
-        if (!PackagePaths.pathProblems(path).isEmpty()) {
-          throw notAWebapp(war, "it holds an unusable path");
-        }
-        if (seen.add(path)) {
-          files.add(baseFile(path, zip, building));
-        }
-      }
+    List<BaseFile> files;
+    try (InputStream in = Files.newInputStream(war)) {
+      files = readWar(war, new ZipInputStream(in), building);
     }
     if (files.isEmpty()) {
       throw notAWebapp(war, "it is not a readable archive");
@@ -282,27 +313,140 @@ public final class BaselineStore {
     return files;
   }
 
-  private static List<BaseFile> readTree(Path webapp, Path building) throws IOException {
+  /** The files of the WAR read from {@code zip}, which is left open; {@code war} names it. */
+  private static List<BaseFile> readWar(Path war, ZipInputStream zip, Path building)
+      throws IOException {
+    List<BaseFile> files = new ArrayList<>();
+    Set<String> seen = new HashSet<>();
+    ZipEntry entry;
+    while ((entry = Zips.nextFile(zip)) != null) {
+      String path = Zips.name(entry);
+      if (!PackagePaths.pathProblems(path).isEmpty()) {
+        throw notAWebapp(war, "it holds an unusable path");
+      }
+      if (seen.add(path)) {
+        files.add(baseFile(Area.WEBAPP, path, zip, building));
+      }
+    }
+    return files;
+  }
+
+  /** True when {@code path} is under one of the installation's directories a package writes. */
+  private static boolean installation(String path) {
+    return Area.INSTALLATION_DIRS.stream().anyMatch(d -> path.startsWith(d + "/"));
+  }
+
+  /** True when {@code file} is a distribution ZIP: it holds a {@code buildomatic/} directory. */
+  private static boolean isDistributionZip(Path file) throws IOException {
+    try (InputStream in = Files.newInputStream(file);
+        ZipInputStream zip = new ZipInputStream(in)) {
+      ZipEntry entry;
+      while ((entry = zip.getNextEntry()) != null) {
+        if (distributionRoot(Zips.name(entry)).isPresent()) {
+          return true;
+        }
+      }
+    } catch (IOException e) {
+      return false;
+    }
+    return false;
+  }
+
+  /**
+   * The directory of a distribution ZIP's entry that holds {@code buildomatic/}: empty for "" when
+   * the entry is {@code buildomatic/...}, {@code "jasperreports-server-pro-10.0.0-bin/"} for one
+   * under that folder; empty when the entry is not under a {@code buildomatic/} at all.
+   */
+  private static Optional<String> distributionRoot(String name) {
+    String marker = Area.INSTALLATION_DIRS.get(0) + "/";
+    if (name.startsWith(marker)) {
+      return Optional.of("");
+    }
+    int at = name.indexOf("/" + marker);
+    return at < 0 || name.substring(0, at).contains("/")
+        ? Optional.empty()
+        : Optional.of(name.substring(0, at + 1));
+  }
+
+  /**
+   * The webapp and the installation of a distribution ZIP: the files of its {@code
+   * jasperserver-pro.war}, read where it lies in the ZIP, and those under its {@code buildomatic/}
+   * and {@code samples/}, by their paths below the distribution's folder.
+   */
+  private static List<List<BaseFile>> readDistributionZip(Path file, Path building)
+      throws IOException {
+    String root = null;
+    try (InputStream in = Files.newInputStream(file);
+        ZipInputStream zip = new ZipInputStream(in)) {
+      ZipEntry entry;
+      while (root == null && (entry = zip.getNextEntry()) != null) {
+        root = distributionRoot(Zips.name(entry)).orElse(null);
+      }
+    }
+    List<BaseFile> webapp = List.of();
+    List<BaseFile> install = new ArrayList<>();
+    try (InputStream in = Files.newInputStream(file);
+        ZipInputStream zip = new ZipInputStream(in)) {
+      ZipEntry entry;
+      while ((entry = Zips.nextFile(zip)) != null) {
+        String name = Zips.name(entry);
+        if (!name.startsWith(java.util.Objects.requireNonNull(root))) {
+          continue;
+        }
+        String path = name.substring(root.length());
+        if (path.equals(DISTRIBUTION_WAR)) {
+          webapp = readWar(file, new ZipInputStream(zip), building);
+        } else if (installation(path)) {
+          if (!PackagePaths.pathProblems(path).isEmpty()) {
+            throw notAWebapp(file, "it holds an unusable path");
+          }
+          install.add(baseFile(Area.INSTALLATION, path, zip, building));
+        }
+      }
+    }
+    if (webapp.isEmpty()) {
+      throw notAWebapp(file, "the distribution holds no " + DISTRIBUTION_WAR);
+    }
+    return List.of(webapp, install);
+  }
+
+  /** The files under a distribution directory's {@code buildomatic/} and {@code samples/}. */
+  private static List<BaseFile> readInstallation(Path distribution, Path building)
+      throws IOException {
+    List<BaseFile> files = new ArrayList<>();
+    for (String dir : Area.INSTALLATION_DIRS) {
+      Path top = distribution.resolve(dir);
+      if (Files.isDirectory(top)) {
+        files.addAll(readTree(top, dir + "/", building, Area.INSTALLATION));
+      }
+    }
+    return files;
+  }
+
+  /** The files under {@code dir} as files of {@code area}, each path {@code prefix} + below dir. */
+  private static List<BaseFile> readTree(Path dir, String prefix, Path building, Area area)
+      throws IOException {
     List<BaseFile> files = new ArrayList<>();
     List<Path> all;
-    try (Stream<Path> walk = Files.walk(webapp)) {
+    try (Stream<Path> walk = Files.walk(dir)) {
       all = walk.filter(Files::isRegularFile).sorted().toList();
     }
     for (Path file : all) {
-      String path = webapp.relativize(file).toString().replace('\\', '/');
+      String path = prefix + dir.relativize(file).toString().replace('\\', '/');
       try (InputStream in = Files.newInputStream(file)) {
-        files.add(baseFile(path, in, building));
+        files.add(baseFile(area, path, in, building));
       }
     }
     return files;
   }
 
   /**
-   * Sums one vendor file from {@code in}, which is left open, and keeps its content under {@code
-   * building} when it is mergeable and small enough.
+   * Sums one vendor file of {@code area} from {@code in}, which is left open, and keeps its content
+   * under {@code building} when it is mergeable and small enough.
    */
-  private static BaseFile baseFile(String path, InputStream in, Path building) throws IOException {
-    FileClass cls = FileClass.of(path);
+  private static BaseFile baseFile(Area area, String path, InputStream in, Path building)
+      throws IOException {
+    FileClass cls = area.fileClass(path);
     if (!cls.mergeable()) {
       Sums sums = Sums.of(in);
       return new BaseFile(
@@ -313,7 +457,7 @@ public final class BaselineStore {
           false,
           false);
     }
-    Path copy = building.resolve(PAYLOAD).resolve(path);
+    Path copy = building.resolve(payloadDir(area)).resolve(path);
     Files.createDirectories(copy.getParent());
     Sums sums;
     try (OutputStream out = Files.newOutputStream(copy)) {
@@ -350,6 +494,7 @@ public final class BaselineStore {
         HotfixException.UNSUPPORTED,
         source + " is not a JasperReports Server 10.x Pro webapp: " + why,
         "point `jrs-hotfix baseline add` at the vendor's jasperserver-pro.war, at the directory"
-            + " that holds it, at an unpacked copy of it, or at an official hotfix ZIP");
+            + " that holds it, at an unpacked copy of it, at the vendor's distribution (its ZIP or"
+            + " its directory), or at an official hotfix ZIP");
   }
 }

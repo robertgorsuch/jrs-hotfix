@@ -20,11 +20,12 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
- * The vendor's webapp at the level this installation states: the release baseline, overlaid with
- * the baseline of the hotfix whose build the webapp states (0.2 design, section 2). Invariants: a
- * path the hotfix ships is the hotfix's file; a path the hotfix's readme deletes is absent; every
- * other path is the release's; the view exists only when the baselines fit the installation (see
- * {@link #resolve}); nothing is written.
+ * The vendor's files at the level this installation states, for one area: the release baseline,
+ * overlaid with the baseline of the hotfix whose build the webapp states (0.2 design, section 2).
+ * The webapp's view is resolved; the installation's is {@link #installation()} of it, made of the
+ * same two baselines (0.7 design, section 1). Invariants: a path the hotfix ships is the hotfix's
+ * file; a path the hotfix's readme deletes is absent; every other path is the release's; the view
+ * exists only when the baselines fit the installation (see {@link #resolve}); nothing is written.
  */
 public final class BaseView {
 
@@ -36,16 +37,36 @@ public final class BaseView {
   private final BaselineStore store;
   private final BaselineManifest release;
   private final Optional<BaselineManifest> hotfix;
+  private final Area area;
   private final Map<String, BaseFile> releaseFiles = new HashMap<>();
   private final Map<String, BaseFile> hotfixFiles = new HashMap<>();
 
   private BaseView(
-      BaselineStore store, BaselineManifest release, Optional<BaselineManifest> hotfix) {
+      BaselineStore store, BaselineManifest release, Optional<BaselineManifest> hotfix, Area area) {
     this.store = store;
     this.release = release;
     this.hotfix = hotfix;
-    release.files().forEach(f -> releaseFiles.put(f.path(), f));
-    hotfix.ifPresent(h -> h.files().forEach(f -> hotfixFiles.put(f.path(), f)));
+    this.area = area;
+    release.files(area).forEach(f -> releaseFiles.put(f.path(), f));
+    hotfix.ifPresent(h -> h.files(area).forEach(f -> hotfixFiles.put(f.path(), f)));
+  }
+
+  /** The installation's view, of the same baselines as this webapp's. */
+  public BaseView installation() {
+    return new BaseView(store, release, hotfix, Area.INSTALLATION);
+  }
+
+  /** The area this view is of. */
+  public Area area() {
+    return area;
+  }
+
+  /**
+   * True when the release baseline knows this area at all: one added before 0.7, or from a WAR
+   * alone, has no installation area.
+   */
+  public boolean covered() {
+    return !release.files(area).isEmpty();
   }
 
   /**
@@ -114,7 +135,7 @@ public final class BaseView {
     BaseView best = null;
     Fit bestFit = null;
     for (BaselineManifest candidate : candidates) {
-      BaseView view = new BaseView(store, candidate, hotfix);
+      BaseView view = new BaseView(store, candidate, hotfix, Area.WEBAPP);
       Fit fit = view.fit(webappDir, files);
       if (bestFit == null || fit.share() > bestFit.share()) {
         best = view;
@@ -193,7 +214,7 @@ public final class BaseView {
     if (fromHotfix != null) {
       return Optional.of(fromHotfix);
     }
-    if (hotfix.isPresent() && hotfix.get().deletes(path)) {
+    if (hotfix.isPresent() && hotfix.get().deletes(area, path)) {
       return Optional.empty();
     }
     return Optional.ofNullable(releaseFiles.get(path));
@@ -209,7 +230,7 @@ public final class BaseView {
   }
 
   private Optional<Path> stored(String id, BaseFile f) {
-    Path p = store.payload(id, f.path());
+    Path p = store.payload(id, area, f.path());
     return f.payload() && Files.isRegularFile(p) ? Optional.of(p) : Optional.empty();
   }
 
@@ -226,7 +247,7 @@ public final class BaseView {
   public Set<String> paths() {
     Set<String> out = new TreeSet<>();
     for (String p : releaseFiles.keySet()) {
-      if (hotfix.isEmpty() || hotfixFiles.containsKey(p) || !hotfix.get().deletes(p)) {
+      if (hotfix.isEmpty() || hotfixFiles.containsKey(p) || !hotfix.get().deletes(area, p)) {
         out.add(p);
       }
     }

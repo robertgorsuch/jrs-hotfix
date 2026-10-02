@@ -304,6 +304,20 @@ public final class HotfixPlans {
     List<String> changes = new ArrayList<>(applyChanges(targets));
     changes.addAll(supersededChanges(contents));
     merge.ifPresent(m -> changes.addAll(MergePlans.changes(m)));
+    long installation =
+        contents.vendorFiles().stream().filter(f -> Scan.installationPath(f.path())).count();
+    if (merge.isPresent()
+        && installation > 0
+        && merge.get().files().stream()
+            .noneMatch(i -> i.where() == com.jaspersoft.jrshotfix.baseline.Area.INSTALLATION)) {
+      // the merge kept the site's webapp files; buildomatic's are replaced as before 0.7
+      warnings.add(
+          installation
+              + " file(s) of the package under the installation (buildomatic, samples) are"
+              + " replaced without being compared: the baseline knows the webapp only. `jrs-hotfix"
+              + " baseline add <the vendor's distribution>` adds the installation, and the next"
+              + " merge keeps what this site changed there too");
+    }
 
     Map<String, String> inputs = new LinkedHashMap<>();
     inputs.put("package", contents.sha256());

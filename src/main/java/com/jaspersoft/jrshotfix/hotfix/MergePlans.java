@@ -1,5 +1,6 @@
 package com.jaspersoft.jrshotfix.hotfix;
 
+import com.jaspersoft.jrshotfix.baseline.Area;
 import com.jaspersoft.jrshotfix.baseline.BaseView;
 import com.jaspersoft.jrshotfix.merge.MergeDoc;
 import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
@@ -97,7 +98,7 @@ final class MergePlans {
       } else {
         d = SiteDecisions.Decision.plain();
       }
-      byPath.put(prefix + item.path(), d);
+      byPath.put(item.where() == Area.WEBAPP ? prefix + item.path() : item.path(), d);
     }
     return new SiteDecisions() {
       @Override
@@ -135,12 +136,11 @@ final class MergePlans {
     }
   }
 
-  /** The webapp paths whose file is neither as {@code doc} found it nor as the apply leaves it. */
+  /** The paths whose file is neither as {@code doc} found it nor as the apply leaves it. */
   List<String> changedSince(MergeDoc doc) {
     List<String> changed = new ArrayList<>();
-    Path webapp = rt.settings().webappDir();
     for (MergeDoc.Item item : doc.files()) {
-      Optional<String> now = FileTarget.hashOf(rt.files(), webapp.resolve(item.path()));
+      Optional<String> now = FileTarget.hashOf(rt.files(), onDisk(item));
       if (!now.equals(item.mine()) && !now.equals(item.lands())) {
         changed.add(item.path());
       }
@@ -195,7 +195,11 @@ final class MergePlans {
               contents,
               view,
               new MergeWorkspace.Site(
-                  rt.settings().webappName(), webapp, rt.files(), known::contains),
+                  rt.settings().webappName(),
+                  webapp,
+                  rt.files(),
+                  known::contains,
+                  Optional.of(rt.settings().installDir())),
               onConflict);
     } catch (IOException e) {
       throw new HotfixException(
@@ -226,12 +230,18 @@ final class MergePlans {
   }
 
   private boolean unchanged(MergeDoc doc) {
-    Path webapp = rt.settings().webappDir();
     for (MergeDoc.Item item : doc.files()) {
-      if (!FileTarget.hashOf(rt.files(), webapp.resolve(item.path())).equals(item.mine())) {
+      if (!FileTarget.hashOf(rt.files(), onDisk(item)).equals(item.mine())) {
         return false;
       }
     }
     return true;
+  }
+
+  /** Where one file of a merge lies on this installation. */
+  private Path onDisk(MergeDoc.Item item) {
+    return item.where() == Area.WEBAPP
+        ? rt.settings().webappDir().resolve(item.path())
+        : rt.settings().installDir().resolve(item.path());
   }
 }

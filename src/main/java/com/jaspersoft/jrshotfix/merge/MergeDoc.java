@@ -1,5 +1,6 @@
 package com.jaspersoft.jrshotfix.merge;
 
+import com.jaspersoft.jrshotfix.baseline.Area;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -78,7 +79,9 @@ public record MergeDoc(
    * One file. {@code base}, {@code mine} and {@code theirs} are the hashes the merge was prepared
    * from, empty where there is no such file; {@code merged} is the hash of the merged file once
    * there is one; {@code checks} are the findings that keep it unresolved; {@code note} says in a
-   * sentence what was done, by key or bean name, never by value.
+   * sentence what was done, by key or bean name, never by value; {@code area} is where {@code path}
+   * lies, {@code webapp} or {@code installation} (0.7 design, section 1), the webapp for a merge
+   * prepared before 0.7.
    */
   public record Item(
       String path,
@@ -92,7 +95,8 @@ public record MergeDoc(
       Optional<String> resolvedBy,
       Optional<Instant> resolvedAt,
       List<String> checks,
-      String note) {
+      String note,
+      String area) {
 
     public Item {
       Objects.requireNonNull(path, "path");
@@ -107,6 +111,12 @@ public record MergeDoc(
       resolvedAt = resolvedAt == null ? Optional.empty() : resolvedAt;
       checks = checks == null ? List.of() : List.copyOf(checks);
       note = note == null ? "" : note;
+      area = Area.of(area).label();
+    }
+
+    /** Where {@link #path} lies. */
+    public Area where() {
+      return Area.of(area);
     }
 
     /** A file the package ships, as the merge was prepared: nobody has resolved it yet. */
@@ -120,7 +130,8 @@ public record MergeDoc(
         String theirs,
         Optional<String> merged,
         List<String> checks,
-        String note) {
+        String note,
+        Area area) {
       return new Item(
           path,
           fileClass,
@@ -133,7 +144,8 @@ public record MergeDoc(
           Optional.empty(),
           Optional.empty(),
           checks,
-          note);
+          note,
+          area.label());
     }
 
     /** A file of the site's that the package does not ship and that stays as it is. */
@@ -150,7 +162,8 @@ public record MergeDoc(
           Optional.empty(),
           Optional.empty(),
           List.of(),
-          note);
+          note,
+          Area.WEBAPP.label());
     }
 
     /** The hash the file has once the package is applied; empty when it is then absent. */
@@ -186,7 +199,8 @@ public record MergeDoc(
           Optional.of(by),
           Optional.of(at),
           findings,
-          newNote);
+          newNote,
+          area);
     }
   }
 

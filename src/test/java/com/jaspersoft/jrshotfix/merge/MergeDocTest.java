@@ -2,6 +2,7 @@ package com.jaspersoft.jrshotfix.merge;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jaspersoft.jrshotfix.baseline.Area;
 import com.jaspersoft.jrshotfix.json.Json;
 import com.jaspersoft.jrshotfix.merge.MergeDoc.Item;
 import com.jaspersoft.jrshotfix.merge.MergeDoc.State;
@@ -24,7 +25,8 @@ class MergeDocTest {
             "t",
             Optional.empty(),
             List.of("a check"),
-            "a note");
+            "a note",
+            Area.WEBAPP);
     Item spelt =
         new Item(
             "WEB-INF/a.xml",
@@ -38,7 +40,8 @@ class MergeDocTest {
             Optional.empty(),
             Optional.empty(),
             List.of("a check"),
-            "a note");
+            "a note",
+            "webapp");
     assertThat(named).isEqualTo(spelt);
     assertThat(Json.writePretty(named)).isEqualTo(Json.writePretty(spelt));
   }
@@ -59,8 +62,21 @@ class MergeDocTest {
             Optional.empty(),
             Optional.empty(),
             List.of(),
-            "kept");
+            "kept",
+            "webapp");
     assertThat(named).isEqualTo(spelt);
     assertThat(Json.writePretty(named)).isEqualTo(Json.writePretty(spelt));
+  }
+
+  @Test
+  void anItemWrittenBefore07IsOfTheWebapp() throws Exception {
+    Item named = Item.kept("WEB-INF/own.jar", "B", "the site's file", "m", "kept");
+    String json = Json.write(named).replace(",\"area\":\"webapp\"", "");
+    assertThat(json).doesNotContain("area");
+
+    Item read = Json.mapper().readValue(json, Item.class);
+
+    assertThat(read.where()).isEqualTo(Area.WEBAPP);
+    assertThat(read).isEqualTo(named);
   }
 }
