@@ -187,6 +187,52 @@ class InstallationAreaTest {
   }
 
   @Test
+  void should_keep_this_sites_values_in_the_files_the_installer_writes() throws Exception {
+    String keystore = "buildomatic/keystore.init.properties";
+    String exporter = "buildomatic/bin/js-import-export.sh";
+    String source =
+        "buildomatic/install_resources/export/js-catalog/resources/public/Samples/Data_Sources/"
+            + "FoodmartDataSource.xml";
+    Map<String, String> vendor = new LinkedHashMap<>(vendorInstallation());
+    vendor.put(keystore, "ks=${user.home}\nksp=${user.home}\n");
+    vendor.put(exporter, "#!/bin/sh\nJAVA_EXEC=java\n");
+    vendor.put(source, "<jdbc><url>jdbc:postgresql://localhost:5432/foodmart</url></jdbc>\n");
+    SiteFixture s = SiteFixture.create(tmp);
+    Path dist = tmp.resolve("dist-installer");
+    Wars.war(dist.resolve("jasperserver-pro.war"), Wars.vendor());
+    write(dist, vendor);
+    s.f.runtime.baselines().addRelease(dist);
+    Map<String, String> site = new LinkedHashMap<>(vendor);
+    site.put(keystore, "ks=D\\:/keys\nksp=D\\:/keys\n");
+    site.put(exporter, "#!/bin/sh\nJAVA_EXEC=/opt/Jaspersoft/java/bin/java\n");
+    site.put(source, "<jdbc><url>jdbc:postgresql://db:5433/foodmart</url></jdbc>\n");
+    write(installDir(s), site);
+
+    Map<String, String> install = new LinkedHashMap<>();
+    install.put(keystore, "ks=${user.home}\nksp=${user.home}\nkeystore.type=PKCS12\n");
+    install.put(exporter, "#!/bin/sh\nJAVA_EXEC=java\nJAVA_OPTS=-Xmx1g\n");
+    install.put(source, "<jdbc><url>jdbc:postgresql://localhost:5432/foodmart2</url></jdbc>\n");
+    Map<String, byte[]> outer = new LinkedHashMap<>();
+    outer.put("readme.txt", Packages.OUTER_README.getBytes(StandardCharsets.UTF_8));
+    outer.put("jasperserver-pro.zip", Packages.zipBytes(SiteFixture.hotfixPayload(), null));
+    outer.put("js-install.zip", Packages.zipBytes(install, null));
+    Path zip = Packages.zip(tmp.resolve("dl/hotfix-installer.zip"), outer);
+
+    MergeDoc doc = s.prepare(zip);
+    assertThat(s.item(doc, exporter).state()).isEqualTo(State.KEPT);
+    assertThat(s.item(doc, source).state()).isEqualTo(State.KEPT);
+    assertThat(doc.blocking()).isEmpty();
+    Plan plan = s.f.plans.planApply(new HotfixPlans.ApplyArgs(zip, true, Optional.of(doc.id())));
+    assertThat(s.f.run(plan, "r-apply")).isInstanceOf(RunOutcome.Succeeded.class);
+
+    // the site's keystore location, with the key the hotfix adds
+    assertThat(read(s, keystore)).contains("keys").contains("keystore.type=PKCS12");
+    assertThat(read(s, keystore)).doesNotContain("user.home");
+    assertThat(read(s, exporter)).contains("Jaspersoft").doesNotContain("Xmx1g");
+    assertThat(read(s, source)).contains("db:5433");
+  }
+
+  @Test
   void should_say_buildomatic_is_replaced_when_the_baseline_knows_the_webapp_only()
       throws Exception {
     SiteFixture s = SiteFixture.create(tmp);

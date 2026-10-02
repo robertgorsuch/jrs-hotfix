@@ -18,19 +18,30 @@ public enum Area {
   public static final List<String> INSTALLATION_DIRS = List.of("buildomatic", "samples");
 
   /**
-   * Installation files buildomatic writes for one site: the site's own settings, never shipped by
-   * the vendor, so never a customization. Provisional until measured on a real 10.0.0 distribution
-   * (0.7 design, open point 1).
+   * Installation files written for one site, by the site or by the installer, with its values in
+   * them: never a customization, and never replaced by a package. A path ending in {@code /} is a
+   * directory and everything under it. Measured on a 10.0.0 installation (0.7 design, open point
+   * 1): {@code default_master.properties}; the keystore's location; the install path in {@code
+   * js-import-export.sh}; the sample data sources and XMLA connections with this site's database
+   * address, port and passwords.
    */
   private static final List<String> INSTALLATION_SITE_FILES =
-      List.of("buildomatic/default_master.properties");
+      List.of(
+          "buildomatic/default_master.properties",
+          "buildomatic/keystore.init.properties",
+          "buildomatic/bin/js-import-export.sh",
+          "buildomatic/install_resources/export/js-catalog/");
 
   /**
-   * Installation directories buildomatic fills from the site's settings: built output, counted and
-   * never merged. Provisional as above.
+   * Installation files buildomatic or the installer builds from the site's settings, or writes at
+   * run time: counted and never merged. As above, with {@code /} for a directory; measured as the
+   * site files are, {@code iecp.jar} being a manifest-only jar written at install.
    */
   private static final List<String> INSTALLATION_GENERATED =
-      List.of("buildomatic/build_conf/", "buildomatic/logs/");
+      List.of(
+          "buildomatic/build_conf/",
+          "buildomatic/logs/",
+          "buildomatic/conf_source/iepro/lib/iecp.jar");
 
   /** How a file of this area is compared and merged. */
   public FileClass fileClass(String path) {
@@ -39,13 +50,12 @@ public enum Area {
 
   /** True when the file is the site's own settings, written for this site; never compared. */
   public boolean siteFile(String path) {
-    return this == INSTALLATION && INSTALLATION_SITE_FILES.contains(lower(path));
+    return this == INSTALLATION && listed(INSTALLATION_SITE_FILES, lower(path));
   }
 
   /** True when the file is built from the site's settings or written at run time. */
   public boolean generated(String path) {
-    String p = lower(path);
-    return this == INSTALLATION && INSTALLATION_GENERATED.stream().anyMatch(p::startsWith);
+    return this == INSTALLATION && listed(INSTALLATION_GENERATED, lower(path));
   }
 
   /** The name the area is shown and stored under. */
@@ -56,6 +66,11 @@ public enum Area {
   /** The area of a stored label; an absent or unknown one is the webapp, as before 0.7. */
   public static Area of(String label) {
     return "installation".equals(label) ? INSTALLATION : WEBAPP;
+  }
+
+  /** Whether {@code path} is one of {@code entries}, or under one that ends in {@code /}. */
+  private static boolean listed(List<String> entries, String path) {
+    return entries.stream().anyMatch(e -> e.endsWith("/") ? path.startsWith(e) : path.equals(e));
   }
 
   private static String lower(String path) {

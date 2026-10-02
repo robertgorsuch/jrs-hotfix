@@ -290,6 +290,14 @@ public final class MergeWorkspace {
                     + " removed) or --theirs");
           }
           case COLLISION, INSTALLER -> {
+            if (!item.fileClass().mergeable() && item.verdict() == Scan.Verdict.INSTALLER) {
+              // a script the installer wrote this server's paths into: the server's stays
+              copySides(id, item, view, site);
+              yield plain(
+                  State.KEPT,
+                  "written by the installer for this server; never replaced. The hotfix's copy is"
+                      + " in the workspace as `theirs`: carry over by hand what it changed");
+            }
             if (!item.fileClass().mergeable()) {
               yield plain(
                   State.OVERWRITTEN,
