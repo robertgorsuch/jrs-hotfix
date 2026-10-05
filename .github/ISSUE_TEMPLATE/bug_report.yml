@@ -1,0 +1,83 @@
+name: Bug report
+description: jrs-hotfix did something wrong, refused something it should not, or failed.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **A security vulnerability goes by email, not here: see [SECURITY.md](https://github.com/robertgorsuch/jrs-hotfix/blob/main/SECURITY.md).**
+
+        jrs-hotfix redacts secrets, not names: review host names, paths and user names before you paste anything below.
+  - type: input
+    id: version
+    attributes:
+      label: jrs-hotfix version
+      description: The output of `jrs-hotfix --version`.
+      placeholder: jrs-hotfix 0.8.0
+    validations:
+      required: true
+  - type: dropdown
+    id: target
+    attributes:
+      label: What was the target?
+      options:
+        - A server (the webapp under Tomcat)
+        - A WAR or webapp directory (--war)
+        - A build host (service.kind none)
+        - No target (compare, baseline, merge, settings)
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, JasperReports Server release and edition (`jrs-hotfix list` prints them), and `service.kind` from `jrs-hotfix settings show`.
+      placeholder: Windows Server 2022, 10.0.0 PRO build 20260730_0457, windows-service
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: What you ran
+      description: The command line, or the menu entries you chose (the menu prints the command it runs). Include the hotfix package's file name.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: The output, and the exit code (`echo $?` on Linux, `echo %ERRORLEVEL%` in cmd, `$LASTEXITCODE` in PowerShell).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: run
+    attributes:
+      label: The run's record
+      description: For a run that changed something or stopped, `jrs-hotfix runs show <id>`, and `runs/<runId>/run.log` from the home. For a failed start, the lines of `<tomcatDir>/logs/catalina.out` around it.
+      render: text
+  - type: checkboxes
+    id: baseline
+    attributes:
+      label: Customized server
+      options:
+        - label: A baseline was in use (`jrs-hotfix baseline list` shows one)
+        - label: The baseline was made from the vendor's distribution ZIP or directory (not the WAR alone)
+        - label: A merge was involved (`jrs-hotfix merge list`)
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I am on the latest release, or I said above why not.
+          required: true
+        - label: I removed passwords, tokens and anything else private from what I pasted.
+          required: true

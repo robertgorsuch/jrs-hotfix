@@ -1,0 +1,51 @@
+name: Feature request
+description: Propose something jrs-hotfix should do, or do differently.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        jrs-hotfix is deliberately small. Official Jaspersoft hotfix packages only; JasperReports Server 10.x Commercial on Tomcat; Windows and Linux x86-64; it never runs buildomatic or logs in to the server. See [CONTRIBUTING.md](https://github.com/robertgorsuch/jrs-hotfix/blob/main/CONTRIBUTING.md#proposing-a-change) for what is out of scope by design.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today? A real case (a support case, a hotfix, an installation) helps most.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: The command, option or menu entry you have in mind, and what it would print or change.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+      description: The workaround, if there is one, and what it costs.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Applying or rolling back on a server
+        - Customized servers (baselines, scan, merges)
+        - WARs, webapp directories or build hosts
+        - compare
+        - The menu
+        - Recovery (runs)
+        - Settings and detection
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety
+      options:
+        - label: The change keeps every change to a server planned, confirmed, journaled and reversible, or I explained above why it cannot.
+          required: true

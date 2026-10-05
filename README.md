@@ -408,6 +408,8 @@ You do not need to build jrs-hotfix to use it: download the release archive abov
 
 The design is in [`docs/spec.md`](docs/spec.md) (0.1), [`docs/spec-customized-servers.md`](docs/spec-customized-servers.md) (0.2 and 0.3, with a section on where the built tool differs from it and why), [`docs/spec-no-ledger.md`](docs/spec-no-ledger.md) (0.6) and [`docs/spec-targets.md`](docs/spec-targets.md) (0.7); 0.8, the menu and `--allow-older`, is described in this README and its [release notes](docs/releases/v0.8.0.md). The decisions taken along the way are in [`docs/decisions/`](docs/decisions/).
 
+To report a problem or contribute a change, read [`CONTRIBUTING.md`](CONTRIBUTING.md); to report a vulnerability, [`SECURITY.md`](SECURITY.md), and never a public issue.
+
 ## Licence
 
 jrs-hotfix is free software, licensed under the GNU General Public License, version 3 only (SPDX `GPL-3.0-only`). See [`LICENSE`](LICENSE). The libraries bundled in the download keep their own licences.

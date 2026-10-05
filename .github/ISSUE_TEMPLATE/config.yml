@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/robertgorsuch/jrs-hotfix/blob/main/SECURITY.md
+    about: Privately, by email. Do not open a public issue for a vulnerability.
+  - name: Troubleshooting and exit codes
+    url: https://github.com/robertgorsuch/jrs-hotfix/wiki/Diagnostics-and-Troubleshooting
+    about: Common errors, what each exit code means, and how to recover an interrupted run.
+  - name: Documentation
+    url: https://github.com/robertgorsuch/jrs-hotfix/wiki
+    about: Getting started, every command, and how a hotfix is applied and rolled back.
