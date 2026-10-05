@@ -457,7 +457,12 @@ public final class BaselineStore {
           false,
           false);
     }
-    Path copy = building.resolve(payloadDir(area)).resolve(path);
+    Path payload = building.resolve(payloadDir(area)).toAbsolutePath().normalize();
+    Path copy = payload.resolve(path).normalize();
+    if (!copy.startsWith(payload) || copy.equals(payload)) {
+      // the callers refuse such a path first; this keeps the write safe on its own
+      throw new IOException("refusing to keep " + path + " outside " + payload);
+    }
     Files.createDirectories(copy.getParent());
     Sums sums;
     try (OutputStream out = Files.newOutputStream(copy)) {

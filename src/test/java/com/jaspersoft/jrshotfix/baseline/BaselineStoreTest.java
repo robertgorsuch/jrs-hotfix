@@ -210,6 +210,39 @@ class BaselineStoreTest {
   }
 
   @Test
+  void should_refuse_a_name_that_would_escape_the_baseline_and_keep_nothing() throws Exception {
+    // a WAR with an entry that climbs out of the baseline being built
+    Map<String, byte[]> war = new LinkedHashMap<>();
+    Wars.vendor().forEach((k, v) -> war.put(k, v.getBytes(StandardCharsets.ISO_8859_1)));
+    war.put("../escaped.xml", "<x/>".getBytes(StandardCharsets.UTF_8));
+    Path climbing = Packages.zip(tmp.resolve("dl/jasperserver-pro.war"), war);
+    assertThatThrownBy(() -> store().addRelease(climbing))
+        .isInstanceOfSatisfying(
+            HotfixException.class, e -> assertThat(e.kind()).isEqualTo(HotfixException.UNSUPPORTED))
+        .hasMessageContaining("unusable path");
+
+    // a distribution whose buildomatic entry climbs out of the installation's payload
+    String top = "jasperreports-server-pro-10.0.0-bin/";
+    Map<String, byte[]> dist = new LinkedHashMap<>();
+    dist.put(
+        top + "jasperserver-pro.war",
+        Files.readAllBytes(Wars.war(tmp.resolve("build/jasperserver-pro.war"), Wars.vendor())));
+    dist.put(
+        top + "buildomatic/../../escaped.properties", "a=1\n".getBytes(StandardCharsets.UTF_8));
+    Path escaping = Packages.zip(tmp.resolve("dl/escaping-bin.zip"), dist);
+    assertThatThrownBy(() -> store().addRelease(escaping))
+        .isInstanceOfSatisfying(
+            HotfixException.class, e -> assertThat(e.kind()).isEqualTo(HotfixException.UNSUPPORTED))
+        .hasMessageContaining("unusable path");
+
+    assertThat(store().list()).isEmpty();
+    try (var walk = Files.walk(tmp)) {
+      assertThat(walk.map(p -> p.getFileName().toString()))
+          .doesNotContain("escaped.xml", "escaped.properties");
+    }
+  }
+
+  @Test
   void should_read_a_baseline_written_before_07_as_one_without_an_installation() throws Exception {
     BaselineStore store = store();
     BaselineManifest m =
