@@ -3,6 +3,7 @@ package com.jaspersoft.jrshotfix.compare;
 import com.jaspersoft.jrshotfix.baseline.Area;
 import com.jaspersoft.jrshotfix.baseline.BaselineStore;
 import com.jaspersoft.jrshotfix.baseline.FileClass;
+import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.pkg.SiteSettings;
 import com.jaspersoft.jrshotfix.platform.Sums;
 import com.jaspersoft.jrshotfix.text.Diff;
@@ -233,12 +234,14 @@ public final class Compare {
   /**
    * Writes the three-way result under {@code out}, one directory per area ({@code webapp/}, {@code
    * installation/}): every file as it comes out, mine where nothing settles it, conflict markers
-   * where a text file has a conflict. A file that comes out absent is not written.
+   * where a text file has a conflict. A file that comes out absent is not written. Nothing is
+   * written outside {@code out}: a path that would land there is refused before it is written,
+   * whatever input it came from.
    */
   public static void write(Report report, Input base, Input mine, Input theirs, Path out)
       throws IOException {
     for (Area area : report.compared()) {
-      Path root = out.resolve(area.label());
+      Path root = out.resolve(area.label()).toAbsolutePath().normalize();
       java.util.Map<String, Item> byPath = new java.util.HashMap<>();
       for (Item item : report.items()) {
         if (item.area() == area) {
@@ -247,7 +250,13 @@ public final class Compare {
       }
       for (String path : union(area, base, mine, theirs)) {
         Item item = byPath.get(path);
-        Path target = root.resolve(path);
+        Path target = root.resolve(path).normalize();
+        if (!target.startsWith(root) || target.equals(root)) {
+          throw new HotfixException(
+              HotfixException.UNSUPPORTED,
+              "refusing to write " + path + ": it would land outside " + root,
+              "compare inputs whose file names stay inside the input");
+        }
         if (item != null && item.merged().isPresent()) {
           byte[] eol = Files.readAllBytes(theirs.file(area, path));
           write(target, Text.of(eol).bytes(item.merged().get()));

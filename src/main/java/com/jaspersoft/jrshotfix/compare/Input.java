@@ -169,9 +169,14 @@ public final class Input implements AutoCloseable {
               .map(n -> n.substring(0, n.length() - WAR.length()))
               .findFirst();
       if (top.isPresent()) {
-        Path dist = into.resolve("distribution");
+        Path dist = into.resolve("distribution").toAbsolutePath().normalize();
         extract(file, dist);
-        return directory(label, dist.resolve(top.get()), Optional.of(into), temp);
+        // the folder the WAR sits in is checked on its own, not only by the extract above
+        Path root = dist.resolve(top.get()).normalize();
+        if (!PackagePaths.pathProblems(top.get() + WAR).isEmpty() || !root.startsWith(dist)) {
+          throw unsupported(file, "it holds an unusable entry name");
+        }
+        return directory(label, root, Optional.of(into), temp);
       }
       throw unsupported(file, "it is neither a WAR, a distribution nor an official hotfix package");
     } catch (IOException | RuntimeException e) {

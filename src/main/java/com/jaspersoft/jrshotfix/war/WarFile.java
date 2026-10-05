@@ -71,6 +71,9 @@ public final class WarFile {
     if (Files.isDirectory(war)) {
       for (String path : tree(war)) {
         Path target = root.resolve(path.replace('/', java.io.File.separatorChar)).normalize();
+        if (!target.startsWith(root)) {
+          throw notAWebapp(war, "a file escapes the webapp: " + path);
+        }
         Files.createDirectories(target.getParent());
         Files.copy(war.resolve(path), target, StandardCopyOption.REPLACE_EXISTING);
         count++;

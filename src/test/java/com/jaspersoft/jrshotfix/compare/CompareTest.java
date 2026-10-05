@@ -201,6 +201,41 @@ class CompareTest {
         .hasMessageContaining("cannot be compared");
   }
 
+  /** Every file under {@code dir} named {@code name}. */
+  private static List<Path> named(Path dir, String name) throws Exception {
+    try (var walk = Files.walk(dir)) {
+      return walk.filter(p -> p.getFileName().toString().equals(name)).toList();
+    }
+  }
+
+  @Test
+  void should_refuse_an_archive_whose_names_would_escape_and_write_nothing_outside()
+      throws Exception {
+    // a webapp whose entry climbs out of the directory it is unpacked into
+    Map<String, byte[]> webapp = new LinkedHashMap<>();
+    webapp.put(PAGE, "<p>a</p>\n".getBytes(StandardCharsets.UTF_8));
+    webapp.put("../escaped.txt", new byte[] {1});
+    Path climbing = Packages.zip(tmp.resolve("dl/climbing.war"), webapp);
+    assertThatThrownBy(() -> open(climbing))
+        .isInstanceOf(HotfixException.class)
+        .hasFieldOrPropertyWithValue("kind", HotfixException.UNSUPPORTED)
+        .hasMessageContaining("unusable entry name");
+
+    // a distribution whose WAR sits in a folder above the archive's root
+    Map<String, byte[]> distribution = new LinkedHashMap<>();
+    distribution.put(
+        "../outside/jasperserver-pro.war",
+        Files.readAllBytes(Wars.war(tmp.resolve("src/vendor.war"), Wars.vendor())));
+    Path escaping = Packages.zip(tmp.resolve("dl/escaping.zip"), distribution);
+    assertThatThrownBy(() -> open(escaping))
+        .isInstanceOf(HotfixException.class)
+        .hasFieldOrPropertyWithValue("kind", HotfixException.UNSUPPORTED)
+        .hasMessageContaining("unusable entry name");
+
+    assertThat(named(tmp, "escaped.txt")).isEmpty();
+    assertThat(named(tmp, "outside")).isEmpty();
+  }
+
   @Test
   void should_show_a_files_differences_as_a_unified_diff() throws Exception {
     try (Input x = open(webapp("a", Map.of(PAGE, "<p>a</p>\n")));
