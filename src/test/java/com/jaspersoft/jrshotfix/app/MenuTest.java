@@ -253,7 +253,9 @@ class MenuTest {
     assertThat(ran)
         .extracting(a -> String.join(" ", a))
         .containsExactly("scan", "baseline add " + pkg, "scan", "scan");
-    assertThat(text()).contains("the vendor's own files");
+    assertThat(text())
+        .contains("the vendor's own files")
+        .contains("distribution ZIP this server was installed from (recommended");
   }
 
   @Test
@@ -276,15 +278,81 @@ class MenuTest {
 
   /** A menu over the recorder whose commands get {@code --home h}. */
   private Menu menu(Supplier<List<String>> pending) {
+    return menu(pending, this::recorder, pkg -> Optional.empty());
+  }
+
+  private Menu menu(
+      Supplier<List<String>> pending,
+      Function<String[], Integer> runner,
+      Function<Path, Optional<Menu.WaitingMerge>> waiting) {
     return new Menu(
         out,
         () -> List.of("--home", "h"),
         List.of("--no-color"),
-        this::recorder,
+        runner,
         pending,
         () -> Optional.of(settings),
         () -> "10.0.0 PRO",
-        () -> {});
+        () -> {},
+        waiting);
+  }
+
+  /** A runner that records the argv and exits 2 for a plain apply and a refused resolve. */
+  private Function<String[], Integer> refusing(String... refused) {
+    List<String> left = new ArrayList<>(List.of(refused));
+    return a -> {
+      ran.add(a);
+      return left.remove(String.join(" ", a)) ? 2 : 0;
+    };
+  }
+
+  @Test
+  void should_decide_each_waiting_file_and_apply_again_when_apply_waits_on_a_merge() {
+    List<Path> asked = new ArrayList<>();
+    Prompter.override(
+        new StringReader(String.join("\n", "1", pkg.toString(), "", "1", "3", "2", "", "q", "")));
+    menu(
+            List::of,
+            refusing("apply " + pkg + " --home h"),
+            p -> {
+              asked.add(p);
+              return Optional.of(new Menu.WaitingMerge("m1", List.of("a.xml", "b.properties")));
+            })
+        .run();
+    assertThat(asked).containsExactly(pkg);
+    assertThat(ranLines())
+        .containsExactly(
+            "apply " + pkg + " --home h",
+            "merge show m1 a.xml --home h",
+            "merge resolve m1 a.xml --mine --home h",
+            "merge resolve m1 b.properties --merged --home h",
+            "apply " + pkg + " --merge m1 --home h");
+    assertThat(text())
+        .contains("2 file(s) changed by both this site and the hotfix wait for your decision")
+        .contains("    a.xml");
+  }
+
+  @Test
+  void should_ask_again_after_a_refused_decision_and_stop_without_applying_on_enter() {
+    Prompter.override(
+        new StringReader(String.join("\n", "1", pkg.toString(), "y", "2", "", "q", "")));
+    menu(
+            List::of,
+            refusing("apply " + pkg + " --home h", "merge resolve m1 a.xml --merged --home h"),
+            p -> Optional.of(new Menu.WaitingMerge("m1", List.of("a.xml"))))
+        .run();
+    // the merged file failed its checks: asked again, and Enter stops with no second apply
+    assertThat(ranLines())
+        .containsExactly("apply " + pkg + " --home h", "merge resolve m1 a.xml --merged --home h");
+    assertThat(text()).contains("entry 10 continues it");
+  }
+
+  @Test
+  void should_offer_nothing_more_when_apply_fails_without_a_waiting_merge() {
+    Prompter.override(new StringReader("1\n" + pkg + "\nq\n"));
+    menu(List::of, refusing("apply " + pkg + " --home h"), p -> Optional.empty()).run();
+    assertThat(ranLines()).containsExactly("apply " + pkg + " --home h");
+    assertThat(text()).doesNotContain("wait for your decision");
   }
 
   private List<String> ranLines() {

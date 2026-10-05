@@ -46,6 +46,13 @@
       <resource><directory>src/main/resources</directory><filtering>false</filtering><excludes><exclude>jrs-hotfix-version.properties</exclude></excludes></resource>
     </resources>
     <plugins>
+      <!-- first in validate: a wrong JDK is named before spotless or the compiler fail obscurely -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId><artifactId>maven-enforcer-plugin</artifactId><version>3.5.0</version>
+        <executions><execution><id>require-jdk-21</id><goals><goal>enforce</goal></goals><configuration><rules>
+          <requireJavaVersion><version>[21,)</version><message>jrs-hotfix builds with JDK 21 or later; set JAVA_HOME to one (scripts/mvn.sh and scripts/mvn.cmd pin JDK 21).</message></requireJavaVersion>
+        </rules></configuration></execution></executions>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version>
         <configuration>

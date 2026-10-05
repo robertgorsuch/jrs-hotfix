@@ -21,12 +21,21 @@ import java.util.function.Supplier;
  * to the commands on a WAR or webapp directory, whose home is beside it unless one was given);
  * without settings the wizard ({@code settings detect}) runs before the menu is shown; while a run
  * is pending, every entry that would change the installation or the settings refuses and points at
- * entry 6; an empty answer where one is required returns to the menu; end of input quits with exit
- * 0; nothing is written by the menu itself.
+ * entry 6; an apply refused because files of its merge wait for a decision is followed through,
+ * file by file, and run again with that merge; an empty answer where one is required returns to the
+ * menu; end of input quits with exit 0; nothing is written by the menu itself.
  */
 final class Menu {
 
   static final String PENDING_REFUSAL = "finish or undo the interrupted job first (entry 6)";
+
+  /** A merge of a package whose files still wait for the operator's decision. */
+  record WaitingMerge(String id, List<String> files) {
+    WaitingMerge {
+      Objects.requireNonNull(id, "id");
+      files = List.copyOf(files);
+    }
+  }
 
   private final PrintWriter out;
   private final Supplier<List<String>> globalArgs;
@@ -36,6 +45,7 @@ final class Menu {
   private final Supplier<Optional<Settings>> settings;
   private final Supplier<String> installedRelease;
   private final Runnable settingsChanged;
+  private final Function<Path, Optional<WaitingMerge>> waitingMerge;
 
   /**
    * {@code settings} gives the current settings, empty when there are none yet; {@code
@@ -57,7 +67,8 @@ final class Menu {
         pendingRuns,
         settings,
         installedRelease,
-        () -> {});
+        () -> {},
+        pkg -> Optional.empty());
   }
 
   /**
@@ -66,7 +77,7 @@ final class Menu {
    * a WAR (the options as the operator gave them, so the wizard places new settings beside the
    * installation it picks, and a WAR is worked on in the home the command line would use), and
    * {@code settingsChanged} run after the wizard or entry 7, so the header and the home are read
-   * again.
+   * again; {@code waitingMerge} gives the merge of a package whose files still wait, if any.
    */
   Menu(
       PrintWriter out,
@@ -76,7 +87,8 @@ final class Menu {
       Supplier<List<String>> pendingRuns,
       Supplier<Optional<Settings>> settings,
       Supplier<String> installedRelease,
-      Runnable settingsChanged) {
+      Runnable settingsChanged,
+      Function<Path, Optional<WaitingMerge>> waitingMerge) {
     this.out = Objects.requireNonNull(out, "out");
     this.globalArgs = Objects.requireNonNull(globalArgs, "globalArgs");
     this.givenArgs = List.copyOf(givenArgs);
@@ -85,6 +97,7 @@ final class Menu {
     this.settings = Objects.requireNonNull(settings, "settings");
     this.installedRelease = Objects.requireNonNull(installedRelease, "installedRelease");
     this.settingsChanged = Objects.requireNonNull(settingsChanged, "settingsChanged");
+    this.waitingMerge = Objects.requireNonNull(waitingMerge, "waitingMerge");
   }
 
   /** Runs the wizard when there are no settings, then shows the menu until the operator quits. */
@@ -134,7 +147,7 @@ final class Menu {
       switch (choice.get()) {
         case "1" -> {
           if (notPending()) {
-            existingFile("Hotfix package (.zip)").ifPresent(p -> execute("apply", p));
+            existingFile("Hotfix package (.zip)").ifPresent(this::apply);
           }
         }
         case "2" -> {
@@ -173,6 +186,76 @@ final class Menu {
   }
 
   /**
+   * The apply; when it is refused (exit 2) because files of the package's merge wait for a
+   * decision, each is shown and decided here, and the apply is run again with that merge.
+   */
+  private void apply(String pkg) {
+    if (execute("apply", pkg) != ExitCodes.PRECHECK_FAILED) {
+      return;
+    }
+    Optional<WaitingMerge> waiting = waitingMerge.apply(local(pkg));
+    if (waiting.isEmpty()) {
+      return;
+    }
+    String id = waiting.get().id();
+    List<String> files = waiting.get().files();
+    out.println();
+    out.println(
+        files.size()
+            + " file(s) changed by both this site and the hotfix wait for your decision in merge "
+            + id
+            + ":");
+    files.forEach(f -> out.println("    " + f));
+    if (!Prompter.yes(out, "Decide them now? [Y/n] ", true)) {
+      return;
+    }
+    for (String file : files) {
+      if (!decide(id, file)) {
+        out.println("  the merge keeps its decisions so far; entry 10 continues it");
+        return;
+      }
+    }
+    if (Prompter.yes(out, "Every file is decided. Apply " + pkg + " now? [Y/n] ", true)) {
+      execute("apply", pkg, "--merge", id);
+    }
+  }
+
+  /**
+   * One waiting file of a merge, asked about until it is decided; false when the operator stops.
+   */
+  private boolean decide(String id, String file) {
+    while (true) {
+      out.println();
+      out.println("File " + file + " in merge " + id);
+      out.println("  1) Show what this site and the hotfix changed");
+      out.println("  2) Take the merged file");
+      out.println("  3) Keep the server's file (mine)");
+      out.println("  4) Take the hotfix's file (theirs)");
+      String flag;
+      switch (Prompter.line(out, "Choose [1-4, Enter to stop]: ").orElse("")) {
+        case "1" -> {
+          execute("merge", "show", id, file);
+          continue;
+        }
+        case "2" -> flag = "--merged";
+        case "3" -> flag = "--mine";
+        case "4" -> flag = "--theirs";
+        case "" -> {
+          return false;
+        }
+        default -> {
+          out.println("Please type a number from 1 to 4, or press Enter to stop.");
+          continue;
+        }
+      }
+      // a merged file that fails its checks is refused; the operator chooses again
+      if (execute("merge", "resolve", id, file, flag) == ExitCodes.SUCCESS) {
+        return true;
+      }
+    }
+  }
+
+  /**
    * The scan; when there is no baseline to compare with (exit 2) and no job is pending, the
    * vendor's WAR is asked for, added as the baseline, and the scan is run again.
    */
@@ -182,9 +265,10 @@ final class Menu {
     }
     out.println();
     out.println(
-        "The scan compares this server with the vendor's own files. Give the jasperserver-pro.war"
-            + " this server was installed from (or the hotfix ZIP the message above asks for).");
-    Optional<String> source = path("WAR or hotfix ZIP (Enter to go back)");
+        "The scan compares this server with the vendor's own files. Give the vendor's distribution"
+            + " ZIP this server was installed from (recommended: it covers buildomatic and samples"
+            + " too), its jasperserver-pro.war, or the hotfix ZIP the message above asks for.");
+    Optional<String> source = path("Distribution ZIP, WAR or hotfix ZIP (Enter to go back)");
     if (source.isPresent() && execute("baseline", "add", source.get()) == ExitCodes.SUCCESS) {
       execute("scan");
     }

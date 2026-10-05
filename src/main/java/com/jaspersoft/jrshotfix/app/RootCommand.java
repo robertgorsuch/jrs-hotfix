@@ -4,7 +4,10 @@ import com.jaspersoft.jrshotfix.Version;
 import com.jaspersoft.jrshotfix.engine.RunRecord;
 import com.jaspersoft.jrshotfix.home.InstalledBuild;
 import com.jaspersoft.jrshotfix.home.Settings;
+import com.jaspersoft.jrshotfix.merge.MergeDoc;
+import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -76,7 +79,8 @@ final class RootCommand extends AppCommand {
         session::pendingRuns,
         session::settings,
         session::installedRelease,
-        session::refresh);
+        session::refresh,
+        session::waitingMerge);
   }
 
   private int runCommand(String[] args) {
@@ -155,6 +159,30 @@ final class RootCommand extends AppCommand {
     /** The settings as they are now; empty when there are none or they cannot be read. */
     Optional<Settings> settings() {
       return boot().flatMap(Bootstrap::settings);
+    }
+
+    /**
+     * The newest merge in the home prepared from exactly this package (by its SHA-256) whose files
+     * still wait for a decision; empty when there is none, or the home or the package cannot be
+     * read.
+     */
+    Optional<Menu.WaitingMerge> waitingMerge(Path pkg) {
+      try {
+        Optional<Bootstrap> b = boot().filter(x -> x.settings().isPresent());
+        if (b.isEmpty()) {
+          return Optional.empty();
+        }
+        String sha = b.get().platform().files().sha256(pkg);
+        return b.get().plans().runtime().merges().list().stream()
+            .filter(d -> d.packageSha256().equalsIgnoreCase(sha) && !d.blocking().isEmpty())
+            .findFirst()
+            .map(
+                d ->
+                    new Menu.WaitingMerge(
+                        d.id(), d.blocking().stream().map(MergeDoc.Item::path).toList()));
+      } catch (IOException | RuntimeException e) {
+        return Optional.empty();
+      }
     }
 
     /**
