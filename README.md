@@ -6,7 +6,7 @@ jrs-hotfix applies, verifies, records and rolls back the cumulative hotfix packa
 
 On a customized server it keeps what the site changed: given the vendor's own WAR to compare with, it tells which files the site changed, keeps the ones the hotfix does not touch, merges settings files by key and pages and XML by line, and leaves what it cannot merge cleanly for you to resolve before the outage. It can also make a hotfixed WAR from a WAR, without a server.
 
-It comes as one download with everything it needs inside. There is nothing else to install, and it works on servers with no internet access. The current release is [v0.7.0](https://github.com/robertgorsuch/jrs-hotfix/releases/latest).
+It comes as one download with everything it needs inside. There is nothing else to install, and it works on servers with no internet access. The current release is [v0.8.0](https://github.com/robertgorsuch/jrs-hotfix/releases/latest).
 
 ---
 
@@ -51,15 +51,15 @@ Check the download, then unpack it anywhere, next to the installation or not, an
 ```bash
 # Linux
 sha256sum -c --ignore-missing SHA256SUMS
-tar -xzf jrs-hotfix-0.7.0-linux-x64.tar.gz -C /opt
-cd /opt/jrs-hotfix-0.7.0
+tar -xzf jrs-hotfix-0.8.0-linux-x64.tar.gz -C /opt
+cd /opt/jrs-hotfix-0.8.0
 ```
 
 ```bat
 :: Windows (Command Prompt, run as administrator)
-certutil -hashfile jrs-hotfix-0.7.0-windows-x64.zip SHA256    (compare with the line in SHA256SUMS)
-tar -xf jrs-hotfix-0.7.0-windows-x64.zip -C C:\Jaspersoft
-cd C:\Jaspersoft\jrs-hotfix-0.7.0
+certutil -hashfile jrs-hotfix-0.8.0-windows-x64.zip SHA256    (compare with the line in SHA256SUMS)
+tar -xf jrs-hotfix-0.8.0-windows-x64.zip -C C:\Jaspersoft
+cd C:\Jaspersoft\jrs-hotfix-0.8.0
 ```
 
 The folder holds `bin/`, `lib/`, `runtime/`, this README and the licence. To upgrade later, unpack the new archive and use it instead of the old one: everything jrs-hotfix keeps lives under the installation (see [Where jrs-hotfix keeps its files](#where-jrs-hotfix-keeps-its-files)), not in the archive.
@@ -392,7 +392,7 @@ wars/webapps/<name>/          the copy of the WAR or webapp directory being work
 `SHA256SUMS` on each release page lists every file of the release:
 
 - Linux: `sha256sum -c --ignore-missing SHA256SUMS`
-- Windows: `certutil -hashfile jrs-hotfix-0.7.0-windows-x64.zip SHA256`, or `Get-FileHash` in PowerShell, and compare with the archive's line
+- Windows: `certutil -hashfile jrs-hotfix-0.8.0-windows-x64.zip SHA256`, or `Get-FileHash` in PowerShell, and compare with the archive's line
 
 Each release page also carries the release notes; `docs/releases/` in this repository holds every release's notes.
 
