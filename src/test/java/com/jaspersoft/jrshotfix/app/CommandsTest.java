@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jaspersoft.jrshotfix.engine.RunLock;
+import com.jaspersoft.jrshotfix.engine.RunRecord;
+import com.jaspersoft.jrshotfix.engine.TerminalState;
 import com.jaspersoft.jrshotfix.home.Home;
 import com.jaspersoft.jrshotfix.home.LastHome;
 import com.jaspersoft.jrshotfix.home.SettingsStore;
@@ -284,6 +286,75 @@ class CommandsTest {
     // the name before 0.6 still works, hidden
     assertThat(f.run("runs", "rollback", "stuck", "--yes")).isEqualTo(0);
     assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(0);
+  }
+
+  /** A pending apply whose journal says it got as far as stopping the service. */
+  private static void stuckAfterStop(Fixture f) throws Exception {
+    FileJournal journal = new FileJournal(f.home, Clock.systemUTC());
+    journal.recordRunStart("stuck", "hotfix.apply", Optional.of("p"), Instant.now());
+    new RunPlans(f.home)
+        .store(
+            "stuck",
+            f.plans().planApply(new HotfixPlans.ApplyArgs(f.pkg, true)),
+            "hotfix.apply",
+            HotfixPlans.applyArgsJson(new HotfixPlans.ApplyArgs(f.pkg, true)));
+    journal.appendTransition(
+        "stuck", "preflight", "verify", Optional.of("PENDING"), "SUCCEEDED", Optional.empty());
+    journal.appendTransition(
+        "stuck", "stop-service", "apply", Optional.of("PENDING"), "SUCCEEDED", Optional.empty());
+    Files.createDirectories(f.home.runDir("stuck").resolve("snapshot"));
+    Files.writeString(f.home.runDir("stuck").resolve("snapshot/kept.txt"), "kept");
+  }
+
+  @Test
+  void should_close_a_pending_run_as_it_is_and_unblock_the_next_run() throws Exception {
+    Fixture f = fixture();
+    stuckAfterStop(f);
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(8);
+    assertThat(f.err()).contains("runs abandon stuck");
+    String before =
+        Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar"));
+
+    assertThat(f.run("runs", "abandon", "stuck", "--yes")).isZero();
+    assertThat(f.out())
+        .contains("completed:     preflight, stop-service")
+        .contains("not completed: ")
+        .contains("! the run stopped the service and did not start it again: the server is down")
+        .contains("run stuck is closed; nothing else was changed")
+        .contains("! start the service yourself");
+
+    // nothing on the server or in the run's snapshot was touched
+    assertThat(Files.readString(f.target("webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar")))
+        .isEqualTo(before);
+    assertThat(f.home.runDir("stuck").resolve("snapshot/kept.txt")).hasContent("kept");
+    // recorded as a failed run (exit 4), as a release before 0.9 reads it, and shown as abandoned
+    FileJournal journal = new FileJournal(f.home, Clock.systemUTC());
+    RunRecord run = journal.run("stuck").orElseThrow();
+    assertThat(run.pending()).isFalse();
+    assertThat(run.terminalState()).contains(TerminalState.FAILED);
+    assertThat(run.exitCode()).contains(4);
+    assertThat(journal.abandoned("stuck")).isTrue();
+    assertThat(f.run("runs", "list")).isZero();
+    assertThat(f.out()).containsPattern("stuck .*ABANDONED");
+    // prune keeps it, with its snapshot, as it keeps a failed run
+    assertThat(f.run("runs", "prune", "--older-than", "0")).isZero();
+    assertThat(f.home.runDir("stuck").resolve("snapshot/kept.txt")).exists();
+
+    assertThat(f.run("runs", "abandon", "stuck", "--yes")).isEqualTo(2);
+    assertThat(f.err()).contains("already ended");
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isZero();
+  }
+
+  @Test
+  void should_ask_before_closing_a_pending_run_and_refuse_an_unknown_one() throws Exception {
+    Fixture f = fixture();
+    stuckAfterStop(f);
+    // without --yes and without a terminal, nothing is closed
+    assertThat(f.run("runs", "abandon", "stuck")).isEqualTo(2);
+    assertThat(new FileJournal(f.home, Clock.systemUTC()).run("stuck").orElseThrow().pending())
+        .isTrue();
+    assertThat(f.run("runs", "abandon", "nope", "--yes")).isEqualTo(2);
+    assertThat(f.err()).contains("unknown run nope");
   }
 
   @Test

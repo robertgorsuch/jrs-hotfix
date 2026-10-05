@@ -2,6 +2,7 @@ package com.jaspersoft.jrshotfix.app;
 
 import com.jaspersoft.jrshotfix.engine.CancellationToken;
 import com.jaspersoft.jrshotfix.engine.Context;
+import com.jaspersoft.jrshotfix.engine.JournalException;
 import com.jaspersoft.jrshotfix.engine.LockHeldException;
 import com.jaspersoft.jrshotfix.engine.Plan;
 import com.jaspersoft.jrshotfix.engine.PlanFingerprint;
@@ -218,6 +219,78 @@ final class PlanExecutor {
   }
 
   /**
+   * Closes a pending run without resuming or undoing it (0.9), for a server the operator has put
+   * right another way. Shows what the run completed and what it did not, and says loudly when it
+   * left the service stopped; then asks, as recovery does. Nothing on the server or in the home is
+   * changed: the run is recorded as ended, its snapshot stays for restoring by hand, and the undo
+   * of the previous apply, which only an apply's last step replaces, stays as it was.
+   */
+  int abandon(String runId) {
+    Optional<Integer> locked = blocked(false);
+    if (locked.isPresent()) {
+      return locked.get();
+    }
+    Optional<RunRecord> run = runs.journal().run(runId);
+    if (run.isEmpty()) {
+      return ExitCodes.fail(
+          err,
+          ExitCodes.PRECHECK_FAILED,
+          "unknown run " + runId,
+          Optional.of("run `jrs-hotfix runs list`"));
+    }
+    if (!run.get().pending()) {
+      return ExitCodes.fail(
+          err,
+          ExitCodes.PRECHECK_FAILED,
+          "run "
+              + runId
+              + " already ended with state "
+              + run.get().terminalState().map(Enum::name).orElse("?"),
+          Optional.of("there is nothing to close"));
+    }
+    RunService.Leftovers left = runs.leftovers(runId);
+    out.println("run " + runId + " (" + left.operation() + ") stopped part way through");
+    out.println(
+        "  completed:     "
+            + (left.completed().isEmpty() ? "nothing" : String.join(", ", left.completed())));
+    out.println(
+        "  not completed: "
+            + (left.notCompleted().isEmpty() ? "nothing" : String.join(", ", left.notCompleted())));
+    if (left.serviceDown()) {
+      out.println("! the run stopped the service and did not start it again: the server is down");
+    }
+    out.println(
+        "Closing it records the run as ended and changes nothing: the server's files stay as they"
+            + " are now, and the run's snapshot stays in "
+            + boot.home().runDir(runId)
+            + " for restoring files by hand.");
+    Optional<Integer> refused = confirm("Close this run and keep the server as it is? [y/N] ");
+    if (refused.isPresent()) {
+      return refused.get();
+    }
+    try (RunLock unused = new RunLock(boot.home(), "abandon", boot.clock().instant())) {
+      runs.abandon(runId);
+    } catch (LockHeldException held) {
+      return lockHeld(held.holderRunId(), held.holderPid());
+    } catch (JournalException | UncheckedIOException e) {
+      return ExitCodes.fail(
+          err,
+          ExitCodes.PRECHECK_FAILED,
+          "cannot close run " + runId + ": " + e.getMessage(),
+          Optional.of("check the rights and free space under " + boot.home().root()));
+    }
+    out.println("run " + runId + " is closed; nothing else was changed");
+    if (left.serviceDown()) {
+      out.println("! start the service yourself: jrs-hotfix did not start it");
+    }
+    out.println(
+        "  its snapshot stays until `jrs-hotfix runs prune --include-failed`; `jrs-hotfix verify"
+            + " <package.zip>` shows what the server holds now");
+    out.flush();
+    return ExitCodes.SUCCESS;
+  }
+
+  /**
    * The inputs recovery compares: a half-done run has changed the target files by design, so only
    * what identifies the request and the installation counts. Apply: the package, the settings, the
    * installed release, and the merge it was planned with, by id and by the hash of its document, so
@@ -324,9 +397,11 @@ final class PlanExecutor {
     err.println(
         "  run `jrs-hotfix runs resume "
             + first
-            + "` to continue it, or `jrs-hotfix runs undo "
+            + "` to continue it, `jrs-hotfix runs undo "
             + first
-            + "` to undo it");
+            + "` to undo it, or `jrs-hotfix runs abandon "
+            + first
+            + "` to close it and keep the server as it is");
     err.flush();
     return Optional.of(ExitCodes.RECOVERY_REQUIRED);
   }

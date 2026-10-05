@@ -210,6 +210,27 @@ class BaselineStoreTest {
   }
 
   @Test
+  void should_import_another_homes_baselines_once_and_leave_both_homes_readable() throws Exception {
+    BaselineStore server = store();
+    BaselineManifest release =
+        server.addRelease(Wars.war(tmp.resolve("dl/jasperserver-pro.war"), Wars.vendor()));
+    BaselineStore war = new BaselineStore(new Home(tmp.resolve("war-home")), Clock.systemUTC());
+
+    assertThat(war.importFrom(server)).containsExactly(release.id());
+    assertThat(war.list()).extracting(BaselineManifest::id).containsExactly(release.id());
+    assertThat(war.payload(release.id(), Wars.WEB_XML))
+        .hasSameTextualContentAs(server.payload(release.id(), Wars.WEB_XML));
+    // a second import copies nothing, and the server's home is as it was
+    assertThat(war.importFrom(server)).isEmpty();
+    assertThat(server.list()).extracting(BaselineManifest::id).containsExactly(release.id());
+    // importing a home into itself copies nothing
+    assertThat(server.importFrom(store())).isEmpty();
+    try (Stream<Path> left = Files.list(tmp.resolve("war-home/baselines"))) {
+      assertThat(left.map(p -> p.getFileName().toString())).containsExactly(release.id());
+    }
+  }
+
+  @Test
   void should_refuse_a_name_that_would_escape_the_baseline_and_keep_nothing() throws Exception {
     // a WAR with an entry that climbs out of the baseline being built
     Map<String, byte[]> war = new LinkedHashMap<>();

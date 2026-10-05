@@ -2,6 +2,7 @@ package com.jaspersoft.jrshotfix.app;
 
 import com.jaspersoft.jrshotfix.baseline.BaselineManifest;
 import com.jaspersoft.jrshotfix.baseline.BaselineStore;
+import com.jaspersoft.jrshotfix.home.Home;
 import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
 import com.jaspersoft.jrshotfix.pkg.OfficialPackage;
@@ -17,18 +18,20 @@ import picocli.CommandLine.Parameters;
 
 /**
  * {@code jrs-hotfix baseline}: the vendor's files this installation is compared with. Invariants:
- * {@code list} is read-only; {@code add} and {@code remove} write under the home only and take the
- * run lock; nothing under the installation is touched by any of them.
+ * {@code list} is read-only; {@code add}, {@code import} and {@code remove} write under the home
+ * only and take the run lock; {@code import} only reads the other home; nothing under the
+ * installation is touched by any of them.
  */
 @Command(
     name = "baseline",
     mixinStandardHelpOptions = true,
     description =
         "The vendor's files this server is compared with: list them, add a release's WAR or a"
-            + " hotfix package, remove one.",
+            + " hotfix package, copy them from another home, remove one.",
     subcommands = {
       BaselineCommand.ListBaselines.class,
       BaselineCommand.Add.class,
+      BaselineCommand.Import.class,
       BaselineCommand.Remove.class
     })
 final class BaselineCommand extends GroupCommand {
@@ -136,6 +139,62 @@ final class BaselineCommand extends GroupCommand {
         out.println("written by the installer for each server:");
         installer.forEach(p -> out.println("  " + p));
       }
+      out.flush();
+      return ExitCodes.SUCCESS;
+    }
+  }
+
+  /** {@code baseline import <home>}. */
+  @Command(
+      name = "import",
+      mixinStandardHelpOptions = true,
+      description =
+          "Copy into this home the baselines another home holds and this one does not, such as the"
+              + " server's into a WAR's own home. Changes nothing on the server or in the other home.",
+      footer = {
+        "",
+        "Example:",
+        "  jrs-hotfix baseline import C:\\Jaspersoft\\jasperreports-server\\jrs-hotfix"
+            + " --home C:\\builds\\jrs-hotfix"
+      })
+  static final class Import extends AppCommand {
+    @Parameters(
+        index = "0",
+        paramLabel = "<home>",
+        description = "The other home: the jrs-hotfix directory that holds its baselines.")
+    Path from;
+
+    @Override
+    public Integer call() {
+      Bootstrap boot = open();
+      return executor(boot).mutate("baseline import", () -> importFrom(boot));
+    }
+
+    private int importFrom(Bootstrap boot) {
+      Home other = new Home(from.toAbsolutePath().normalize());
+      if (!Files.isDirectory(other.baselines())) {
+        throw new HotfixException(
+            HotfixException.PRECHECK,
+            from + " holds no baselines",
+            "name the home of the server whose baselines you want, the jrs-hotfix directory beside"
+                + " its installation");
+      }
+      BaselineStore store = new HotfixPlans(boot.runtimeOrWarLike()).runtime().baselines();
+      List<String> copied;
+      try {
+        copied = store.importFrom(new BaselineStore(other, boot.clock()));
+      } catch (IOException e) {
+        throw new HotfixException(
+            HotfixException.PRECHECK,
+            "cannot copy the baselines of " + from + ": " + e.getMessage(),
+            "check the rights and free space under " + boot.home().baselines(),
+            e);
+      }
+      PrintWriter out = out();
+      out.println(
+          copied.isEmpty()
+              ? "nothing to copy: this home already holds every baseline of " + from
+              : "copied " + String.join(", ", copied) + " from " + from);
       out.flush();
       return ExitCodes.SUCCESS;
     }

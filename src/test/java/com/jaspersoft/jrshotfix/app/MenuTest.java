@@ -149,8 +149,8 @@ class MenuTest {
     m.run();
     assertThat(text())
         .contains("interrupted")
-        .contains("jrs-hotfix runs resume stuck     (or runs undo stuck)")
-        .contains("finish or undo the interrupted job first (entry 6)");
+        .contains("jrs-hotfix runs resume stuck     (or runs undo, or runs abandon stuck)")
+        .contains("finish, undo or close the interrupted job first (entry 6)");
     // choosing 1 while pending printed a refusal and did not run apply; 6 lists the runs first
     assertThat(ran).hasSize(2);
     assertThat(ran.get(0)).containsExactly("runs", "list");
@@ -459,7 +459,7 @@ class MenuTest {
                 "10",
                 "4",
                 pkg.toString(),
-                "Mine",
+                "2",
                 "10",
                 "5",
                 "m1",
@@ -513,34 +513,11 @@ class MenuTest {
   @Test
   void should_refuse_the_new_changing_entries_but_not_the_reading_ones_when_a_run_is_pending()
       throws Exception {
-    Path war = Files.writeString(tmp.resolve("jasperserver-pro.war"), "war");
     Prompter.override(
         new StringReader(
             String.join(
-                "\n",
-                "8",
-                war.toString(),
-                "1",
-                "10",
-                "3",
-                "10",
-                "4",
-                "10",
-                "5",
-                "11",
-                "1",
-                "11",
-                "2",
-                "6",
-                "3",
-                "stuck",
-                "9",
-                "a",
-                "b",
-                "",
-                "",
-                "q",
-                "")));
+                "\n", "10", "3", "10", "4", "10", "5", "11", "1", "11", "2", "6", "4", "stuck", "6",
+                "3", "9", "a", "b", "", "", "q", "")));
     menu(() -> List.of("stuck")).run();
     assertThat(ranLines())
         .containsExactly(
@@ -551,7 +528,81 @@ class MenuTest {
             "baseline list --home h",
             "runs list --home h",
             "runs show stuck --home h",
+            "runs list --home h",
+            "runs abandon stuck --home h",
             "compare a b --home h");
+    assertThat(text())
+        .contains("3) Close job stuck without finishing or undoing it (keep the server as is)");
+  }
+
+  @Test
+  void should_hotfix_a_war_while_a_run_on_the_server_is_pending() throws Exception {
+    Path war = Files.createDirectories(tmp.resolve("webapps/jasperserver-pro"));
+    Path target = tmp.resolve("out.war");
+    Prompter.override(
+        new StringReader(
+            String.join(
+                "\n",
+                "8",
+                war.toString(),
+                "1",
+                pkg.toString(),
+                target.toString(),
+                "",
+                "",
+                "",
+                "q",
+                "")));
+    menu(() -> List.of("stuck")).run();
+    // the WAR has its own home: the server's interrupted run does not hold it up
+    assertThat(ranLines())
+        .containsExactly("apply " + pkg + " --war " + war + " --out " + target + " --no-color");
+    assertThat(text()).doesNotContain(Menu.PENDING_REFUSAL);
+  }
+
+  @Test
+  void should_offer_the_servers_baselines_to_a_wars_home_that_has_none() throws Exception {
+    Path server = tmp.resolve("server/jrs-hotfix");
+    Files.createDirectories(server.resolve("baselines/JRS-10.0.0-PRO"));
+    Files.writeString(server.resolve("baselines/JRS-10.0.0-PRO/manifest.json"), "{}");
+    Path war = Files.createDirectories(tmp.resolve("site/webapps/jasperserver-pro"));
+    Path warHome = tmp.resolve("site/jrs-hotfix");
+    Prompter.override(
+        new StringReader(
+            String.join(
+                "\n",
+                "8",
+                war.toString(),
+                "",
+                "3", // yes to the copy, then scan it
+                "8",
+                war.toString(),
+                "n",
+                "5",
+                "3", // no, then copy from its baselines entry
+                "q",
+                "")));
+    new Menu(
+            out,
+            () -> List.of("--home", server.toString()),
+            List.of("--no-color"),
+            this::recorder,
+            List::of,
+            () -> Optional.of(settings),
+            () -> "10.0.0 PRO",
+            () -> {},
+            p -> Optional.empty())
+        .run();
+    String home = " --no-color --home " + warHome.toAbsolutePath().normalize();
+    assertThat(ranLines())
+        .containsExactly(
+            "baseline import " + server + home,
+            "scan --war " + war + " --no-color",
+            "baseline import " + server + home);
+    assertThat(text())
+        .contains("This WAR's home has no baselines")
+        .contains("no baselines in this WAR's home yet")
+        .contains("3) Copy the server's baselines");
   }
 
   @Test
@@ -564,8 +615,8 @@ class MenuTest {
                 pkg.toString(),
                 "y",
                 "y",
-                "maybe",
-                "MINE", // a wrong rule is asked again
+                "mine",
+                "2", // a wrong answer is asked again
                 "",
                 "4",
                 "",
@@ -582,7 +633,10 @@ class MenuTest {
             "apply " + pkg + " --keep-superseded --on-conflict mine --home h",
             "merge resolve m1 a.xml --theirs --home h",
             "apply " + pkg + " --merge m1 --keep-superseded --home h");
-    assertThat(text()).contains("please type ask, mine, theirs or fail");
+    assertThat(text())
+        .contains("Before applying, two choices most people leave as they are:")
+        .contains("Keep the older library versions instead of deleting them?")
+        .contains("please type a number from 1 to 4, or press Enter");
   }
 
   @Test

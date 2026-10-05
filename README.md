@@ -23,7 +23,7 @@ It comes as one download with everything it needs inside. There is nothing else 
 | Make a hotfixed WAR from a WAR or a deployed webapp, with no server | `jrs-hotfix apply <package.zip> --war <in.war \| dir> --out <out.war>` |
 | Hotfix a build host, which deploys with buildomatic and runs no server | `jrs-hotfix settings detect` in the distribution, then `jrs-hotfix apply <package.zip>` |
 | Compare two WARs or webapps, or see what two of them each changed from a third | `jrs-hotfix compare <a> <b>` / `jrs-hotfix compare <base> <mine> <theirs>` |
-| Finish or undo an interrupted job | `jrs-hotfix runs resume <id>` / `jrs-hotfix runs undo <id>` |
+| Finish or undo an interrupted job, or close it and keep the server as it is | `jrs-hotfix runs resume <id>` / `jrs-hotfix runs undo <id>` / `jrs-hotfix runs abandon <id>` |
 | Apply a package older than the build the server is at | `jrs-hotfix apply <package.zip> --allow-older`, or answer `y` when `apply` asks at a terminal |
 | Do any of the above from a menu that shows each command | `jrs-hotfix` |
 
@@ -229,7 +229,7 @@ For an environment that deploys one generic WAR with its own database configurat
 
 This touches no server: no service, no snapshot, no rollback. The input is never modified, and the output is the one file written: what it carries is stated by its own `WEB-INF/internal/jasperserver-pro.properties`, as on a server, and the run's record is under `runs/<runId>/` in the home. The same merge applies: `scan --war <in.war>` and `merge prepare <package.zip> --war <in.war>` read the site's files from the WAR, and a merge prepared for a WAR is what `apply --war` uses, by itself or with `--merge <mergeId>`.
 
-The home is `--home` (or `JRS_HOTFIX_HOME`), else `jrs-hotfix` beside the WAR, and for a deployed webapp beside Tomcat's `webapps/`, never inside it. The baseline of the release goes into that home as for a server; the hotfix's baseline is written by every `apply --war`, so the next hotfix on the output WAR is compared with it. The WAR is unpacked, or the directory copied, under `<home>/wars/` while it is worked on, one at a time; that copy may be deleted at any time.
+The home is `--home` (or `JRS_HOTFIX_HOME`), else `jrs-hotfix` beside the WAR, and for a deployed webapp beside Tomcat's `webapps/`, never inside it. The baseline of the release goes into that home as for a server. **A new WAR home holds no baseline**, and without one the site's changes cannot be told from the vendor's, so an `apply --war` replaces them. When the server already has its baselines, copy them over: `jrs-hotfix baseline import <the server's home> --home <the WAR's home>`. The menu offers this when you pick a WAR whose home has none, and its entry 8 has the WAR's own baselines. A run interrupted on the server does not hold up a WAR's home. The hotfix's baseline is written by every `apply --war`, so the next hotfix on the output WAR is compared with it. The WAR is unpacked, or the directory copied, under `<home>/wars/` while it is worked on, one at a time; that copy may be deleted at any time.
 
 Files of `js-install.zip` (`buildomatic`, `samples`) are not part of a WAR: the plan says how many were left out, and they are applied on the server the WAR is deployed to. A WAR has no undo: `apply --war` leaves the home's `undo/` alone, and the server that deploys the output states the hotfix's build like any other.
 
@@ -283,7 +283,7 @@ jrs-hotfix finishes every job by saying what happened and what to do next. The n
 | **8** | An earlier job was interrupted (a crash, a reboot, Ctrl-C) | Run `jrs-hotfix runs resume <id>` to finish it, or `jrs-hotfix runs undo <id>` to undo it |
 | **9** | Another jrs-hotfix job is already running | Wait for it to finish |
 
-A run whose journal has no terminal state blocks every mutating command with exit 8 until `runs resume` finishes it or `runs undo` undoes it; the menu's entry 6 offers both first. A run's snapshot lives in its run directory for as long as the run does, and goes when it ends: an apply's becomes the undo, any other is deleted. A run that failed with exit 4 keeps its snapshot, which its message told you to restore from, until `runs prune --include-failed`.
+A run whose journal has no terminal state blocks every mutating command with exit 8 until `runs resume` finishes it, `runs undo` undoes it, or `runs abandon` closes it; the menu's entry 6 offers all three first. Close a run only when the server has been put right another way, by a restore from a backup or a redeploy for example, or when neither resuming nor undoing can work any more: `runs abandon <id>` shows which steps the run completed and which it did not, says so when it left the service stopped, and asks before it records the run as ended. It changes nothing else: the server's files stay as they are, and the run's snapshot stays for restoring files by hand until `runs prune --include-failed`. A later `rollback` still undoes only the apply before it, and refuses when files have changed since. A run's snapshot lives in its run directory for as long as the run does, and goes when it ends: an apply's becomes the undo, any other is deleted. A run that failed with exit 4 keeps its snapshot, which its message told you to restore from, until `runs prune --include-failed`.
 
 ```bash
 jrs-hotfix runs list                                   # every job that has run, and how it ended
@@ -318,14 +318,14 @@ jrs-hotfix apply <package.zip> --war <in.war | dir> --out <out.war> [--install-o
 jrs-hotfix rollback [--plan] [--yes]
 jrs-hotfix verify <package.zip> [--war <file.war | dir>]
 jrs-hotfix scan [--war <file.war | dir>]
-jrs-hotfix baseline [list | add <war | dir | package.zip> | remove <id>]
+jrs-hotfix baseline [list | add <war | dir | package.zip> | import <home> | remove <id>]
 jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war | dir>] | list | status <mergeId>
                   | show <mergeId> <path>
                   | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
                   | discard <mergeId>]
 jrs-hotfix list
 jrs-hotfix compare <a> <b> [<c>] [--out <dir>] [--show <path>]
-jrs-hotfix runs [list | show <id> | resume <id> | undo <id> | prune --older-than <days> [--include-failed]]
+jrs-hotfix runs [list | show <id> | resume <id> | undo <id> | abandon <id> | prune --older-than <days> [--include-failed]]
 jrs-hotfix settings [show | set <key> <value> | detect]
 jrs-hotfix --docs | --version | --help
 ```
