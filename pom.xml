@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.jaspersoft.jrshotfix</groupId>
   <artifactId>jrs-hotfix</artifactId>
-  <version>0.9.0</version>
+  <version>0.10.0-SNAPSHOT</version>
   <name>jrs-hotfix</name>
   <description>Apply, verify and roll back official Jaspersoft hotfix packages on JasperReports Server 10.x</description>
   <licenses><license><name>GPL-3.0-only</name><url>https://www.gnu.org/licenses/gpl-3.0.txt</url></license></licenses>
