@@ -102,6 +102,34 @@ class PreflightTest {
   }
 
   @Test
+  void should_warn_instead_of_refusing_an_older_package_when_the_operator_allowed_it()
+      throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      stateBuild(f, "20260801", "0000");
+      assertThat(HotfixPlans.refusedOnlyAsOlder(f.plan())).isTrue();
+      Plan allowed =
+          f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true).allowingOlder());
+      assertThat(HotfixPlans.refusedOnlyAsOlder(allowed)).isFalse();
+      assertThat(allowed.summary().warnings()).noneMatch(w -> w.contains("will be refused"));
+      assertThat(warning(HotfixFixture.step(allowed, "preflight").precheck(f.ctx("r"))))
+          .contains("newer than this package's 20260730_0457")
+          .contains("takes the server back, as allowed");
+    }
+  }
+
+  @Test
+  void should_refuse_the_packages_own_build_even_when_older_is_allowed() throws Exception {
+    try (HotfixFixture f = HotfixFixture.create(tmp)) {
+      stateBuild(f, "20260730", "0457");
+      Plan plan =
+          f.plans.planApply(new HotfixPlans.ApplyArgs(f.packageFile(), true).allowingOlder());
+      assertThat(HotfixPlans.refusedOnlyAsOlder(plan)).isFalse();
+      assertThat(failure(HotfixFixture.step(plan, "preflight").precheck(f.ctx("r"))))
+          .contains("is already installed");
+    }
+  }
+
+  @Test
   void should_pass_without_a_word_when_the_webapp_states_an_older_build() throws Exception {
     try (HotfixFixture f = HotfixFixture.create(tmp)) {
       // the release, a hotfix applied by hand, a redeploy: whoever left it, it is older

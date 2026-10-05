@@ -138,7 +138,7 @@ can be undone:  JRSHF-10.0.0-20260730-0457, applied 2026-10-01T14:02:11Z by run 
 The hotfix packages are cumulative, so the build the webapp states about itself (`WEB-INF/internal/jasperserver-pro.properties`) is the hotfix level of the files on disk, whoever put them there: jrs-hotfix, an operator following the readme, or a redeploy. jrs-hotfix keeps no list of hotfixes beside it. `apply` and `verify` compare the package's build with it:
 
 - the webapp states the package's build: the hotfix is installed already, and the package is refused with exit 2;
-- the webapp states a newer build: applying the package would take the server back, and it is refused with exit 2 (taking it back is what `rollback` is for);
+- the webapp states a newer build: applying the package would take the server back, and it is refused with exit 2. At a terminal `apply` asks whether to apply it anyway (default no); in a script `--allow-older` gives that leave, which `--yes` does not. An older package replaces the files it ships, but files only the newer build has stay, and a library the newer build brought may stay beside the package's older one, so when the newer build was applied with jrs-hotfix, `rollback` is the cleaner way back;
 - the webapp states an older build: the package applies;
 - the webapp states no build: a warning, and a package whose files are all in place already, with nothing left to delete, is refused with exit 2, because the outage would change nothing.
 
@@ -295,7 +295,7 @@ A run interrupted while the service was down, at an installation outside the def
 
 ## Getting help
 
-Not sure which command you need? Type `jrs-hotfix` on its own: a menu walks you through the common jobs (apply, undo the latest hotfix, verify, check for customizations, the installed build, recent runs and recovery, settings) and prints the command it runs for each, so using the menu also teaches the scripted form.
+Not sure which command you need? Type `jrs-hotfix` on its own: a menu walks you through the common jobs (apply, undo the latest hotfix, verify, check for customizations, the installed build, recent runs and recovery, settings, hotfixing a WAR or webapp directory, compare, merges, baselines) and prints the command it runs for each, so using the menu also teaches the scripted form. When an apply stops because files of its merge wait for your decision, the menu shows each one, asks for your decision, and applies again with that merge.
 
 Everything is built in and works without internet access:
 
@@ -309,7 +309,7 @@ The full command list:
 
 ```
 jrs-hotfix                                   menu at a terminal; usage otherwise
-jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--keep-superseded] [--plan] [--yes]
+jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--keep-superseded] [--allow-older] [--plan] [--yes]
 jrs-hotfix apply <package.zip> --war <in.war | dir> --out <out.war> [--install-out <dir>] [--merge <mergeId>] [--generic]
 jrs-hotfix rollback [--plan] [--yes]
 jrs-hotfix verify <package.zip> [--war <file.war | dir>]

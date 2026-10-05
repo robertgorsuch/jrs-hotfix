@@ -240,6 +240,10 @@ class ApplyPlanTest {
             .asGeneric()
             .withInstallOut(tmp.resolve("buildomatic-tree"));
     assertThat(HotfixPlans.applyArgs(HotfixPlans.applyArgsJson(war))).isEqualTo(war);
+    HotfixPlans.ApplyArgs older = args.keepingSuperseded().allowingOlder();
+    assertThat(HotfixPlans.applyArgs(HotfixPlans.applyArgsJson(older))).isEqualTo(older);
+    // arguments stored before 0.8 have no allowOlder: they never had the leave
+    assertThat(HotfixPlans.applyArgsJson(args)).doesNotContain("allowOlder");
     assertThatThrownBy(() -> args.withInstallOut(tmp))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("--install-out needs --war");

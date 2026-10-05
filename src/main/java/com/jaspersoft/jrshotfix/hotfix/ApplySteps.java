@@ -172,7 +172,7 @@ final class ApplySteps {
     @Override
     public CheckResult precheck(Context ctx) {
       List<String> problems = new ArrayList<>();
-      problems.addAll(HotfixPlans.applicability(rt, in.contents(), in.targets()));
+      problems.addAll(HotfixPlans.applicability(rt, in.contents(), in.targets(), in.allowOlder()));
       for (Path dir :
           List.of(rt.settings().webappDir(), rt.settings().installDir(), rt.home().root())) {
         if (!rt.files().isWritable(dir)) {
@@ -203,7 +203,7 @@ final class ApplySteps {
         return controller;
       }
       CheckResult baseUrl = baseUrlCheck(rt);
-      List<String> warnings = HotfixPlans.buildWarnings(rt, in.contents());
+      List<String> warnings = HotfixPlans.buildWarnings(rt, in.contents(), in.allowOlder());
       return baseUrl instanceof CheckResult.Pass && !warnings.isEmpty()
           ? CheckResult.warn(String.join("; ", warnings))
           : baseUrl;

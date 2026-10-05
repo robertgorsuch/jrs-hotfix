@@ -140,7 +140,8 @@ final class WarSteps {
     @Override
     public CheckResult precheck(Context ctx) {
       List<String> problems =
-          new ArrayList<>(HotfixPlans.applicability(rt, in.contents(), in.targets()));
+          new ArrayList<>(
+              HotfixPlans.applicability(rt, in.contents(), in.targets(), in.allowOlder()));
       if (!target.inPlace() && Files.exists(target.out())) {
         problems.add(target.out() + " exists already; the output is never overwritten");
       }
@@ -177,7 +178,7 @@ final class WarSteps {
             String.join("; ", problems),
             "fix the listed problems, then run again; nothing was written");
       }
-      List<String> warnings = HotfixPlans.buildWarnings(rt, in.contents());
+      List<String> warnings = HotfixPlans.buildWarnings(rt, in.contents(), in.allowOlder());
       return warnings.isEmpty()
           ? CheckResult.pass()
           : CheckResult.warn(String.join("; ", warnings));

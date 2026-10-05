@@ -51,6 +51,80 @@ class CommandsTest {
     fixtures.forEach(Fixture::close);
   }
 
+  /** Makes the fixture's webapp state {@code build}, newer than the package's 20260730_0457. */
+  private static void stateBuild(Fixture f, String date, String time) throws IOException {
+    Path file = f.hf.settings.webappDir().resolve("WEB-INF/internal/jasperserver-pro.properties");
+    Files.createDirectories(file.getParent());
+    Files.writeString(
+        file,
+        "PRO_VERSION=10.0.0\n  BUILD_DATE_STAMP=" + date + "\n  BUILD_TIME_STAMP=" + time + "\n");
+  }
+
+  private static final String FOO = "webapps/jasperserver-pro/WEB-INF/lib/foo-1.2.3.jar";
+
+  @Test
+  void should_refuse_an_older_package_unless_allow_older_is_given() throws Exception {
+    Fixture f = fixture();
+    stateBuild(f, "20260801", "0000");
+    // --yes answers confirmations; it is not leave to take the server back
+    assertThat(f.run("apply", f.pkg.toString(), "--yes")).isEqualTo(2);
+    assertThat(f.out() + f.err()).contains("take the server back").contains("--allow-older");
+    assertThat(Files.readString(f.target(FOO))).isEqualTo("old foo");
+
+    assertThat(f.run("apply", f.pkg.toString(), "--allow-older", "--plan")).isEqualTo(0);
+    assertThat(f.out())
+        .contains("takes the server back, as allowed")
+        .doesNotContain("will be refused");
+    assertThat(f.run("apply", f.pkg.toString(), "--yes", "--allow-older")).isEqualTo(0);
+    assertThat(Files.readString(f.target(FOO))).isEqualTo("patched foo");
+    // the leave is stored with the run, so the plan rebuilt for recovery is the one that ran
+    assertThat(f.run("rollback", "--yes")).isEqualTo(0);
+    assertThat(Files.readString(f.target(FOO))).isEqualTo("old foo");
+  }
+
+  /** {@code args} at a terminal, answering with {@code answers}. */
+  private static int atTerminal(Fixture f, String answers, String... args) {
+    Prompter.override(new java.io.StringReader(answers));
+    try {
+      f.out = new StringWriter();
+      f.err = new StringWriter();
+      Bootstrap.Opener real = Bootstrap.opener(prompt -> f.hf.platform, f.env());
+      List<String> all = new ArrayList<>(List.of(args));
+      all.addAll(List.of("--home", f.home.root().toString()));
+      return Main.commandLine(
+              new PrintWriter(f.out, true),
+              new PrintWriter(f.err, true),
+              options -> real.open(options).asInteractive())
+          .execute(all.toArray(String[]::new));
+    } finally {
+      Prompter.reset();
+    }
+  }
+
+  @Test
+  void should_ask_at_a_terminal_whether_to_apply_an_older_package() throws Exception {
+    Fixture f = fixture();
+    stateBuild(f, "20260801", "0000");
+    // the checksum matches, no to the older package, yes to the plan: preflight refuses
+    assertThat(atTerminal(f, "y\nn\ny\n", "apply", f.pkg.toString())).isEqualTo(2);
+    assertThat(f.out()).contains("Apply this older package anyway? [y/N]");
+    assertThat(Files.readString(f.target(FOO))).isEqualTo("old foo");
+
+    // the checksum matches, yes to the older package, yes to the plan
+    assertThat(atTerminal(f, "y\ny\ny\n", "apply", f.pkg.toString())).isEqualTo(0);
+    assertThat(f.out()).contains("takes the server back, as allowed");
+    assertThat(Files.readString(f.target(FOO))).isEqualTo("patched foo");
+  }
+
+  @Test
+  void should_not_ask_about_an_older_package_when_the_build_is_the_packages() throws Exception {
+    Fixture f = fixture();
+    stateBuild(f, "20260730", "0457");
+    assertThat(atTerminal(f, "y\ny\ny\n", "apply", f.pkg.toString())).isEqualTo(2);
+    assertThat(f.out()).doesNotContain("older package anyway");
+    assertThat(f.out() + f.err()).contains("is already installed");
+  }
+
   @Test
   void should_apply_verify_list_and_roll_back_through_the_commands() throws Exception {
     Fixture f = fixture();

@@ -68,6 +68,14 @@ final class ApplyCommand extends AppCommand {
   boolean keepSuperseded;
 
   @Option(
+      names = "--allow-older",
+      description =
+          "Apply a package older than the build the server states, which takes the server back."
+              + " Without it such a package is refused, after asking at a terminal; --yes does not"
+              + " give it.")
+  boolean allowOlder;
+
+  @Option(
       names = "--war",
       paramLabel = "<in.war | dir>",
       description =
@@ -167,7 +175,25 @@ final class ApplyCommand extends AppCommand {
     if (installOut != null) {
       args = args.withInstallOut(installOut);
     }
+    if (allowOlder) {
+      args = args.allowingOlder();
+    }
     Plan p = plans.planApply(args);
+    if (!args.allowOlder()
+        && !plan
+        && !global().yes()
+        && boot.interactive()
+        && HotfixPlans.refusedOnlyAsOlder(p)) {
+      out()
+          .println(
+              "! The server states a newer build than this package: applying it takes the server"
+                  + " back. Files only the newer build has stay; when it was applied with jrs-hotfix,"
+                  + " `rollback` is the cleaner way back.");
+      if (Prompter.yes(out(), "Apply this older package anyway? [y/N] ", false)) {
+        args = args.allowingOlder();
+        p = plans.planApply(args);
+      }
+    }
     List<String> audit =
         global().yes()
             ? List.of(HotfixPlans.AUDIT_CHECKSUM_CONFIRMED + " skipped with --yes")

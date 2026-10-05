@@ -43,6 +43,28 @@ class MergeCommandsTest {
   }
 
   @Test
+  void should_find_the_waiting_merge_of_exactly_this_package_for_the_menu() throws Exception {
+    CommandsTest.Fixture f = fixture();
+    SiteFixture s = SiteFixture.create(f.hf, tmp);
+    s.customizeWithoutCollisions();
+    Path zip = s.hotfix();
+    assertThat(f.run("apply", zip.toString(), "--yes")).isEqualTo(2);
+    GlobalOptions g = new GlobalOptions();
+    g.home = f.home.root();
+    RootCommand.Session session =
+        new RootCommand.Session(Bootstrap.opener(prompt -> f.hf.platform, f.env()), g);
+
+    assertThat(session.waitingMerge(zip))
+        .contains(new Menu.WaitingMerge(mergeId(f), List.of(Wars.WEB_XML)));
+    // a merge is matched by the package's bytes: any other file has none waiting
+    Path other = Files.writeString(tmp.resolve("other.zip"), "not the package");
+    assertThat(session.waitingMerge(other)).isEmpty();
+
+    assertThat(f.run("merge", "resolve", mergeId(f), Wars.WEB_XML, "--merged")).isEqualTo(0);
+    assertThat(session.waitingMerge(zip)).isEmpty();
+  }
+
+  @Test
   void should_apply_a_hotfix_to_a_customized_server_keeping_and_merging_the_sites_changes()
       throws Exception {
     CommandsTest.Fixture f = fixture();

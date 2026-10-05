@@ -15,14 +15,16 @@ import java.util.Optional;
  * The resolved inputs of one apply plan. Invariants: targets are absolute and immutable; the
  * package file is the one the operator named, absolute and normalised; a target's staged copy sits
  * at its package path under the run's staging directory; {@code merge} is the prepared merge the
- * contents were read with, empty for an apply without a baseline.
+ * contents were read with, empty for an apply without a baseline; {@code allowOlder} is the
+ * operator's leave to apply a package older than the build the webapp states.
  */
 public record ApplyInput(
     Path packageFile,
     PackageContents contents,
     PackagePaths paths,
     List<FileTarget> targets,
-    Optional<MergeDoc> merge) {
+    Optional<MergeDoc> merge,
+    boolean allowOlder) {
 
   public ApplyInput {
     packageFile = packageFile.toAbsolutePath().normalize();
@@ -30,6 +32,15 @@ public record ApplyInput(
     Objects.requireNonNull(paths, "paths");
     targets = List.copyOf(targets);
     Objects.requireNonNull(merge, "merge");
+  }
+
+  public ApplyInput(
+      Path packageFile,
+      PackageContents contents,
+      PackagePaths paths,
+      List<FileTarget> targets,
+      Optional<MergeDoc> merge) {
+    this(packageFile, contents, paths, targets, merge, false);
   }
 
   public Path stagingDir(Context ctx) {
