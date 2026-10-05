@@ -2,7 +2,7 @@
 
 **The safe way to install a Jaspersoft hotfix.** For JasperReports Server 10.x on Apache Tomcat.
 
-jrs-hotfix applies, verifies, records and rolls back the cumulative hotfix packages Jaspersoft Support publishes, on Windows and Linux. Before it changes anything it shows you exactly what it will do and asks you to confirm. It stops the server for every change under `WEB-INF`, keeps a copy of every file it replaces or deletes so a hotfix can be taken out again, and finishes or undoes a job that a crash, a reboot or Ctrl-C interrupted.
+jrs-hotfix applies, verifies and rolls back the cumulative hotfix packages Jaspersoft Support publishes, on Windows and Linux. Before it changes anything it shows you exactly what it will do and asks you to confirm. It stops the server for every change under `WEB-INF`, keeps a copy of every file it replaces or deletes so a hotfix can be taken out again, and finishes or undoes a job that a crash, a reboot or Ctrl-C interrupted.
 
 On a customized server it keeps what the site changed: given the vendor's own WAR to compare with, it tells which files the site changed, keeps the ones the hotfix does not touch, merges settings files by key and pages and XML by line, and leaves what it cannot merge cleanly for you to resolve before the outage. It can also make a hotfixed WAR from a WAR, without a server.
 
@@ -407,6 +407,8 @@ Each release page also carries the release notes; `docs/releases/` in this repos
 You do not need to build jrs-hotfix to use it: download the release archive above. Building from source needs JDK 21; with an older one the build stops at once and says so. `scripts/mvn.sh verify` (`scripts\mvn.cmd verify` on Windows; JDK 21 pinned) builds, tests and runs the acceptance suite against the shaded jar. While iterating, `scripts/fast.sh test <TestClass[,TestClass]>` compiles with Error Prone and `-Werror` and runs just those unit tests, and `scripts/fast.sh fmt` formats with google-java-format before committing.
 
 The design is in [`docs/spec.md`](docs/spec.md) (0.1), [`docs/spec-customized-servers.md`](docs/spec-customized-servers.md) (0.2 and 0.3, with a section on where the built tool differs from it and why), [`docs/spec-no-ledger.md`](docs/spec-no-ledger.md) (0.6) and [`docs/spec-targets.md`](docs/spec-targets.md) (0.7); 0.8, the menu and `--allow-older`, is described in this README and its [release notes](docs/releases/v0.8.0.md). The decisions taken along the way are in [`docs/decisions/`](docs/decisions/).
+
+To report a problem or contribute a change, read [`CONTRIBUTING.md`](CONTRIBUTING.md); to report a vulnerability, [`SECURITY.md`](SECURITY.md), and never a public issue.
 
 ## Licence
 
