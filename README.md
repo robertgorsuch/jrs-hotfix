@@ -24,6 +24,8 @@ It comes as one download with everything it needs inside. There is nothing else 
 | Hotfix a build host, which deploys with buildomatic and runs no server | `jrs-hotfix settings detect` in the distribution, then `jrs-hotfix apply <package.zip>` |
 | Compare two WARs or webapps, or see what two of them each changed from a third | `jrs-hotfix compare <a> <b>` / `jrs-hotfix compare <base> <mine> <theirs>` |
 | Finish or undo an interrupted job | `jrs-hotfix runs resume <id>` / `jrs-hotfix runs undo <id>` |
+| Apply a package older than the build the server is at | `jrs-hotfix apply <package.zip> --allow-older`, or answer `y` when `apply` asks at a terminal |
+| Do any of the above from a menu that shows each command | `jrs-hotfix` |
 
 ---
 
@@ -203,6 +205,8 @@ jrs-hotfix merge resolve <mergeId> <path> --merged [<file>]    # install the mer
 jrs-hotfix merge resolve <mergeId> <path> --mine | --theirs    # keep the server's file, or take the hotfix's (also for a script, stylesheet or binary file)
 jrs-hotfix apply <package.zip> --merge <mergeId>
 ```
+
+The menu does this for you: when its apply (entry 1) stops on a merge that waits, it lists the files and takes each in turn (show what changed, take the merged file, keep the server's, take the hotfix's, or install a file you merged yourself), then applies again with that merge. Entry 10 decides the files of any merge the same way.
 
 `--merged` takes the workspace's `files/<path>/merged`, which you edit with your own editor, or the file you name. It is refused while it holds a conflict marker, and an XML file must be well-formed, define no bean, filter, servlet or listener twice, and neither bring back a bean the site removed nor lose one the site added. The three sides are plain files under `files/<path>/` (`base`, `mine`, `theirs`), so any merge tool can be pointed at them.
 
@@ -400,9 +404,9 @@ Each release page also carries the release notes; `docs/releases/` in this repos
 
 ## For developers
 
-You do not need to build jrs-hotfix to use it: download the release archive above. Building from source needs JDK 21: `scripts/mvn.sh verify` (JDK 21 pinned) builds, tests and runs the acceptance suite against the shaded jar. While iterating, `scripts/fast.sh test <TestClass[,TestClass]>` compiles with Error Prone and `-Werror` and runs just those unit tests, and `scripts/fast.sh fmt` formats with google-java-format before committing.
+You do not need to build jrs-hotfix to use it: download the release archive above. Building from source needs JDK 21; with an older one the build stops at once and says so. `scripts/mvn.sh verify` (`scripts\mvn.cmd verify` on Windows; JDK 21 pinned) builds, tests and runs the acceptance suite against the shaded jar. While iterating, `scripts/fast.sh test <TestClass[,TestClass]>` compiles with Error Prone and `-Werror` and runs just those unit tests, and `scripts/fast.sh fmt` formats with google-java-format before committing.
 
-The design is in [`docs/spec.md`](docs/spec.md) (0.1) and [`docs/spec-customized-servers.md`](docs/spec-customized-servers.md) (0.2 and 0.3, with a section on where the built tool differs from it and why); the decisions taken along the way are in [`docs/decisions/`](docs/decisions/).
+The design is in [`docs/spec.md`](docs/spec.md) (0.1), [`docs/spec-customized-servers.md`](docs/spec-customized-servers.md) (0.2 and 0.3, with a section on where the built tool differs from it and why), [`docs/spec-no-ledger.md`](docs/spec-no-ledger.md) (0.6) and [`docs/spec-targets.md`](docs/spec-targets.md) (0.7); 0.8, the menu and `--allow-older`, is described in this README and its [release notes](docs/releases/v0.8.0.md). The decisions taken along the way are in [`docs/decisions/`](docs/decisions/).
 
 ## Licence
 
