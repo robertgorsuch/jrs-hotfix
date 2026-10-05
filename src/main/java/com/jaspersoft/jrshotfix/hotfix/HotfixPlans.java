@@ -56,6 +56,9 @@ public final class HotfixPlans {
   /** The audit kind the front end writes to the run log when the package checksum is confirmed. */
   public static final String AUDIT_CHECKSUM_CONFIRMED = ApplySteps.AUDIT_CHECKSUM_CONFIRMED;
 
+  /** How a plan summary's warning begins when preflight will refuse the plan. */
+  private static final String REFUSED_PREFIX = "this plan will be refused before anything is ";
+
   /**
    * Marks a plan summary warning as one of the package readme's manual steps, so {@link
    * #notesOf(Plan)} can find it again without a new field on the copied {@link PlanSummary}.
@@ -82,7 +85,8 @@ public final class HotfixPlans {
    * What {@code apply} was asked to do; stored with the run so the plan can be rebuilt. {@code
    * mergeId} names the prepared merge that says what happens to the files this site changed; empty
    * means there was no baseline to compare with, and the package is applied as 0.1 applied it.
-   * {@code installOut} is the installation tree an apply into a WAR also patches.
+   * {@code installOut} is the installation tree an apply into a WAR also patches; {@code
+   * allowOlder} is the operator's leave to apply a package older than the build the webapp states.
    */
   public record ApplyArgs(
       Path packageFile,
@@ -92,7 +96,8 @@ public final class HotfixPlans {
       Optional<Path> out,
       boolean keepSuperseded,
       boolean generic,
-      Optional<Path> installOut) {
+      Optional<Path> installOut,
+      boolean allowOlder) {
     public ApplyArgs {
       Objects.requireNonNull(packageFile, "packageFile");
       Objects.requireNonNull(mergeId, "mergeId");
@@ -108,6 +113,27 @@ public final class HotfixPlans {
       if (installOut.isPresent() && war.isEmpty()) {
         throw new IllegalArgumentException("--install-out needs --war");
       }
+    }
+
+    public ApplyArgs(
+        Path packageFile,
+        boolean checksumConfirmed,
+        Optional<String> mergeId,
+        Optional<Path> war,
+        Optional<Path> out,
+        boolean keepSuperseded,
+        boolean generic,
+        Optional<Path> installOut) {
+      this(
+          packageFile,
+          checksumConfirmed,
+          mergeId,
+          war,
+          out,
+          keepSuperseded,
+          generic,
+          installOut,
+          false);
     }
 
     public ApplyArgs(
@@ -155,7 +181,7 @@ public final class HotfixPlans {
     /** These arguments with superseded libraries left where they are. */
     public ApplyArgs keepingSuperseded() {
       return new ApplyArgs(
-          packageFile, checksumConfirmed, mergeId, war, out, true, generic, installOut);
+          packageFile, checksumConfirmed, mergeId, war, out, true, generic, installOut, allowOlder);
     }
 
     /**
@@ -164,7 +190,15 @@ public final class HotfixPlans {
      */
     public ApplyArgs asGeneric() {
       return new ApplyArgs(
-          packageFile, checksumConfirmed, mergeId, war, out, keepSuperseded, true, installOut);
+          packageFile,
+          checksumConfirmed,
+          mergeId,
+          war,
+          out,
+          keepSuperseded,
+          true,
+          installOut,
+          allowOlder);
     }
 
     /**
@@ -180,7 +214,25 @@ public final class HotfixPlans {
           out,
           keepSuperseded,
           generic,
-          Optional.of(dir.toAbsolutePath().normalize()));
+          Optional.of(dir.toAbsolutePath().normalize()),
+          allowOlder);
+    }
+
+    /**
+     * These arguments with leave to apply a package older than the build the webapp states, which
+     * the operator gave with {@code --allow-older} or at the prompt.
+     */
+    public ApplyArgs allowingOlder() {
+      return new ApplyArgs(
+          packageFile,
+          checksumConfirmed,
+          mergeId,
+          war,
+          out,
+          keepSuperseded,
+          generic,
+          installOut,
+          true);
     }
 
     public ApplyArgs(Path packageFile, boolean checksumConfirmed) {
@@ -197,7 +249,8 @@ public final class HotfixPlans {
           Optional.of(outFile),
           keepSuperseded,
           generic,
-          installOut);
+          installOut,
+          allowOlder);
     }
   }
 
@@ -360,17 +413,17 @@ public final class HotfixPlans {
             file, generic(args, merge.map(merges::decisions).orElse(SiteDecisions.NONE)), args);
     merge.ifPresent(m -> merges.check(m, contents));
     List<FileTarget> targets = FileTarget.resolve(contents, rt.paths(), rt.files());
-    ApplyInput in = new ApplyInput(file, contents, rt.paths(), targets, merge);
+    ApplyInput in = new ApplyInput(file, contents, rt.paths(), targets, merge, args.allowOlder());
 
     List<String> warnings = new ArrayList<>();
-    String refused = "this plan will be refused before anything is " + mutation + ": ";
-    for (String problem : applicability(rt, contents, targets)) {
+    String refused = REFUSED_PREFIX + mutation + ": ";
+    for (String problem : applicability(rt, contents, targets, args.allowOlder())) {
       warnings.add(refused + problem);
     }
     for (String problem : refusals) {
       warnings.add(refused + problem);
     }
-    warnings.addAll(buildWarnings(rt, contents));
+    warnings.addAll(buildWarnings(rt, contents, args.allowOlder()));
     warnings.add(
         "package "
             + file.getFileName()
@@ -608,7 +661,8 @@ public final class HotfixPlans {
         in.contents(),
         in.paths(),
         in.targets().stream().filter(t -> target.pathOf(t).isEmpty()).toList(),
-        in.merge());
+        in.merge(),
+        in.allowOlder());
   }
 
   private String warHash(Path war) {
@@ -1096,7 +1150,7 @@ public final class HotfixPlans {
    * should be, not a mismatch with the package.
    */
   private List<String> asApplied(PackageContents c) {
-    List<String> out = new ArrayList<>(buildWarnings(rt, c));
+    List<String> out = new ArrayList<>(buildWarnings(rt, c, false));
     Optional<UndoRecord> entry = rt.undo().read().filter(u -> u.id().equals(c.id()));
     if (entry.isEmpty()) {
       return out;
@@ -1138,6 +1192,15 @@ public final class HotfixPlans {
    * {@code targets} are the package's files as they were on disk when the caller resolved them.
    */
   static List<String> applicability(HotfixRuntime rt, PackageContents c, List<FileTarget> targets) {
+    return applicability(rt, c, targets, false);
+  }
+
+  /**
+   * As {@link #applicability(HotfixRuntime, PackageContents, List)}; with {@code allowOlder} a
+   * package older than the build the webapp states is not refused.
+   */
+  static List<String> applicability(
+      HotfixRuntime rt, PackageContents c, List<FileTarget> targets, boolean allowOlder) {
     List<String> problems = new ArrayList<>();
     String installed = JrsVersion.ofWebapp(rt.settings().webappDir()).orElse("");
     if (!installed.equals(c.release())) {
@@ -1159,7 +1222,7 @@ public final class HotfixPlans {
     }
     problems.addAll(c.conflicts());
     if (problems.isEmpty()) {
-      problems.addAll(BuildCheck.of(rt.settings().webappDir(), c).problems());
+      problems.addAll(BuildCheck.of(rt.settings().webappDir(), c, allowOlder).problems());
     }
     if (problems.isEmpty() && inPlace(targets)) {
       problems.add(
@@ -1170,9 +1233,22 @@ public final class HotfixPlans {
     return problems;
   }
 
-  /** What the build the webapp states says without refusing the package: that it is unreadable. */
-  static List<String> buildWarnings(HotfixRuntime rt, PackageContents c) {
-    return BuildCheck.of(rt.settings().webappDir(), c).warnings();
+  /**
+   * What the build the webapp states says without refusing the package: that it is unreadable, or
+   * with {@code allowOlder} that the package takes the server back.
+   */
+  static List<String> buildWarnings(HotfixRuntime rt, PackageContents c, boolean allowOlder) {
+    return BuildCheck.of(rt.settings().webappDir(), c, allowOlder).warnings();
+  }
+
+  /**
+   * True when {@code p} is refused only because its package is older than the build the webapp
+   * states, so the operator can be asked whether to apply it anyway.
+   */
+  public static boolean refusedOnlyAsOlder(Plan p) {
+    List<String> refusals =
+        p.summary().warnings().stream().filter(w -> w.startsWith(REFUSED_PREFIX)).toList();
+    return refusals.size() == 1 && refusals.get(0).contains(BuildCheck.TAKES_BACK);
   }
 
   /**
@@ -1235,6 +1311,9 @@ public final class HotfixPlans {
       m.put("generic", true);
     }
     a.installOut().ifPresent(d -> m.put("installOut", d.toString()));
+    if (a.allowOlder()) {
+      m.put("allowOlder", true);
+    }
     return Json.write(m);
   }
 
@@ -1255,7 +1334,8 @@ public final class HotfixPlans {
         n.path("generic").asBoolean(false),
         n.hasNonNull("installOut")
             ? Optional.of(Path.of(n.get("installOut").asText()))
-            : Optional.empty());
+            : Optional.empty(),
+        n.path("allowOlder").asBoolean(false));
   }
 
   public static String rollbackArgsJson(RollbackArgs a) {

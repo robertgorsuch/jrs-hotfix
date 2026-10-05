@@ -1,5 +1,6 @@
 package com.jaspersoft.jrshotfix.app;
 
+import com.jaspersoft.jrshotfix.home.HomeResolver;
 import com.jaspersoft.jrshotfix.home.Settings;
 import com.jaspersoft.jrshotfix.platform.UserPaths;
 import java.io.PrintWriter;
@@ -7,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
@@ -28,6 +30,10 @@ import java.util.function.Supplier;
 final class Menu {
 
   static final String PENDING_REFUSAL = "finish or undo the interrupted job first (entry 6)";
+
+  private static final String KEEP_SUPERSEDED = "--keep-superseded";
+
+  private static final List<String> CONFLICT_RULES = List.of("ask", "mine", "theirs", "fail");
 
   /** A merge of a package whose files still wait for the operator's decision. */
   record WaitingMerge(String id, List<String> files) {
@@ -167,7 +173,7 @@ final class Menu {
         case "7" -> settingsEntry();
         case "8" -> war();
         case "9" -> compare();
-        case "10" -> merges();
+        case "10" -> merges(globalArgs.get(), Optional.empty());
         case "11" -> baselines();
         default -> out.println("Please type a number from 1 to 11, or q.");
       }
@@ -186,11 +192,15 @@ final class Menu {
   }
 
   /**
-   * The apply; when it is refused (exit 2) because files of the package's merge wait for a
-   * decision, each is shown and decided here, and the apply is run again with that merge.
+   * The apply, with the options asked for; when it is refused (exit 2) because files of the
+   * package's merge wait for a decision, each is shown and decided here, and the apply is run again
+   * with that merge.
    */
   private void apply(String pkg) {
-    if (execute("apply", pkg) != ExitCodes.PRECHECK_FAILED) {
+    List<String> options = applyOptions();
+    List<String> command = new ArrayList<>(List.of("apply", pkg));
+    command.addAll(options);
+    if (run(command, globalArgs.get()) != ExitCodes.PRECHECK_FAILED) {
       return;
     }
     Optional<WaitingMerge> waiting = waitingMerge.apply(local(pkg));
@@ -210,20 +220,60 @@ final class Menu {
       return;
     }
     for (String file : files) {
-      if (!decide(id, file)) {
+      if (!decide(id, file, globalArgs.get())) {
         out.println("  the merge keeps its decisions so far; entry 10 continues it");
         return;
       }
     }
     if (Prompter.yes(out, "Every file is decided. Apply " + pkg + " now? [Y/n] ", true)) {
-      execute("apply", pkg, "--merge", id);
+      List<String> again = new ArrayList<>(List.of("apply", pkg, "--merge", id));
+      if (options.contains(KEEP_SUPERSEDED)) {
+        again.add(KEEP_SUPERSEDED);
+      }
+      run(again, globalArgs.get());
     }
   }
 
   /**
-   * One waiting file of a merge, asked about until it is decided; false when the operator stops.
+   * The apply options most operators leave as they are, asked for only on request: {@code
+   * --keep-superseded} and {@code --on-conflict}.
    */
-  private boolean decide(String id, String file) {
+  private List<String> applyOptions() {
+    List<String> options = new ArrayList<>();
+    if (!Prompter.yes(
+        out, "Change the apply options (superseded libraries, conflict rule)? [y/N] ", false)) {
+      return options;
+    }
+    if (Prompter.yes(
+        out,
+        "Leave older versions of the package's libraries in WEB-INF/lib (--keep-superseded)?"
+            + " [y/N] ",
+        false)) {
+      options.add(KEEP_SUPERSEDED);
+    }
+    onConflict().ifPresent(rule -> options.addAll(List.of("--on-conflict", rule)));
+    return options;
+  }
+
+  /** The rule for a properties key both changed, asked until valid; empty for the setting. */
+  private Optional<String> onConflict() {
+    while (true) {
+      Optional<String> rule =
+          text("When a properties key was changed by both: ask, mine, theirs or fail"
+                  + " (Enter for the setting merge.onConflict)")
+              .map(r -> r.toLowerCase(Locale.ROOT));
+      if (rule.isEmpty() || CONFLICT_RULES.contains(rule.get())) {
+        return rule;
+      }
+      out.println("  please type ask, mine, theirs or fail, or press Enter");
+    }
+  }
+
+  /**
+   * One file of a merge, asked about until it is decided; false when the operator stops. The
+   * commands get {@code args}: the server's home, or the home of a WAR.
+   */
+  private boolean decide(String id, String file, List<String> args) {
     while (true) {
       out.println();
       out.println("File " + file + " in merge " + id);
@@ -231,25 +281,35 @@ final class Menu {
       out.println("  2) Take the merged file");
       out.println("  3) Keep the server's file (mine)");
       out.println("  4) Take the hotfix's file (theirs)");
-      String flag;
-      switch (Prompter.line(out, "Choose [1-4, Enter to stop]: ").orElse("")) {
+      out.println("  5) Install a file you merged yourself");
+      List<String> decision;
+      switch (Prompter.line(out, "Choose [1-5, Enter to stop]: ").orElse("")) {
         case "1" -> {
-          execute("merge", "show", id, file);
+          run(List.of("merge", "show", id, file), args);
           continue;
         }
-        case "2" -> flag = "--merged";
-        case "3" -> flag = "--mine";
-        case "4" -> flag = "--theirs";
+        case "2" -> decision = List.of("--merged");
+        case "3" -> decision = List.of("--mine");
+        case "4" -> decision = List.of("--theirs");
+        case "5" -> {
+          Optional<String> own = existingFile("Your merged file (Enter to choose again)");
+          if (own.isEmpty()) {
+            continue;
+          }
+          decision = List.of("--merged", own.get());
+        }
         case "" -> {
           return false;
         }
         default -> {
-          out.println("Please type a number from 1 to 4, or press Enter to stop.");
+          out.println("Please type a number from 1 to 5, or press Enter to stop.");
           continue;
         }
       }
+      List<String> command = new ArrayList<>(List.of("merge", "resolve", id, file));
+      command.addAll(decision);
       // a merged file that fails its checks is refused; the operator chooses again
-      if (execute("merge", "resolve", id, file, flag) == ExitCodes.SUCCESS) {
+      if (run(command, args) == ExitCodes.SUCCESS) {
         return true;
       }
     }
@@ -324,9 +384,10 @@ final class Menu {
 
   /**
    * A WAR or a deployed or exploded webapp directory, worked on instead of the server: hotfixed
-   * into a new WAR, a package verified against it, or checked for customizations. These commands
-   * get the options as the operator gave them, not the server's home, so their home is the one the
-   * command line would use: {@code --home} if given, else {@code jrs-hotfix} beside the input.
+   * into a new WAR, a package verified against it, checked for customizations, or its merges. These
+   * commands get the options as the operator gave them, not the server's home, so their home is the
+   * one the command line would use: {@code --home} if given, else {@code jrs-hotfix} beside the
+   * input.
    */
   private void war() {
     Optional<String> war = existing("WAR or webapp directory (Enter to go back)");
@@ -337,7 +398,8 @@ final class Menu {
     out.println("  1) Hotfix it into a new WAR");
     out.println("  2) Verify a hotfix package against it");
     out.println("  3) Check it for customizations");
-    switch (Prompter.line(out, "Choose [1-3]: ").orElse("")) {
+    out.println("  4) Its merges");
+    switch (Prompter.line(out, "Choose [1-4]: ").orElse("")) {
       case "1" -> {
         if (notPending()) {
           hotfixWar(war.get());
@@ -347,6 +409,7 @@ final class Menu {
           existingFile("Hotfix package (.zip)")
               .ifPresent(p -> run(List.of("verify", p, "--war", war.get()), givenArgs));
       case "3" -> run(List.of("scan", "--war", war.get()), givenArgs);
+      case "4" -> merges(warArgs(war.get()), Optional.of(war.get()));
       default -> {
         // back to the menu
       }
@@ -372,10 +435,33 @@ final class Menu {
     }
     path("Installation tree for the buildomatic and samples files (Enter to leave them out)")
         .ifPresent(dir -> command.addAll(List.of("--install-out", dir)));
-    run(command, givenArgs);
+    command.addAll(applyOptions());
+    if (run(command, givenArgs) == ExitCodes.PRECHECK_FAILED) {
+      out.println("  if files of its merge wait for your decision, entry 8 then 4 decides them");
+    }
   }
 
-  /** Two inputs, or three for base, mine and theirs; nothing is changed. */
+  /**
+   * The options for the merges of a WAR: the home {@code apply --war} uses, named with {@code
+   * --home} when the operator gave none, so the merge commands, which take no {@code --war}, find
+   * it.
+   */
+  private List<String> warArgs(String war) {
+    if (warHomeGiven()) {
+      return givenArgs;
+    }
+    List<String> args = new ArrayList<>(givenArgs);
+    args.addAll(List.of("--home", Bootstrap.besideWar(local(war)).root().toString()));
+    return args;
+  }
+
+  /** True when the operator named the home, with {@code --home} or the environment. */
+  private boolean warHomeGiven() {
+    String env = Env.vars().get(HomeResolver.ENV);
+    return givenArgs.contains("--home") || (env != null && !env.isBlank());
+  }
+
+  /** Two inputs, or three for base, mine and theirs, or one file of them; nothing is changed. */
   private void compare() {
     out.println(
         "Each input is a WAR, a webapp directory, the vendor's distribution, a hotfix ZIP, or"
@@ -389,17 +475,34 @@ final class Menu {
       command.add(input.get());
     }
     Optional<String> third = path("Third input (Enter to compare two)");
-    if (third.isPresent()) {
-      command.add(third.get());
+    third.ifPresent(command::add);
+    Optional<String> show =
+        text("One file to show the differences of (Enter for the whole report)");
+    if (show.isPresent()) {
+      command.addAll(List.of("--show", show.get()));
+    } else if (third.isPresent()) {
       path("Directory to write the merged result to (Enter for the report only)")
           .ifPresent(dir -> command.addAll(List.of("--out", dir)));
     }
     execute(command.toArray(String[]::new));
   }
 
-  /** The merges in the home, then one looked at, decided, prepared or discarded. */
-  private void merges() {
-    execute("merge", "list");
+  /**
+   * The merges in a home, then one looked at, decided, prepared or discarded: the server's, with
+   * {@code war} empty, or a WAR's, whose merges are prepared with {@code --war}.
+   */
+  private void merges(List<String> args, Optional<String> war) {
+    boolean none =
+        war.isPresent()
+            && !warHomeGiven()
+            && !Files.isRegularFile(Bootstrap.besideWar(local(war.get())).settingsFile());
+    if (none) {
+      // the home beside the WAR is made by its first merge or apply
+      out.println();
+      out.println("  no merges for this WAR yet");
+    } else {
+      run(List.of("merge", "list"), args);
+    }
     out.println();
     out.println("  1) Show the files of a merge");
     out.println("  2) Show one file of a merge");
@@ -407,26 +510,29 @@ final class Menu {
     out.println("  4) Prepare a merge for a hotfix");
     out.println("  5) Discard a merge");
     switch (Prompter.line(out, "Choose [1-5]: ").orElse("")) {
-      case "1" -> mergeId().ifPresent(id -> execute("merge", "status", id));
+      case "1" -> mergeId().ifPresent(id -> run(List.of("merge", "status", id), args));
       case "2" -> {
         Optional<String> id = mergeId();
         if (id.isPresent()) {
-          mergePath().ifPresent(p -> execute("merge", "show", id.get(), p));
+          mergePath().ifPresent(p -> run(List.of("merge", "show", id.get(), p), args));
         }
       }
       case "3" -> {
         if (notPending()) {
-          resolve();
+          Optional<String> id = mergeId();
+          if (id.isPresent()) {
+            mergePath().ifPresent(p -> decide(id.get(), p, args));
+          }
         }
       }
       case "4" -> {
         if (notPending()) {
-          existingFile("Hotfix package (.zip)").ifPresent(p -> execute("merge", "prepare", p));
+          prepare(args, war);
         }
       }
       case "5" -> {
         if (notPending()) {
-          mergeId().ifPresent(id -> execute("merge", "discard", id));
+          mergeId().ifPresent(id -> run(List.of("merge", "discard", id), args));
         }
       }
       default -> {
@@ -435,26 +541,15 @@ final class Menu {
     }
   }
 
-  private void resolve() {
-    Optional<String> id = mergeId();
-    if (id.isEmpty()) {
+  private void prepare(List<String> args, Optional<String> war) {
+    Optional<String> pkg = existingFile("Hotfix package (.zip)");
+    if (pkg.isEmpty()) {
       return;
     }
-    Optional<String> file = mergePath();
-    if (file.isEmpty()) {
-      return;
-    }
-    out.println("  1) Take the merged file");
-    out.println("  2) Keep the server's file (mine)");
-    out.println("  3) Take the hotfix's file (theirs)");
-    Optional<String> decision =
-        switch (Prompter.line(out, "Choose [1-3]: ").orElse("")) {
-          case "1" -> Optional.of("--merged");
-          case "2" -> Optional.of("--mine");
-          case "3" -> Optional.of("--theirs");
-          default -> Optional.empty();
-        };
-    decision.ifPresent(d -> execute("merge", "resolve", id.get(), file.get(), d));
+    List<String> command = new ArrayList<>(List.of("merge", "prepare", pkg.get()));
+    war.ifPresent(w -> command.addAll(List.of("--war", w)));
+    onConflict().ifPresent(rule -> command.addAll(List.of("--on-conflict", rule)));
+    run(command, args);
   }
 
   private Optional<String> mergeId() {

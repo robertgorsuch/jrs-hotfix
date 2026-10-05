@@ -21,7 +21,7 @@ about to run, so using the menu also teaches the scripted form.
 
 ```
 jrs-hotfix                                   menu at a terminal; usage otherwise
-jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--keep-superseded] [--plan] [--yes]
+jrs-hotfix apply <package.zip> [--merge <mergeId>] [--on-conflict <rule>] [--keep-superseded] [--allow-older] [--plan] [--yes]
 jrs-hotfix apply <package.zip> --war <in.war | dir> --out <out.war> [--merge <mergeId>] [--generic] [--install-out <dir>]
 jrs-hotfix rollback [--plan] [--yes]
 jrs-hotfix verify <package.zip> [--war <file.war | dir>]
@@ -75,8 +75,9 @@ The packages are cumulative, so the build the webapp states about itself
 (`WEB-INF/internal/jasperserver-pro.properties`) says what is installed,
 whoever installed it; jrs-hotfix keeps no list of hotfixes beside it. A
 package of that build is refused as installed already, and one older than it
-as taking the server back (exit 2). `jrs-hotfix list` shows the build and what
-`rollback` would undo.
+as taking the server back (exit 2): at a terminal `apply` asks whether to
+apply it anyway, and `--allow-older` gives that leave in a script (`--yes`
+does not). `jrs-hotfix list` shows the build and what `rollback` would undo.
 
 A library under `WEB-INF/lib` that is an older version of one the package
 brings, and that no readme list names, is deleted as superseded when the

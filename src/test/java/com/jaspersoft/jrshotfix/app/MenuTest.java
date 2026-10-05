@@ -310,7 +310,8 @@ class MenuTest {
   void should_decide_each_waiting_file_and_apply_again_when_apply_waits_on_a_merge() {
     List<Path> asked = new ArrayList<>();
     Prompter.override(
-        new StringReader(String.join("\n", "1", pkg.toString(), "", "1", "3", "2", "", "q", "")));
+        new StringReader(
+            String.join("\n", "1", pkg.toString(), "", "", "1", "3", "2", "", "q", "")));
     menu(
             List::of,
             refusing("apply " + pkg + " --home h"),
@@ -335,7 +336,7 @@ class MenuTest {
   @Test
   void should_ask_again_after_a_refused_decision_and_stop_without_applying_on_enter() {
     Prompter.override(
-        new StringReader(String.join("\n", "1", pkg.toString(), "y", "2", "", "q", "")));
+        new StringReader(String.join("\n", "1", pkg.toString(), "", "y", "2", "", "q", "")));
     menu(
             List::of,
             refusing("apply " + pkg + " --home h", "merge resolve m1 a.xml --merged --home h"),
@@ -349,7 +350,7 @@ class MenuTest {
 
   @Test
   void should_offer_nothing_more_when_apply_fails_without_a_waiting_merge() {
-    Prompter.override(new StringReader("1\n" + pkg + "\nq\n"));
+    Prompter.override(new StringReader("1\n" + pkg + "\n\nq\n"));
     menu(List::of, refusing("apply " + pkg + " --home h"), p -> Optional.empty()).run();
     assertThat(ranLines()).containsExactly("apply " + pkg + " --home h");
     assertThat(text()).doesNotContain("wait for your decision");
@@ -375,6 +376,7 @@ class MenuTest {
                 target.toString(),
                 "y",
                 "",
+                "",
                 "8",
                 war.toString(),
                 "2",
@@ -395,11 +397,34 @@ class MenuTest {
 
   @Test
   void should_compare_two_or_three_inputs_when_9_is_chosen() {
-    Prompter.override(new StringReader("9\na.war\nserver\n\n9\nbase\nmine\ntheirs\nout\nq\n"));
+    Prompter.override(
+        new StringReader(
+            String.join(
+                "\n",
+                "9",
+                "a.war",
+                "server",
+                "",
+                "",
+                "9",
+                "base",
+                "mine",
+                "theirs",
+                "",
+                "out",
+                "9",
+                "base",
+                "mine",
+                "theirs",
+                "WEB-INF/web.xml",
+                "q",
+                "")));
     menu(List::of).run();
     assertThat(ranLines())
         .containsExactly(
-            "compare a.war server --home h", "compare base mine theirs --out out --home h");
+            "compare a.war server --home h",
+            "compare base mine theirs --out out --home h",
+            "compare base mine theirs --show WEB-INF/web.xml --home h");
   }
 
   @Test
@@ -419,15 +444,22 @@ class MenuTest {
                 "3",
                 "m1",
                 "WEB-INF/web.xml",
-                "1",
+                "2",
                 "10",
                 "3",
                 "m1",
                 "WEB-INF/web.xml",
+                "4",
+                "10",
                 "3",
+                "m1",
+                "WEB-INF/web.xml",
+                "5",
+                pkg.toString(),
                 "10",
                 "4",
                 pkg.toString(),
+                "Mine",
                 "10",
                 "5",
                 "m1",
@@ -445,7 +477,9 @@ class MenuTest {
             "merge list --home h",
             "merge resolve m1 WEB-INF/web.xml --theirs --home h",
             "merge list --home h",
-            "merge prepare " + pkg + " --home h",
+            "merge resolve m1 WEB-INF/web.xml --merged " + pkg + " --home h",
+            "merge list --home h",
+            "merge prepare " + pkg + " --on-conflict mine --home h",
             "merge list --home h",
             "merge discard m1 --home h");
   }
@@ -504,6 +538,7 @@ class MenuTest {
                 "a",
                 "b",
                 "",
+                "",
                 "q",
                 "")));
     menu(() -> List.of("stuck")).run();
@@ -517,6 +552,82 @@ class MenuTest {
             "runs list --home h",
             "runs show stuck --home h",
             "compare a b --home h");
+  }
+
+  @Test
+  void should_pass_the_apply_options_asked_for_and_keep_them_when_applying_again() {
+    Prompter.override(
+        new StringReader(
+            String.join(
+                "\n",
+                "1",
+                pkg.toString(),
+                "y",
+                "y",
+                "maybe",
+                "MINE", // a wrong rule is asked again
+                "",
+                "4",
+                "",
+                "q",
+                "")));
+    menu(
+            List::of,
+            refusing("apply " + pkg + " --keep-superseded --on-conflict mine --home h"),
+            p -> Optional.of(new Menu.WaitingMerge("m1", List.of("a.xml"))))
+        .run();
+    // a merge named is applied as prepared: only --keep-superseded still means something
+    assertThat(ranLines())
+        .containsExactly(
+            "apply " + pkg + " --keep-superseded --on-conflict mine --home h",
+            "merge resolve m1 a.xml --theirs --home h",
+            "apply " + pkg + " --merge m1 --keep-superseded --home h");
+    assertThat(text()).contains("please type ask, mine, theirs or fail");
+  }
+
+  @Test
+  void should_work_on_the_merges_of_a_war_in_its_own_home_when_8_then_4_is_chosen()
+      throws Exception {
+    Path war = Files.createDirectories(tmp.resolve("webapps/jasperserver-pro"));
+    Path home = tmp.resolve("jrs-hotfix");
+    Prompter.override(
+        new StringReader(
+            String.join(
+                "\n",
+                "8",
+                war.toString(),
+                "4",
+                "4",
+                pkg.toString(),
+                "",
+                "8",
+                war.toString(),
+                "4",
+                "1",
+                "m1",
+                "q",
+                "")));
+    Function<String[], Integer> runner =
+        a -> {
+          ran.add(a);
+          if (a[1].equals("prepare")) {
+            // the first merge makes the home beside the webapps directory
+            try {
+              Files.createDirectories(home);
+              Files.writeString(new com.jaspersoft.jrshotfix.home.Home(home).settingsFile(), "{}");
+            } catch (java.io.IOException e) {
+              throw new java.io.UncheckedIOException(e);
+            }
+          }
+          return 0;
+        };
+    menu(List::of, runner, p -> Optional.empty()).run();
+    assertThat(text()).contains("no merges for this WAR yet");
+    assertThat(ranLines())
+        .containsExactly(
+            "merge prepare " + pkg + " --war " + war + " --no-color --home " + home,
+            "merge list --no-color --home " + home,
+            "merge status m1 --no-color --home " + home);
   }
 
   @Test

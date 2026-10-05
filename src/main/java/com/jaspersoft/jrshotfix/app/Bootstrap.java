@@ -172,6 +172,12 @@ final class Bootstrap {
     return interactive;
   }
 
+  /** This bootstrap as if a person were at a terminal: for tests of the questions commands ask. */
+  Bootstrap asInteractive() {
+    return new Bootstrap(
+        home, settings, platform, redactor, clock, true, explicitHome, lastHome, turned);
+  }
+
   /**
    * Where settings for {@code installDir} belong: the explicit home when {@code --home} or {@code
    * JRS_HOTFIX_HOME} named one, else {@code installDir/jrs-hotfix}.
@@ -232,14 +238,7 @@ final class Bootstrap {
           file + " does not exist",
           "point --war at the WAR file, or at a deployed or exploded webapp directory");
     }
-    Path beside = file.getParent();
-    if (Files.isDirectory(file)
-        && beside.getFileName() != null
-        && beside.getFileName().toString().equals("webapps")
-        && beside.getParent() != null) {
-      beside = beside.getParent();
-    }
-    Home warHome = explicitHome ? home : new Home(beside.resolve(DefaultHome.DIR));
+    Home warHome = explicitHome ? home : besideWar(file);
     Settings saved = warSettings(warHome, file);
     Settings s =
         installOut
@@ -272,6 +271,22 @@ final class Bootstrap {
       SettingsStore.save(warHome, saved);
     }
     return turned;
+  }
+
+  /**
+   * The home a WAR is worked on in when none was given: {@code jrs-hotfix} beside the WAR, or
+   * beside the {@code webapps} directory a deployed webapp sits in.
+   */
+  static Home besideWar(Path war) {
+    Path file = war.toAbsolutePath().normalize();
+    Path beside = file.getParent();
+    if (Files.isDirectory(file)
+        && beside.getFileName() != null
+        && beside.getFileName().toString().equals("webapps")
+        && beside.getParent() != null) {
+      beside = beside.getParent();
+    }
+    return new Home(beside.resolve(DefaultHome.DIR));
   }
 
   /** The settings a WAR is worked on with: its unpacked copy is the webapp, there is no service. */
