@@ -275,6 +275,53 @@ public final class BaselineStore {
     return Files.createTempDirectory(home.baselines(), ".adding-");
   }
 
+  /**
+   * Copies into this home every baseline of {@code other} that this home does not hold yet (0.9),
+   * so a WAR's own home can use the vendor's files already added for the server. Each is copied
+   * whole into a directory of its own and renamed into place as {@code add} does; one this home
+   * already holds, by id, is left as it is. Returns the ids copied.
+   */
+  public List<String> importFrom(BaselineStore other) throws IOException {
+    if (other
+        .home
+        .baselines()
+        .toAbsolutePath()
+        .normalize()
+        .equals(home.baselines().toAbsolutePath().normalize())) {
+      return List.of();
+    }
+    Files.createDirectories(home.baselines());
+    List<String> copied = new ArrayList<>();
+    for (BaselineManifest manifest : other.list()) {
+      if (!PackagePaths.isPlainFileName(manifest.id())) {
+        throw new IOException("baseline id " + manifest.id() + " is not a plain directory name");
+      }
+      if (find(manifest.id()).isPresent()) {
+        continue;
+      }
+      Path from = other.home.baselines().resolve(manifest.id()).toAbsolutePath().normalize();
+      Path building = building().toAbsolutePath().normalize();
+      try (Stream<Path> walk = Files.walk(from)) {
+        for (Path source : walk.filter(Files::isRegularFile).toList()) {
+          Path target = building.resolve(from.relativize(source).toString()).normalize();
+          if (!target.startsWith(building) || target.equals(building)) {
+            throw new IOException("refusing to copy " + source + " outside " + building);
+          }
+          Files.createDirectories(target.getParent());
+          Files.copy(source, target, StandardCopyOption.COPY_ATTRIBUTES);
+        }
+      } catch (IOException e) {
+        Trees.deleteRecursively(building);
+        throw e;
+      }
+      Path target = home.baselines().resolve(manifest.id());
+      Durability.move(building, target, StandardCopyOption.ATOMIC_MOVE);
+      Durability.syncDirectory(home.baselines());
+      copied.add(manifest.id());
+    }
+    return List.copyOf(copied);
+  }
+
   /** Writes the manifest into {@code building} and puts the directory in the baseline's place. */
   private void publish(Path building, BaselineManifest manifest) throws IOException {
     Path file = building.resolve(MANIFEST);

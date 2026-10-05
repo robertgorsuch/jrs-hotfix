@@ -1,5 +1,6 @@
 package com.jaspersoft.jrshotfix.app;
 
+import com.jaspersoft.jrshotfix.home.Home;
 import com.jaspersoft.jrshotfix.home.HomeResolver;
 import com.jaspersoft.jrshotfix.home.Settings;
 import com.jaspersoft.jrshotfix.platform.UserPaths;
@@ -8,7 +9,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
@@ -22,18 +22,18 @@ import java.util.function.Supplier;
  * command, with the home the menu resolved (except to the wizard, which places settings itself, and
  * to the commands on a WAR or webapp directory, whose home is beside it unless one was given);
  * without settings the wizard ({@code settings detect}) runs before the menu is shown; while a run
- * is pending, every entry that would change the installation or the settings refuses and points at
- * entry 6; an apply refused because files of its merge wait for a decision is followed through,
- * file by file, and run again with that merge; an empty answer where one is required returns to the
- * menu; end of input quits with exit 0; nothing is written by the menu itself.
+ * is pending in the server's home, every entry that would change the installation or the settings
+ * refuses and points at entry 6, where it is finished, undone or closed (the entries on a WAR work
+ * in the WAR's own home, where the commands refuse a run of their own with exit 8); an apply
+ * refused because files of its merge wait for a decision is followed through, file by file, and run
+ * again with that merge; an empty answer where one is required returns to the menu; end of input
+ * quits with exit 0; nothing is written by the menu itself.
  */
 final class Menu {
 
-  static final String PENDING_REFUSAL = "finish or undo the interrupted job first (entry 6)";
+  static final String PENDING_REFUSAL = "finish, undo or close the interrupted job first (entry 6)";
 
   private static final String KEEP_SUPERSEDED = "--keep-superseded";
-
-  private static final List<String> CONFLICT_RULES = List.of("ask", "mine", "theirs", "fail");
 
   /** A merge of a package whose files still wait for the operator's decision. */
   record WaitingMerge(String id, List<String> files) {
@@ -122,9 +122,10 @@ final class Menu {
     List<String> pending = pendingRuns.get();
     if (!pending.isEmpty()) {
       out.println();
-      out.println("! An earlier job was interrupted and must be finished or undone first:");
+      out.println("! An earlier job was interrupted and must be finished, undone or closed first:");
       for (String id : pending) {
-        out.println("    jrs-hotfix runs resume " + id + "     (or runs undo " + id + ")");
+        out.println(
+            "    jrs-hotfix runs resume " + id + "     (or runs undo, or runs abandon " + id + ")");
       }
       out.println("  Choose 6 below to do this.");
     }
@@ -240,32 +241,50 @@ final class Menu {
    */
   private List<String> applyOptions() {
     List<String> options = new ArrayList<>();
-    if (!Prompter.yes(
-        out, "Change the apply options (superseded libraries, conflict rule)? [y/N] ", false)) {
+    out.println();
+    out.println("Before applying, two choices most people leave as they are:");
+    out.println(
+        "  - Older versions of libraries this hotfix replaces are deleted from WEB-INF/lib.");
+    out.println("  - When this site and the hotfix both changed the same setting, you are asked.");
+    if (!Prompter.yes(out, "Change either? [y/N] ", false)) {
       return options;
     }
     if (Prompter.yes(
-        out,
-        "Leave older versions of the package's libraries in WEB-INF/lib (--keep-superseded)?"
-            + " [y/N] ",
-        false)) {
+        out, "Keep the older library versions instead of deleting them? [y/N] ", false)) {
       options.add(KEEP_SUPERSEDED);
     }
     onConflict().ifPresent(rule -> options.addAll(List.of("--on-conflict", rule)));
     return options;
   }
 
-  /** The rule for a properties key both changed, asked until valid; empty for the setting. */
+  /**
+   * What to do with a setting both this site and the hotfix changed ({@code --on-conflict}), asked
+   * until valid; empty for the default, the setting {@code merge.onConflict}.
+   */
   private Optional<String> onConflict() {
+    out.println(
+        "When this site and the hotfix both changed the same setting in a .properties file:");
+    out.println("  1) Ask me: the file waits for my decision (the usual choice)");
+    out.println("  2) Keep this site's value (the hotfix's is kept beside it as a comment)");
+    out.println("  3) Take the hotfix's value (this site's is kept beside it as a comment)");
+    out.println("  4) Stop with an error, for a scripted run");
     while (true) {
+      Optional<String> answer = text("Choose [1-4, Enter for the default]");
+      if (answer.isEmpty()) {
+        return Optional.empty();
+      }
       Optional<String> rule =
-          text("When a properties key was changed by both: ask, mine, theirs or fail"
-                  + " (Enter for the setting merge.onConflict)")
-              .map(r -> r.toLowerCase(Locale.ROOT));
-      if (rule.isEmpty() || CONFLICT_RULES.contains(rule.get())) {
+          switch (answer.get()) {
+            case "1" -> Optional.of("ask");
+            case "2" -> Optional.of("mine");
+            case "3" -> Optional.of("theirs");
+            case "4" -> Optional.of("fail");
+            default -> Optional.empty();
+          };
+      if (rule.isPresent()) {
         return rule;
       }
-      out.println("  please type ask, mine, theirs or fail, or press Enter");
+      out.println("  please type a number from 1 to 4, or press Enter");
     }
   }
 
@@ -335,8 +354,9 @@ final class Menu {
   }
 
   /**
-   * The runs; a pending one is offered to finish or undo first, and old runs can be removed only
-   * when none is pending.
+   * The runs; a pending one is offered to finish, undo or close first, and old runs can be removed
+   * only when none is pending. Closing ({@code runs abandon}) keeps the server as it is: the
+   * command shows what the run left and asks before it records anything.
    */
   private void runs() {
     execute("runs", "list");
@@ -357,11 +377,14 @@ final class Menu {
     String id = pending.get(0);
     out.println("  1) Finish job " + id);
     out.println("  2) Undo job " + id);
-    out.println("  3) Show a run");
-    switch (Prompter.line(out, "Choose [1-3]: ").orElse("")) {
+    out.println(
+        "  3) Close job " + id + " without finishing or undoing it (keep the server as is)");
+    out.println("  4) Show a run");
+    switch (Prompter.line(out, "Choose [1-4]: ").orElse("")) {
       case "1" -> execute("runs", "resume", id);
       case "2" -> execute("runs", "undo", id);
-      case "3" -> showRun();
+      case "3" -> execute("runs", "abandon", id);
+      case "4" -> showRun();
       default -> {
         // back to the menu
       }
@@ -394,22 +417,25 @@ final class Menu {
     if (war.isEmpty()) {
       return;
     }
+    if (!warHomeGiven()) {
+      offerServerBaselines(war.get(), warArgs(war.get()));
+    }
     out.println();
     out.println("  1) Hotfix it into a new WAR");
     out.println("  2) Verify a hotfix package against it");
     out.println("  3) Check it for customizations");
     out.println("  4) Its merges");
-    switch (Prompter.line(out, "Choose [1-4]: ").orElse("")) {
-      case "1" -> {
-        if (notPending()) {
-          hotfixWar(war.get());
-        }
-      }
+    out.println("  5) Its baselines");
+    switch (Prompter.line(out, "Choose [1-5]: ").orElse("")) {
+        // a WAR has its own home: a run interrupted on the server does not block it, and one
+        // interrupted in the WAR's home is refused by the command itself (exit 8)
+      case "1" -> hotfixWar(war.get());
       case "2" ->
           existingFile("Hotfix package (.zip)")
               .ifPresent(p -> run(List.of("verify", p, "--war", war.get()), givenArgs));
       case "3" -> run(List.of("scan", "--war", war.get()), givenArgs);
       case "4" -> merges(warArgs(war.get()), Optional.of(war.get()));
+      case "5" -> baselines(warArgs(war.get()), Optional.of(war.get()));
       default -> {
         // back to the menu
       }
@@ -518,7 +544,7 @@ final class Menu {
         }
       }
       case "3" -> {
-        if (notPending()) {
+        if (war.isPresent() || notPending()) {
           Optional<String> id = mergeId();
           if (id.isPresent()) {
             mergePath().ifPresent(p -> decide(id.get(), p, args));
@@ -526,12 +552,12 @@ final class Menu {
         }
       }
       case "4" -> {
-        if (notPending()) {
+        if (war.isPresent() || notPending()) {
           prepare(args, war);
         }
       }
       case "5" -> {
-        if (notPending()) {
+        if (war.isPresent() || notPending()) {
           mergeId().ifPresent(id -> run(List.of("merge", "discard", id), args));
         }
       }
@@ -562,26 +588,99 @@ final class Menu {
 
   /** The baselines in the home, then one added or removed. */
   private void baselines() {
-    execute("baseline", "list");
+    baselines(globalArgs.get(), Optional.empty());
+  }
+
+  /**
+   * The baselines in a home, then one added or removed: the server's, with {@code war} empty, or
+   * the home of a WAR, which can also copy the server's ({@code baseline import}). A run
+   * interrupted on the server does not hold up a WAR's home, whose commands refuse their own with
+   * exit 8.
+   */
+  private void baselines(List<String> args, Optional<String> war) {
+    Optional<String> server = war.flatMap(w -> serverHome());
+    if (war.isEmpty() || hasBaselines(war)) {
+      run(List.of("baseline", "list"), args);
+    } else {
+      out.println();
+      out.println("  no baselines in this WAR's home yet");
+    }
     out.println();
     out.println("  1) Add a baseline");
     out.println("  2) Remove a baseline");
-    switch (Prompter.line(out, "Choose [1-2]: ").orElse("")) {
+    if (server.isPresent()) {
+      out.println("  3) Copy the server's baselines");
+    }
+    String choices = server.isPresent() ? "[1-3]" : "[1-2]";
+    switch (Prompter.line(out, "Choose " + choices + ": ").orElse("")) {
       case "1" -> {
-        if (notPending()) {
+        if (war.isPresent() || notPending()) {
           existing("WAR, directory or hotfix ZIP")
-              .ifPresent(source -> execute("baseline", "add", source));
+              .ifPresent(source -> run(List.of("baseline", "add", source), args));
         }
       }
       case "2" -> {
-        if (notPending()) {
-          text("Baseline id (as listed above)").ifPresent(id -> execute("baseline", "remove", id));
+        if (war.isPresent() || notPending()) {
+          text("Baseline id (as listed above)")
+              .ifPresent(id -> run(List.of("baseline", "remove", id), args));
         }
       }
+      case "3" -> server.ifPresent(home -> run(List.of("baseline", "import", home), args));
       default -> {
         // back to the menu
       }
     }
+  }
+
+  /**
+   * Offers to copy the server's baselines into the home of {@code war} when that home has none and
+   * the server's has some: without one, a WAR's changes cannot be told from the vendor's, and an
+   * apply replaces them. Asked only when the WAR's home is the one beside it.
+   */
+  private void offerServerBaselines(String war, List<String> args) {
+    Optional<String> server = serverHome();
+    if (server.isEmpty() || hasBaselines(Optional.of(war))) {
+      return;
+    }
+    Path serverBaselines = new Home(Path.of(server.get())).baselines();
+    if (!holdsBaseline(serverBaselines)) {
+      return;
+    }
+    out.println();
+    out.println(
+        "This WAR's home has no baselines, so its changes cannot be told from the vendor's and an"
+            + " apply would replace them. The server's home has baselines.");
+    if (Prompter.yes(out, "Copy the server's baselines into this WAR's home? [Y/n] ", true)) {
+      run(List.of("baseline", "import", server.get()), args);
+    }
+  }
+
+  /**
+   * True when the home of {@code war} (beside it, as {@link #warArgs} names it) holds a baseline.
+   */
+  private boolean hasBaselines(Optional<String> war) {
+    if (war.isEmpty() || warHomeGiven()) {
+      return true; // the operator named the home: list what it holds
+    }
+    return holdsBaseline(Bootstrap.besideWar(local(war.get())).baselines());
+  }
+
+  private static boolean holdsBaseline(Path baselines) {
+    if (!Files.isDirectory(baselines)) {
+      return false;
+    }
+    try (var dirs = Files.list(baselines)) {
+      return dirs.anyMatch(d -> Files.isRegularFile(d.resolve("manifest.json")));
+    } catch (java.io.IOException e) {
+      return false;
+    }
+  }
+
+  /** The server's home, as the global options name it once there are settings; else empty. */
+  private Optional<String> serverHome() {
+    List<String> global = globalArgs.get();
+    int at = global.indexOf("--home");
+    return at >= 0 && at + 1 < global.size() ? Optional.of(global.get(at + 1)) : Optional.empty();
   }
 
   private void settingsEntry() {

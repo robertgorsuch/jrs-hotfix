@@ -26,14 +26,14 @@ jrs-hotfix apply <package.zip> --war <in.war | dir> --out <out.war> [--merge <me
 jrs-hotfix rollback [--plan] [--yes]
 jrs-hotfix verify <package.zip> [--war <file.war | dir>]
 jrs-hotfix scan [--war <file.war | dir>]
-jrs-hotfix baseline [list | add <war | dir | package.zip> | remove <id>]
+jrs-hotfix baseline [list | add <war | dir | package.zip> | import <home> | remove <id>]
 jrs-hotfix merge [prepare <package.zip> [--on-conflict <rule>] [--war <file.war | dir>] | list | status <mergeId>
                   | show <mergeId> <path>
                   | resolve <mergeId> <path> --merged [<file>] | --mine | --theirs
                   | discard <mergeId>]
 jrs-hotfix list
 jrs-hotfix compare <a> <b> [<c>] [--out <dir>] [--show <path>]
-jrs-hotfix runs [list | show <id> | resume <id> | undo <id> | prune --older-than <days> [--include-failed]]
+jrs-hotfix runs [list | show <id> | resume <id> | undo <id> | abandon <id> | prune --older-than <days> [--include-failed]]
 jrs-hotfix settings [show | set <key> <value> | detect]
 jrs-hotfix --docs | --version | --help
 ```
@@ -189,8 +189,12 @@ printed in the plan preview, printed again after the run finishes, and saved to
 | 9 | lock held |
 
 A run whose journal has no terminal state blocks every mutating command with
-exit 8 until `jrs-hotfix runs resume <id>` finishes it or
-`jrs-hotfix runs undo <id>` undoes it; the menu's entry 6 offers both first.
+exit 8 until `jrs-hotfix runs resume <id>` finishes it,
+`jrs-hotfix runs undo <id>` undoes it, or `jrs-hotfix runs abandon <id>`
+closes it as it is, for a server put right another way; the menu's entry 6
+offers all three first. Closing shows what the run completed, warns when it
+left the service stopped, asks, and changes nothing else: its snapshot stays
+until `runs prune --include-failed`.
 A run's snapshot lives in its run directory while the run lasts (see Files
 below): an apply's becomes the undo, any other is deleted when the run ends. A
 run that failed with exit 4 keeps its snapshot until `runs prune

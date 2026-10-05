@@ -60,6 +60,27 @@ public final class FileJournal implements Journal {
     write(runId, n);
   }
 
+  /**
+   * Ends a pending run that the operator closed without resuming or undoing it (0.9). It is
+   * recorded as {@link TerminalState#FAILED} with {@code exitCode}, as a run whose rollback is
+   * incomplete, so a release before 0.9 reads the home unchanged and {@code runs prune} keeps its
+   * snapshot as it keeps a failed run's; {@code abandoned} says why it ended.
+   */
+  public void recordAbandoned(String runId, Instant endedAt, int exitCode) {
+    ObjectNode n =
+        (ObjectNode) readRun(runId).orElseThrow(() -> new JournalException("no run " + runId));
+    n.put("endedAt", endedAt.toString())
+        .put("terminalState", TerminalState.FAILED.name())
+        .put("exitCode", exitCode)
+        .put("abandoned", true);
+    write(runId, n);
+  }
+
+  /** True when the operator closed the run without resuming or undoing it. */
+  public boolean abandoned(String runId) {
+    return readRun(runId).map(n -> n.path("abandoned").asBoolean(false)).orElse(false);
+  }
+
   @Override
   public synchronized Transition appendTransition(
       String runId,

@@ -106,7 +106,8 @@ public final class BaseView {
           "there is no baseline for "
               + stated.map(b -> "release " + b.release()).orElse("this webapp"),
           "run `jrs-hotfix baseline add <jasperserver-pro.war>` with the vendor's WAR of the"
-              + " release that was installed");
+              + " release that was installed, or copy the baselines another home holds, such as"
+              + " the server's, with `jrs-hotfix baseline import <home>`");
     }
     if (stated.isEmpty()) {
       return Resolution.none(

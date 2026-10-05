@@ -15,19 +15,21 @@ import picocli.CommandLine.Parameters;
  * {@code jrs-hotfix runs}: the run history, recovery of an interrupted run, and retention.
  * Invariants: {@code list} and {@code show} are read-only; {@code resume} and {@code undo} act only
  * on a pending run and only after its rebuilt plan matches what was stored ({@code rollback} is the
- * hidden name {@code undo} had before 0.6); {@code prune} never removes a pending run or the undo
- * of the latest apply, and keeps a failed run and its snapshot unless {@code --include-failed} is
- * given.
+ * hidden name {@code undo} had before 0.6); {@code abandon} closes a pending run without resuming
+ * or undoing it, changing nothing else, and is shown as {@code ABANDONED}; {@code prune} never
+ * removes a pending run or the undo of the latest apply, and keeps a failed run and its snapshot
+ * unless {@code --include-failed} is given.
  */
 @Command(
     name = "runs",
     mixinStandardHelpOptions = true,
-    description = "Show runs, finish or undo an interrupted run, prune old runs.",
+    description = "Show runs, finish, undo or close an interrupted run, prune old runs.",
     subcommands = {
       RunsCommand.ListRuns.class,
       RunsCommand.Show.class,
       RunsCommand.Resume.class,
       RunsCommand.Undo.class,
+      RunsCommand.Abandon.class,
       RunsCommand.RollbackAlias.class,
       RunsCommand.Prune.class
     })
@@ -58,7 +60,7 @@ final class RunsCommand extends GroupCommand {
             r.operation(),
             r.startedAt().toString(),
             r.endedAt().map(Object::toString).orElse("-"),
-            r.terminalState().map(Enum::name).orElse("PENDING"),
+            state(runs, r),
             r.exitCode().map(String::valueOf).orElse("-"));
       }
       table.printTo(out);
@@ -98,7 +100,7 @@ final class RunsCommand extends GroupCommand {
       head.row("plan", r.planId().orElse("-"));
       head.row("started", r.startedAt().toString());
       head.row("ended", r.endedAt().map(Object::toString).orElse("-"));
-      head.row("state", r.terminalState().map(Enum::name).orElse("PENDING"));
+      head.row("state", state(runs, r));
       head.row("exit", r.exitCode().map(String::valueOf).orElse("-"));
       head.row("log", boot.home().logFile(r.runId()).toString());
       head.printTo(out);
@@ -155,6 +157,32 @@ final class RunsCommand extends GroupCommand {
     public Integer call() {
       return executor(open()).recover(runId, false);
     }
+  }
+
+  /** {@code runs abandon <id>}. */
+  @Command(
+      name = "abandon",
+      mixinStandardHelpOptions = true,
+      description =
+          "Close an interrupted run without finishing or undoing it, for a server put right"
+              + " another way; nothing else is changed, and the run's snapshot is kept.",
+      footer = {"", "Example:", "  jrs-hotfix runs abandon <id>"})
+  static final class Abandon extends AppCommand {
+    @Parameters(index = "0", paramLabel = "<id>", description = "The pending run id.")
+    String runId;
+
+    @Override
+    public Integer call() {
+      return executor(open()).abandon(runId);
+    }
+  }
+
+  /** A run's state as the operator reads it: {@code ABANDONED} for a run closed as it was. */
+  static String state(RunService runs, RunRecord r) {
+    if (runs.journal().abandoned(r.runId())) {
+      return "ABANDONED";
+    }
+    return r.terminalState().map(Enum::name).orElse("PENDING");
   }
 
   /**

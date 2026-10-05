@@ -14,6 +14,7 @@ import com.jaspersoft.jrshotfix.engine.RunRecord;
 import com.jaspersoft.jrshotfix.engine.Runner;
 import com.jaspersoft.jrshotfix.engine.Sleeper;
 import com.jaspersoft.jrshotfix.engine.TerminalState;
+import com.jaspersoft.jrshotfix.engine.Transition;
 import com.jaspersoft.jrshotfix.event.Event;
 import com.jaspersoft.jrshotfix.event.EventSink;
 import com.jaspersoft.jrshotfix.home.InstalledBuild;
@@ -24,6 +25,7 @@ import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
 import com.jaspersoft.jrshotfix.platform.Durability;
 import com.jaspersoft.jrshotfix.platform.Trees;
 import com.jaspersoft.jrshotfix.redact.RedactingEventSink;
+import com.jaspersoft.jrshotfix.service.ServiceSteps;
 import com.jaspersoft.jrshotfix.state.FileJournal;
 import com.jaspersoft.jrshotfix.state.RunPlans;
 import com.jaspersoft.jrshotfix.state.UndoRecord;
@@ -38,6 +40,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -68,6 +71,22 @@ final class RunService {
       mergesRemoved = List.copyOf(mergesRemoved);
     }
   }
+
+  /**
+   * What a pending run left behind: the steps it completed and those it did not, in plan order, and
+   * whether it stopped the service and never started it again.
+   */
+  record Leftovers(
+      String operation, List<String> completed, List<String> notCompleted, boolean serviceDown) {
+    Leftovers {
+      Objects.requireNonNull(operation, "operation");
+      completed = List.copyOf(completed);
+      notCompleted = List.copyOf(notCompleted);
+    }
+  }
+
+  /** The step id of the transition {@link #abandon} records. */
+  static final String ABANDON_STEP = "abandon";
 
   /** Test-only environment variable: the step id a run pauses before; see {@link #pauseIfAt}. */
   static final String PAUSE_AT = "JRS_HOTFIX_TEST_PAUSE_AT";
@@ -104,6 +123,56 @@ final class RunService {
 
   String newRunId() {
     return RunIds.next(boot.clock());
+  }
+
+  /**
+   * What run {@code runId} left behind, from its stored plan and its journal: a step is completed
+   * when its last transition is {@code SUCCEEDED} or {@code SKIPPED}. The service is down when the
+   * stop step got as far as running and the start step never succeeded.
+   */
+  Leftovers leftovers(String runId) {
+    Map<String, String> last = new HashMap<>();
+    for (Transition t : journal.transitions(runId)) {
+      last.put(t.stepId(), t.toState());
+    }
+    Optional<RunPlans.Stored> stored = plans.load(runId);
+    List<String> steps =
+        stored.map(RunPlans.Stored::stepIds).orElseGet(() -> List.copyOf(last.keySet()));
+    List<String> completed = new ArrayList<>();
+    List<String> notCompleted = new ArrayList<>();
+    for (String step : steps) {
+      String state = last.getOrDefault(step, "");
+      if (state.equals("SUCCEEDED") || state.equals("SKIPPED")) {
+        completed.add(step);
+      } else {
+        notCompleted.add(step);
+      }
+    }
+    boolean stopped =
+        Set.of("RUNNING", "SUCCEEDED", "FAILED").contains(last.getOrDefault(ServiceSteps.STOP, ""));
+    boolean started = "SUCCEEDED".equals(last.get(ServiceSteps.START));
+    return new Leftovers(
+        stored.map(RunPlans.Stored::operation).orElse("unknown"),
+        completed,
+        notCompleted,
+        stopped && !started);
+  }
+
+  /**
+   * Ends pending run {@code runId} without resuming or undoing it: one transition says the operator
+   * closed it, and the run is recorded as ended (see {@link FileJournal#recordAbandoned}). Nothing
+   * on the server or in the home is changed or deleted; the run's snapshot stays for restoring by
+   * hand, until {@code runs prune --include-failed}.
+   */
+  void abandon(String runId) {
+    journal.appendTransition(
+        runId,
+        ABANDON_STEP,
+        Runner.RUN_PHASE,
+        Optional.empty(),
+        "ABANDONED",
+        Optional.of("closed by the operator without resuming or undoing it"));
+    journal.recordAbandoned(runId, boot.clock().instant(), ExitCodes.FAILED_ROLLBACK_INCOMPLETE);
   }
 
   Context context(String runId) {

@@ -261,6 +261,39 @@ class WarCommandsTest {
   }
 
   @Test
+  void should_use_the_servers_baseline_for_a_war_once_it_is_imported_into_the_wars_home()
+      throws Exception {
+    CommandsTest.Fixture f = fixture();
+    Path serverHome = tmp.resolve("server-home");
+    Path vendor = Wars.war(tmp.resolve("dl/jasperserver-pro.war"), Wars.vendor());
+    assertThat(
+            f.runExactly(
+                List.of("baseline", "add", vendor.toString(), "--home", serverHome.toString())))
+        .as("stderr: %s", f.err())
+        .isZero();
+    Path webapp = deployedWebapp();
+    Path warHome = tmp.resolve("srv/apache-tomcat/jrs-hotfix");
+
+    // the WAR's own home starts with no baseline, so its changes cannot be told from the vendor's
+    assertThat(f.runExactly(List.of("scan", "--war", webapp.toString()))).isEqualTo(2);
+    assertThat(f.err()).contains("no baseline").contains("baseline import");
+
+    assertThat(
+            f.runExactly(
+                List.of("baseline", "import", serverHome.toString(), "--home", warHome.toString())))
+        .as("stderr: %s", f.err())
+        .isZero();
+    assertThat(f.out()).contains("copied " + Wars.RELEASE_ID);
+    assertThat(f.runExactly(List.of("scan", "--war", webapp.toString())))
+        .as("stderr: %s", f.err())
+        .isZero();
+    // the imported release baseline is the one the scan compares with
+    assertThat(f.out()).contains("baseline: " + Wars.RELEASE_ID).contains("vanilla");
+    // the server's home is as it was
+    assertThat(serverHome.resolve("baselines").resolve(Wars.RELEASE_ID)).isDirectory();
+  }
+
+  @Test
   void should_write_the_vendors_installer_files_into_a_generic_war() throws Exception {
     CommandsTest.Fixture f = fixture();
     Map<String, String> edits = new LinkedHashMap<>();
