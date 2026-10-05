@@ -19,13 +19,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The menu an operator at a terminal gets from a bare {@code jrs-hotfix}: seven entries, each
+ * The menu an operator at a terminal gets from a bare {@code jrs-hotfix}: eleven entries, each
  * running an ordinary command line through the runner and printing it first.
  */
 class MenuTest {
@@ -70,7 +71,7 @@ class MenuTest {
   }
 
   @Test
-  void should_print_seven_entries_and_run_apply_when_1_is_chosen() {
+  void should_print_eleven_entries_and_run_apply_when_1_is_chosen() {
     Prompter.override(new StringReader("1\n" + pkg + "\nq\n"));
     Menu m =
         new Menu(
@@ -85,6 +86,7 @@ class MenuTest {
         .contains("1) Apply a hotfix")
         .contains("4) Check the server for customizations")
         .contains("7) Settings")
+        .contains("11) Baselines")
         .contains("q) Quit")
         .contains("release 10.0.0 PRO")
         .contains("Running: jrs-hotfix apply " + pkg)
@@ -122,10 +124,14 @@ class MenuTest {
                 "  5) Show the installed build",
                 "  6) Recent runs and recovery",
                 "  7) Settings",
+                "  8) Hotfix a WAR or webapp directory",
+                "  9) Compare WARs, webapps, distributions or packages",
+                " 10) Merges",
+                " 11) Baselines",
                 "  q) Quit",
                 "Each entry runs an ordinary command and prints it first. jrs-hotfix --help lists"
                     + " every command.",
-                "Choose [1-7, q]: "));
+                "Choose [1-11, q]: "));
     assertThat(ran).isEmpty();
   }
 
@@ -268,6 +274,183 @@ class MenuTest {
     assertThat(text()).doesNotContain("the vendor's own files");
   }
 
+  /** A menu over the recorder whose commands get {@code --home h}. */
+  private Menu menu(Supplier<List<String>> pending) {
+    return new Menu(
+        out,
+        () -> List.of("--home", "h"),
+        List.of("--no-color"),
+        this::recorder,
+        pending,
+        () -> Optional.of(settings),
+        () -> "10.0.0 PRO",
+        () -> {});
+  }
+
+  private List<String> ranLines() {
+    return ran.stream().map(a -> String.join(" ", a)).toList();
+  }
+
+  @Test
+  void should_work_on_a_war_in_the_home_the_command_line_would_use_when_8_is_chosen()
+      throws Exception {
+    Path war = Files.createDirectories(tmp.resolve("webapps/jasperserver-pro"));
+    Path target = tmp.resolve("out.war");
+    Prompter.override(
+        new StringReader(
+            String.join(
+                "\n",
+                "8",
+                war.toString(),
+                "1",
+                pkg.toString(),
+                target.toString(),
+                "y",
+                "",
+                "8",
+                war.toString(),
+                "2",
+                pkg.toString(),
+                "8",
+                war.toString(),
+                "3",
+                "q",
+                "")));
+    menu(List::of).run();
+    // the server's home is not passed on: a WAR's home is beside it unless one was given
+    assertThat(ranLines())
+        .containsExactly(
+            "apply " + pkg + " --war " + war + " --out " + target + " --generic --no-color",
+            "verify " + pkg + " --war " + war + " --no-color",
+            "scan --war " + war + " --no-color");
+  }
+
+  @Test
+  void should_compare_two_or_three_inputs_when_9_is_chosen() {
+    Prompter.override(new StringReader("9\na.war\nserver\n\n9\nbase\nmine\ntheirs\nout\nq\n"));
+    menu(List::of).run();
+    assertThat(ranLines())
+        .containsExactly(
+            "compare a.war server --home h", "compare base mine theirs --out out --home h");
+  }
+
+  @Test
+  void should_list_the_merges_then_run_the_chosen_merge_command_when_10_is_chosen() {
+    Prompter.override(
+        new StringReader(
+            String.join(
+                "\n",
+                "10",
+                "1",
+                "m1",
+                "10",
+                "2",
+                "m1",
+                "WEB-INF/web.xml",
+                "10",
+                "3",
+                "m1",
+                "WEB-INF/web.xml",
+                "1",
+                "10",
+                "3",
+                "m1",
+                "WEB-INF/web.xml",
+                "3",
+                "10",
+                "4",
+                pkg.toString(),
+                "10",
+                "5",
+                "m1",
+                "q",
+                "")));
+    menu(List::of).run();
+    assertThat(ranLines())
+        .containsExactly(
+            "merge list --home h",
+            "merge status m1 --home h",
+            "merge list --home h",
+            "merge show m1 WEB-INF/web.xml --home h",
+            "merge list --home h",
+            "merge resolve m1 WEB-INF/web.xml --merged --home h",
+            "merge list --home h",
+            "merge resolve m1 WEB-INF/web.xml --theirs --home h",
+            "merge list --home h",
+            "merge prepare " + pkg + " --home h",
+            "merge list --home h",
+            "merge discard m1 --home h");
+  }
+
+  @Test
+  void should_list_the_baselines_then_add_or_remove_one_when_11_is_chosen() {
+    Prompter.override(new StringReader("11\n1\n" + pkg + "\n11\n2\nb1\nq\n"));
+    menu(List::of).run();
+    assertThat(ranLines())
+        .containsExactly(
+            "baseline list --home h",
+            "baseline add " + pkg + " --home h",
+            "baseline list --home h",
+            "baseline remove b1 --home h");
+  }
+
+  @Test
+  void should_show_a_run_or_prune_old_runs_when_none_is_pending() {
+    Prompter.override(new StringReader("6\n1\nr1\n6\n2\n30\ny\n6\n2\n\n\nq\n"));
+    menu(List::of).run();
+    assertThat(ranLines())
+        .containsExactly(
+            "runs list --home h",
+            "runs show r1 --home h",
+            "runs list --home h",
+            "runs prune --older-than 30 --include-failed --home h",
+            "runs list --home h",
+            "runs prune --home h");
+  }
+
+  @Test
+  void should_refuse_the_new_changing_entries_but_not_the_reading_ones_when_a_run_is_pending()
+      throws Exception {
+    Path war = Files.writeString(tmp.resolve("jasperserver-pro.war"), "war");
+    Prompter.override(
+        new StringReader(
+            String.join(
+                "\n",
+                "8",
+                war.toString(),
+                "1",
+                "10",
+                "3",
+                "10",
+                "4",
+                "10",
+                "5",
+                "11",
+                "1",
+                "11",
+                "2",
+                "6",
+                "3",
+                "stuck",
+                "9",
+                "a",
+                "b",
+                "",
+                "q",
+                "")));
+    menu(() -> List.of("stuck")).run();
+    assertThat(ranLines())
+        .containsExactly(
+            "merge list --home h",
+            "merge list --home h",
+            "merge list --home h",
+            "baseline list --home h",
+            "baseline list --home h",
+            "runs list --home h",
+            "runs show stuck --home h",
+            "compare a b --home h");
+  }
+
   @Test
   void should_quit_with_0_when_input_ends() {
     Prompter.override(new StringReader(""));
@@ -309,7 +492,7 @@ class MenuTest {
           opens.incrementAndGet();
           return real.open(options);
         };
-    Prompter.override(new StringReader("5\n6\n5\nq\n"));
+    Prompter.override(new StringReader("5\n6\n\n5\nq\n"));
     assertThat(root.menu(out, this::recorder).run()).isZero();
     assertThat(opens).hasValue(1);
     assertThat(ran).hasSize(3);

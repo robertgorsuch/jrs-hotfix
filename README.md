@@ -295,7 +295,7 @@ A run interrupted while the service was down, at an installation outside the def
 
 ## Getting help
 
-Not sure which command you need? Type `jrs-hotfix` on its own: a menu walks you through the common jobs (apply, undo the latest hotfix, verify, check for customizations, the installed build, recent runs and recovery, settings) and prints the command it runs for each, so using the menu also teaches the scripted form.
+Not sure which command you need? Type `jrs-hotfix` on its own: a menu walks you through the common jobs (apply, undo the latest hotfix, verify, check for customizations, the installed build, recent runs and recovery, settings, hotfixing a WAR or webapp directory, compare, merges, baselines) and prints the command it runs for each, so using the menu also teaches the scripted form.
 
 Everything is built in and works without internet access:
 
