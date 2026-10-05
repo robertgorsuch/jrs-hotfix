@@ -3,14 +3,17 @@ package com.jaspersoft.jrshotfix.app;
 import com.jaspersoft.jrshotfix.home.Home;
 import com.jaspersoft.jrshotfix.home.HomeResolver;
 import com.jaspersoft.jrshotfix.home.Settings;
+import com.jaspersoft.jrshotfix.platform.DefaultFileOps;
 import com.jaspersoft.jrshotfix.platform.UserPaths;
 import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -25,9 +28,10 @@ import java.util.function.Supplier;
  * is pending in the server's home, every entry that would change the installation or the settings
  * refuses and points at entry 6, where it is finished, undone or closed (the entries on a WAR work
  * in the WAR's own home, where the commands refuse a run of their own with exit 8); an apply
- * refused because files of its merge wait for a decision is followed through, file by file, and run
- * again with that merge; an empty answer where one is required returns to the menu; end of input
- * quits with exit 0; nothing is written by the menu itself.
+ * refused because files of its merge wait for a decision, on the server (entry 1) or into a WAR
+ * (entry 8), is followed through file by file in the home the merge waits in, and run again with
+ * that merge and the same options; an empty answer where one is required returns to the menu; end
+ * of input quits with exit 0; nothing is written by the menu itself.
  */
 final class Menu {
 
@@ -52,6 +56,7 @@ final class Menu {
   private final Supplier<String> installedRelease;
   private final Runnable settingsChanged;
   private final Function<Path, Optional<WaitingMerge>> waitingMerge;
+  private final BiFunction<Path, Path, Optional<WaitingMerge>> waitingMergeIn;
 
   /**
    * {@code settings} gives the current settings, empty when there are none yet; {@code
@@ -95,6 +100,35 @@ final class Menu {
       Supplier<String> installedRelease,
       Runnable settingsChanged,
       Function<Path, Optional<WaitingMerge>> waitingMerge) {
+    this(
+        out,
+        globalArgs,
+        givenArgs,
+        runner,
+        pendingRuns,
+        settings,
+        installedRelease,
+        settingsChanged,
+        waitingMerge,
+        (pkg, home) ->
+            RootCommand.waitingIn(new Home(home), pkg, new DefaultFileOps(), Clock.systemUTC()));
+  }
+
+  /**
+   * As above, with {@code waitingMergeIn} giving the merge of a package whose files still wait in a
+   * WAR's own home, the second argument.
+   */
+  Menu(
+      PrintWriter out,
+      Supplier<List<String>> globalArgs,
+      List<String> givenArgs,
+      Function<String[], Integer> runner,
+      Supplier<List<String>> pendingRuns,
+      Supplier<Optional<Settings>> settings,
+      Supplier<String> installedRelease,
+      Runnable settingsChanged,
+      Function<Path, Optional<WaitingMerge>> waitingMerge,
+      BiFunction<Path, Path, Optional<WaitingMerge>> waitingMergeIn) {
     this.out = Objects.requireNonNull(out, "out");
     this.globalArgs = Objects.requireNonNull(globalArgs, "globalArgs");
     this.givenArgs = List.copyOf(givenArgs);
@@ -104,6 +138,7 @@ final class Menu {
     this.installedRelease = Objects.requireNonNull(installedRelease, "installedRelease");
     this.settingsChanged = Objects.requireNonNull(settingsChanged, "settingsChanged");
     this.waitingMerge = Objects.requireNonNull(waitingMerge, "waitingMerge");
+    this.waitingMergeIn = Objects.requireNonNull(waitingMergeIn, "waitingMergeIn");
   }
 
   /** Runs the wizard when there are no settings, then shows the menu until the operator quits. */
@@ -205,34 +240,42 @@ final class Menu {
       return;
     }
     Optional<WaitingMerge> waiting = waitingMerge.apply(local(pkg));
-    if (waiting.isEmpty()) {
+    if (waiting.isEmpty() || !decideAll(waiting.get(), globalArgs.get(), "entry 10")) {
       return;
-    }
-    String id = waiting.get().id();
-    List<String> files = waiting.get().files();
-    out.println();
-    out.println(
-        files.size()
-            + " file(s) changed by both this site and the hotfix wait for your decision in merge "
-            + id
-            + ":");
-    files.forEach(f -> out.println("    " + f));
-    if (!Prompter.yes(out, "Decide them now? [Y/n] ", true)) {
-      return;
-    }
-    for (String file : files) {
-      if (!decide(id, file, globalArgs.get())) {
-        out.println("  the merge keeps its decisions so far; entry 10 continues it");
-        return;
-      }
     }
     if (Prompter.yes(out, "Every file is decided. Apply " + pkg + " now? [Y/n] ", true)) {
-      List<String> again = new ArrayList<>(List.of("apply", pkg, "--merge", id));
+      List<String> again = new ArrayList<>(List.of("apply", pkg, "--merge", waiting.get().id()));
       if (options.contains(KEEP_SUPERSEDED)) {
         again.add(KEEP_SUPERSEDED);
       }
       run(again, globalArgs.get());
     }
+  }
+
+  /**
+   * Lists the files of {@code waiting} and, when the operator agrees, decides each in turn with
+   * {@code args} (the server's home, or a WAR's); true when every file is decided. When the
+   * operator stops, says where the merge is continued: {@code where}.
+   */
+  private boolean decideAll(WaitingMerge waiting, List<String> args, String where) {
+    List<String> files = waiting.files();
+    out.println();
+    out.println(
+        files.size()
+            + " file(s) changed by both this site and the hotfix wait for your decision in merge "
+            + waiting.id()
+            + ":");
+    files.forEach(f -> out.println("    " + f));
+    if (!Prompter.yes(out, "Decide them now? [Y/n] ", true)) {
+      return false;
+    }
+    for (String file : files) {
+      if (!decide(waiting.id(), file, args)) {
+        out.println("  the merge keeps its decisions so far; " + where + " continues it");
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
@@ -461,10 +504,41 @@ final class Menu {
     }
     path("Installation tree for the buildomatic and samples files (Enter to leave them out)")
         .ifPresent(dir -> command.addAll(List.of("--install-out", dir)));
-    command.addAll(applyOptions());
-    if (run(command, givenArgs) == ExitCodes.PRECHECK_FAILED) {
-      out.println("  if files of its merge wait for your decision, entry 8 then 4 decides them");
+    List<String> options = applyOptions();
+    List<String> first = new ArrayList<>(command);
+    first.addAll(options);
+    if (run(first, givenArgs) != ExitCodes.PRECHECK_FAILED) {
+      return;
     }
+    // as on the server: the WAR's merge waits in the WAR's own home, decided there
+    Optional<WaitingMerge> waiting = waitingMergeIn.apply(local(pkg.get()), warHome(war));
+    if (waiting.isEmpty() || !decideAll(waiting.get(), warArgs(war), "entry 8, then 4,")) {
+      return;
+    }
+    if (Prompter.yes(out, "Every file is decided. Hotfix " + war + " now? [Y/n] ", true)) {
+      List<String> again = new ArrayList<>(command);
+      again.addAll(List.of("--merge", waiting.get().id()));
+      if (options.contains(KEEP_SUPERSEDED)) {
+        again.add(KEEP_SUPERSEDED);
+      }
+      run(again, givenArgs);
+    }
+  }
+
+  /**
+   * The home a WAR is worked on in, as {@code apply --war} chooses it: {@code --home} when the
+   * operator gave one, else the environment's, else {@code jrs-hotfix} beside the WAR.
+   */
+  private Path warHome(String war) {
+    int at = givenArgs.indexOf("--home");
+    if (at >= 0 && at + 1 < givenArgs.size()) {
+      return local(givenArgs.get(at + 1));
+    }
+    String env = Env.vars().get(HomeResolver.ENV);
+    if (env != null && !env.isBlank()) {
+      return local(env);
+    }
+    return Bootstrap.besideWar(local(war)).root();
   }
 
   /**

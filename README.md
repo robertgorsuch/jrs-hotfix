@@ -206,7 +206,7 @@ jrs-hotfix merge resolve <mergeId> <path> --mine | --theirs    # keep the server
 jrs-hotfix apply <package.zip> --merge <mergeId>
 ```
 
-The menu does this for you: when its apply (entry 1) stops on a merge that waits, it lists the files and takes each in turn (show what changed, take the merged file, keep the server's, take the hotfix's, or install a file you merged yourself), then applies again with that merge. Entry 10 decides the files of any merge the same way.
+The menu does this for you: when its apply (entry 1), or its hotfix of a WAR (entry 8), stops on a merge that waits, it lists the files and takes each in turn (show what changed, take the merged file, keep the site's, take the hotfix's, or install a file you merged yourself), then applies again with that merge and the same options. Entry 10 decides the files of any merge the same way.
 
 `--merged` takes the workspace's `files/<path>/merged`, which you edit with your own editor, or the file you name. It is refused while it holds a conflict marker, and an XML file must be well-formed, define no bean, filter, servlet or listener twice, and neither bring back a bean the site removed nor lose one the site added. The three sides are plain files under `files/<path>/` (`base`, `mine`, `theirs`), so any merge tool can be pointed at them.
 

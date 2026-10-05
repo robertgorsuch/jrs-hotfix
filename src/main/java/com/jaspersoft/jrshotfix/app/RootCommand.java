@@ -2,12 +2,16 @@ package com.jaspersoft.jrshotfix.app;
 
 import com.jaspersoft.jrshotfix.Version;
 import com.jaspersoft.jrshotfix.engine.RunRecord;
+import com.jaspersoft.jrshotfix.home.Home;
 import com.jaspersoft.jrshotfix.home.InstalledBuild;
 import com.jaspersoft.jrshotfix.home.Settings;
 import com.jaspersoft.jrshotfix.merge.MergeDoc;
+import com.jaspersoft.jrshotfix.merge.MergeWorkspace;
+import com.jaspersoft.jrshotfix.platform.FileOps;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -167,22 +171,10 @@ final class RootCommand extends AppCommand {
      * read.
      */
     Optional<Menu.WaitingMerge> waitingMerge(Path pkg) {
-      try {
-        Optional<Bootstrap> b = boot().filter(x -> x.settings().isPresent());
-        if (b.isEmpty()) {
-          return Optional.empty();
-        }
-        String sha = b.get().platform().files().sha256(pkg);
-        return b.get().plans().runtime().merges().list().stream()
-            .filter(d -> d.packageSha256().equalsIgnoreCase(sha) && !d.blocking().isEmpty())
-            .findFirst()
-            .map(
-                d ->
-                    new Menu.WaitingMerge(
-                        d.id(), d.blocking().stream().map(MergeDoc.Item::path).toList()));
-      } catch (IOException | RuntimeException e) {
-        return Optional.empty();
-      }
+      Optional<Bootstrap> b = boot().filter(x -> x.settings().isPresent());
+      return b.isEmpty()
+          ? Optional.empty()
+          : waitingIn(b.get().home(), pkg, b.get().platform().files(), b.get().clock());
     }
 
     /**
@@ -196,6 +188,28 @@ final class RootCommand extends AppCommand {
                 settings().map(s -> InstalledBuild.describe(s.webappDir())).orElse("unknown"));
       }
       return release.get();
+    }
+  }
+
+  /**
+   * The newest merge in {@code home} prepared from exactly {@code pkg} (by its SHA-256) whose files
+   * still wait for a decision: the server's home, or a WAR's own. Read from the home's merge
+   * workspace, so it needs no settings; empty when there is none, or the home or the package cannot
+   * be read.
+   */
+  static Optional<Menu.WaitingMerge> waitingIn(Home home, Path pkg, FileOps files, Clock clock) {
+    try {
+      String sha = files.sha256(pkg);
+      return new MergeWorkspace(home, clock)
+          .list().stream()
+              .filter(d -> d.packageSha256().equalsIgnoreCase(sha) && !d.blocking().isEmpty())
+              .findFirst()
+              .map(
+                  d ->
+                      new Menu.WaitingMerge(
+                          d.id(), d.blocking().stream().map(MergeDoc.Item::path).toList()));
+    } catch (IOException | RuntimeException e) {
+      return Optional.empty();
     }
   }
 
