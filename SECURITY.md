@@ -8,8 +8,8 @@ Only the latest release receives fixes. A fix is released as a new version; olde
 
 | Version | Supported |
 |---|---|
-| 0.8.x (latest) | Yes |
-| 0.7.x and older | No: upgrade to the latest release |
+| 0.9.x (latest) | Yes |
+| 0.8.x and older | No: upgrade to the latest release |
 
 Upgrading is safe: a home written by an earlier release is read as it is (see [Compatibility](https://github.com/robertgorsuch/jrs-hotfix/wiki/Compatibility)).
 
