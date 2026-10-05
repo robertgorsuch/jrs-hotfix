@@ -11,6 +11,7 @@ import com.jaspersoft.jrshotfix.war.WarFileTest;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -190,7 +191,12 @@ class WarCommandsTest {
         .isEqualTo(2);
     assertThat(f.err()).contains(Wars.WEB_XML + " (CONFLICT)");
     String id = mergeId(f.err());
+    // the menu's follow-through finds the waiting merge in the WAR's own home, by the package
+    assertThat(RootCommand.waitingIn(f.home, hotfix(), new DefaultFileOps(), Clock.systemUTC()))
+        .contains(new Menu.WaitingMerge(id, List.of(Wars.WEB_XML)));
     assertThat(f.run("merge", "resolve", id, Wars.WEB_XML, "--theirs")).isEqualTo(0);
+    assertThat(RootCommand.waitingIn(f.home, hotfix(), new DefaultFileOps(), Clock.systemUTC()))
+        .isEmpty();
     assertThat(
             f.run(
                 "apply",

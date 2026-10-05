@@ -535,6 +535,109 @@ class MenuTest {
         .contains("3) Close job stuck without finishing or undoing it (keep the server as is)");
   }
 
+  /** A menu whose WAR lookup reports {@code waiting} for the WAR home it is asked about. */
+  private Menu warMenu(
+      Function<String[], Integer> runner, List<Path> askedHomes, Menu.WaitingMerge waiting) {
+    return new Menu(
+        out,
+        () -> List.of("--home", "h"),
+        List.of("--no-color"),
+        runner,
+        List::of,
+        () -> Optional.of(settings),
+        () -> "10.0.0 PRO",
+        () -> {},
+        p -> Optional.empty(),
+        (p, home) -> {
+          askedHomes.add(home);
+          return Optional.of(waiting);
+        });
+  }
+
+  @Test
+  void should_decide_a_wars_waiting_merge_in_its_home_and_hotfix_it_again() throws Exception {
+    Path war = Files.createDirectories(tmp.resolve("site/webapps/jasperserver-pro"));
+    Path warHome = tmp.resolve("site/jrs-hotfix").toAbsolutePath().normalize();
+    Path target = tmp.resolve("out.war");
+    String first =
+        "apply "
+            + pkg
+            + " --war "
+            + war
+            + " --out "
+            + target
+            + " --generic --keep-superseded"
+            + " --no-color";
+    List<Path> asked = new ArrayList<>();
+    Prompter.override(
+        new StringReader(
+            String.join(
+                "\n",
+                "8",
+                war.toString(),
+                "1",
+                pkg.toString(),
+                target.toString(),
+                "y",
+                "", // --generic, no installation tree
+                "y",
+                "y",
+                "", // change the options: keep the old libraries, default rule
+                "",
+                "1",
+                "4",
+                "", // decide now; show, then take theirs; hotfix again
+                "q",
+                "")));
+    warMenu(refusing(first), asked, new Menu.WaitingMerge("m1", List.of("WEB-INF/web.xml"))).run();
+    String home = " --no-color --home " + warHome;
+    assertThat(asked).containsExactly(warHome);
+    assertThat(ranLines())
+        .containsExactly(
+            first,
+            "merge show m1 WEB-INF/web.xml" + home,
+            "merge resolve m1 WEB-INF/web.xml --theirs" + home,
+            "apply "
+                + pkg
+                + " --war "
+                + war
+                + " --out "
+                + target
+                + " --generic --merge m1"
+                + " --keep-superseded --no-color");
+    assertThat(text())
+        .contains("1 file(s) changed by both this site and the hotfix wait for your decision")
+        .contains("Every file is decided. Hotfix " + war + " now?");
+  }
+
+  @Test
+  void should_stop_a_wars_follow_through_on_enter_and_say_where_it_continues() throws Exception {
+    Path war = Files.createDirectories(tmp.resolve("site/webapps/jasperserver-pro"));
+    Path target = tmp.resolve("out.war");
+    String first = "apply " + pkg + " --war " + war + " --out " + target + " --no-color";
+    Prompter.override(
+        new StringReader(
+            String.join(
+                "\n",
+                "8",
+                war.toString(),
+                "1",
+                pkg.toString(),
+                target.toString(),
+                "",
+                "",
+                "",
+                "",
+                "", // decide now, then Enter stops
+                "q",
+                "")));
+    warMenu(refusing(first), new ArrayList<>(), new Menu.WaitingMerge("m1", List.of("a.xml")))
+        .run();
+    assertThat(ranLines()).containsExactly(first);
+    assertThat(text())
+        .contains("the merge keeps its decisions so far; entry 8, then 4, continues it");
+  }
+
   @Test
   void should_hotfix_a_war_while_a_run_on_the_server_is_pending() throws Exception {
     Path war = Files.createDirectories(tmp.resolve("webapps/jasperserver-pro"));
