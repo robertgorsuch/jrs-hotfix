@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting. **A security vulnerability goes by email, not here: see [SECURITY.md](https://github.com/robertgorsuch/jrs-hotfix/blob/main/SECURITY.md).**
+        Thanks for reporting. **A security vulnerability is reported privately, not here: see [SECURITY.md](https://github.com/robertgorsuch/jrs-hotfix/blob/main/SECURITY.md).**
 
         jrs-hotfix redacts secrets, not names: review host names, paths and user names before you paste anything below.
   - type: input

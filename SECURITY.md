@@ -17,14 +17,19 @@ Upgrading is safe: a home written by an earlier release is read as it is (see [C
 
 **Do not open a public issue, pull request or discussion for a vulnerability.**
 
-Email the maintainer at **robert.gorsuch@actian.com** with the subject `jrs-hotfix security`, and include:
+Report it privately, in either of two ways:
+
+- **On GitHub (preferred):** [open a private security advisory](https://github.com/robertgorsuch/jrs-hotfix/security/advisories/new) from the repository's **Security** tab ("Report a vulnerability"). Only you and the maintainer see it.
+- **By email:** write to **robert.gorsuch@actian.com** with the subject `jrs-hotfix security`.
+
+Include:
 
 - the jrs-hotfix version (`jrs-hotfix --version`), the OS, and the service kind in `settings.json`;
 - what an attacker can do, and what they need first (an account on the server, write access to a directory, a crafted package or WAR);
 - the steps to reproduce it, as small as you can make them, with any files involved;
 - whether you want to be credited, and how.
 
-You will get a reply by email. The fix is worked on privately, released as a new version, and described in that release's notes; the report is made public once a fixed release is out, with credit if you want it.
+You will get a reply in the advisory, or by email. The fix is worked on privately, released as a new version, and described in that release's notes; the report is made public once a fixed release is out, with credit if you want it.
 
 ## What is in scope
 

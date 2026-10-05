@@ -6,7 +6,7 @@ By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Reporting a problem
 
-- **A security vulnerability:** do not open an issue. Follow [SECURITY.md](SECURITY.md).
+- **A security vulnerability:** do not open an issue. Report it privately, as a GitHub security advisory or by email: see [SECURITY.md](SECURITY.md).
 - **A bug:** open an issue with the *Bug report* form. It asks for what the [wiki's troubleshooting page](https://github.com/robertgorsuch/jrs-hotfix/wiki/Diagnostics-and-Troubleshooting#getting-help) lists: `jrs-hotfix --version`, the exit code, `jrs-hotfix runs show <id>`, the run's `run.log`, the OS and the service kind. Review host names and paths before you paste them; the tool redacts secrets, not names.
 - **A problem in JasperReports Server itself,** or in a hotfix package's content: that is for Jaspersoft Support, not this repository.
 
