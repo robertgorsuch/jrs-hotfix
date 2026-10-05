@@ -2,7 +2,7 @@
 
 **The safe way to install a Jaspersoft hotfix.** For JasperReports Server 10.x on Apache Tomcat.
 
-jrs-hotfix applies, verifies, records and rolls back the cumulative hotfix packages Jaspersoft Support publishes, on Windows and Linux. Before it changes anything it shows you exactly what it will do and asks you to confirm. It stops the server for every change under `WEB-INF`, keeps a copy of every file it replaces or deletes so a hotfix can be taken out again, and finishes or undoes a job that a crash, a reboot or Ctrl-C interrupted.
+jrs-hotfix applies, verifies and rolls back the cumulative hotfix packages Jaspersoft Support publishes, on Windows and Linux. Before it changes anything it shows you exactly what it will do and asks you to confirm. It stops the server for every change under `WEB-INF`, keeps a copy of every file it replaces or deletes so a hotfix can be taken out again, and finishes or undoes a job that a crash, a reboot or Ctrl-C interrupted.
 
 On a customized server it keeps what the site changed: given the vendor's own WAR to compare with, it tells which files the site changed, keeps the ones the hotfix does not touch, merges settings files by key and pages and XML by line, and leaves what it cannot merge cleanly for you to resolve before the outage. It can also make a hotfixed WAR from a WAR, without a server.
 
