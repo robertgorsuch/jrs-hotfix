@@ -192,11 +192,33 @@ final class Bootstrap {
   }
 
   /**
+   * Refuses (exit 2) a home that exists and is not a folder, before anything tries to create the
+   * run lock or other files below it. The usual cause: no settings and no {@code --home}, so the
+   * home falls back to {@code ./jrs-hotfix}, and the working directory is the distribution's {@code
+   * bin/}, where {@code jrs-hotfix} is the launcher script.
+   */
+  void requireHomeFolder() {
+    Path root = home.root();
+    if (Files.exists(root) && !Files.isDirectory(root)) {
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          "the jrs-hotfix home " + root.toAbsolutePath().normalize() + " is a file, not a folder",
+          explicitHome
+              ? "point --home (or JRS_HOTFIX_HOME) at a folder"
+              : "no settings were found, so the home defaults to ./jrs-hotfix, and here that is a"
+                  + " file (the launcher, when this is the tool's bin folder): pass `--home"
+                  + " <installDir>/jrs-hotfix`, set JRS_HOTFIX_HOME, or run jrs-hotfix from"
+                  + " another folder");
+    }
+  }
+
+  /**
    * Creates the home and points native temporary files below it; called only where something is
    * about to be written there (the hotfix runtime, a run), so a command that finds no settings
    * leaves no directory behind.
    */
   Home ensureHome() {
+    requireHomeFolder();
     try {
       Files.createDirectories(home.root());
     } catch (IOException e) {

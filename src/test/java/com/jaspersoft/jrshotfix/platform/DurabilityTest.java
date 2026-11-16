@@ -9,6 +9,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -71,5 +73,31 @@ class DurabilityTest {
     assertThatCode(() -> Durability.syncDirectory(dir.resolve("absent")))
         .doesNotThrowAnyException();
     assertThatCode(() -> Durability.syncDirectory(null)).doesNotThrowAnyException();
+  }
+
+  @Test
+  void should_skip_directories_on_windows_and_say_so_at_most_once(@TempDir Path dir) {
+    // seen 2026-11-16: an apply on Windows logged one AccessDeniedException per directory, hundreds
+    // of DEBUG lines that buried the run log; on Windows the directory is not opened at all
+    List<String> logged = new CopyOnWriteArrayList<>();
+    Diag.install((level, message) -> logged.add(message));
+    try {
+      for (int i = 0; i < 50; i++) {
+        Durability.syncDirectory(dir, true);
+        Durability.syncDirectory(dir.resolve("absent"), true);
+      }
+    } finally {
+      Diag.reset();
+    }
+    assertThat(logged).noneMatch(m -> m.contains("cannot be synced"));
+    // once per process: an earlier test in this JVM may already have said it
+    assertThat(logged.stream().filter(m -> m.contains("not forced on Windows"))).hasSizeLessThan(2);
+  }
+
+  @Test
+  void should_still_force_directories_elsewhere(@TempDir Path dir) {
+    // the POSIX path is unchanged: the directory is opened and forced; a failure is logged, not
+    // thrown (on a Windows test host the open fails, which is exactly that branch)
+    assertThatCode(() -> Durability.syncDirectory(dir, false)).doesNotThrowAnyException();
   }
 }

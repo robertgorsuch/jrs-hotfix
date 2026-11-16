@@ -425,6 +425,27 @@ class CommandsTest {
   }
 
   @Test
+  void should_exit_2_for_every_mutating_command_when_the_home_is_a_file() throws Exception {
+    // seen 2026-11-16: run from the distribution's bin/ without settings, the home fell back to
+    // ./jrs-hotfix, which is the launcher script there; creating the run lock below it failed and
+    // `settings detect` ended with "unexpected IllegalStateException", exit 4
+    Fixture f = fixture();
+    Path launcher = tmp.resolve("bin").resolve("jrs-hotfix");
+    Files.createDirectories(launcher.getParent());
+    Files.writeString(launcher, "#!/bin/sh\n");
+    for (List<String> command : gatedCommands()) {
+      List<String> args = new ArrayList<>(command);
+      args.addAll(List.of("--home", launcher.toString(), "--non-interactive"));
+      assertThat(f.runExactly(args)).as(command.toString()).isEqualTo(2);
+      assertThat(f.err())
+          .as(command.toString())
+          .contains("is a file, not a folder")
+          .doesNotContain("IllegalStateException");
+    }
+    assertThat(Files.readString(launcher)).isEqualTo("#!/bin/sh\n");
+  }
+
+  @Test
   void should_exit_8_for_every_mutating_command_while_a_run_is_pending() throws Exception {
     Fixture f = fixture();
     new FileJournal(f.home, Clock.systemUTC())
