@@ -121,7 +121,7 @@ final class PlanExecutor {
     if (blocked.isPresent()) {
       return blocked.get();
     }
-    try (RunLock unused = new RunLock(boot.home(), what, boot.clock().instant())) {
+    try (RunLock unused = lock(what)) {
       return body.getAsInt();
     } catch (LockHeldException held) {
       return lockHeld(held.holderRunId(), held.holderPid());
@@ -268,7 +268,7 @@ final class PlanExecutor {
     if (refused.isPresent()) {
       return refused.get();
     }
-    try (RunLock unused = new RunLock(boot.home(), "abandon", boot.clock().instant())) {
+    try (RunLock unused = lock("abandon")) {
       runs.abandon(runId);
     } catch (LockHeldException held) {
       return lockHeld(held.holderRunId(), held.holderPid());
@@ -334,7 +334,7 @@ final class PlanExecutor {
         failed.add(run.runId());
       }
     }
-    try (RunLock unused = new RunLock(boot.home(), "convert", boot.clock().instant())) {
+    try (RunLock unused = lock("convert")) {
       if (new UndoStore(boot.home()).convertLegacy(failed)) {
         out.println(
             "converted this home from jrs-hotfix 0.5: "
@@ -355,6 +355,16 @@ final class PlanExecutor {
               "cannot convert this home from jrs-hotfix 0.5: " + e.getMessage(),
               Optional.of("check the rights and free space under " + boot.home().root())));
     }
+  }
+
+  /**
+   * Takes the run lock in the home for {@code what}, after refusing (exit 2) a home that is a file:
+   * creating the lock below a file fails with an I/O error that would otherwise surface as an
+   * unexpected exception, exit 4.
+   */
+  private RunLock lock(String what) {
+    boot.requireHomeFolder();
+    return new RunLock(boot.home(), what, boot.clock().instant());
   }
 
   /** Reports the run lock held by another process: exit 9. */
