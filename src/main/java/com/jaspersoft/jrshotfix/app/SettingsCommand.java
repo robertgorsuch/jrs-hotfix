@@ -122,18 +122,29 @@ final class SettingsCommand extends GroupCommand {
     }
 
     /**
-     * Writes {@code s} to {@code home}: directly when {@link #call} holds the run lock already,
-     * else under the run gates and run lock of {@code home} itself. Returns the exit code.
+     * Writes {@code s} to {@code home} under the run gates and run lock of {@code home} itself:
+     * those {@link #call} took when {@code home} is the bootstrap's own, else taken here (exit 8 or
+     * 9 when a run is pending or holds the lock there). Settings that are in {@code home} by then
+     * are replaced only when {@code replace}: the check is repeated under the lock, so a write
+     * since the operator was asked is refused, not overwritten. Returns the exit code.
      */
-    private int save(Bootstrap boot, Home home, Settings s) {
+    private int save(Bootstrap boot, Home home, Settings s, boolean replace) {
       IntSupplier write =
           () -> {
+            if (!replace && SettingsStore.load(home).isPresent()) {
+              return ExitCodes.fail(
+                  err(),
+                  ExitCodes.PRECHECK_FAILED,
+                  "settings exist already in " + home.root(),
+                  Optional.of(
+                      "pass --yes to replace them, or change one with `jrs-hotfix settings set`"));
+            }
             SettingsStore.save(home, s);
             return ExitCodes.SUCCESS;
           };
-      return boot.fallbackHome()
-          ? executor(boot.at(home)).mutate("settings-detect", write)
-          : write.getAsInt();
+      return !boot.fallbackHome() && boot.isHome(home)
+          ? write.getAsInt()
+          : executor(boot.at(home)).mutate("settings-detect", write);
     }
 
     private int detect(Bootstrap boot) {
@@ -153,12 +164,12 @@ final class SettingsCommand extends GroupCommand {
                 "pass --yes to replace them, or change one with `jrs-hotfix settings set`"));
       }
       // without a person to ask, the first candidate that yields defaults is taken as detected
-      InstallScan scan = Detection.candidates(boot.platform());
+      InstallScan scan = boot.installScan();
       for (Path candidate : scan.candidates()) {
         Optional<Settings> found = Detection.defaults(boot.platform(), candidate);
         if (found.isPresent()) {
           Home home = boot.homeFor(candidate);
-          int saved = save(boot, home, found.get());
+          int saved = save(boot, home, found.get(), global().yes());
           if (saved != ExitCodes.SUCCESS) {
             return saved;
           }
@@ -185,7 +196,7 @@ final class SettingsCommand extends GroupCommand {
     private Optional<Integer> buildHost(Bootstrap boot) {
       java.util.Set<Path> dirs = new LinkedHashSet<>();
       Optional.ofNullable(boot.home().root().getParent()).ifPresent(dirs::add);
-      dirs.add(Path.of("").toAbsolutePath());
+      dirs.add(boot.cwd());
       for (Path dir : dirs) {
         Home home = boot.homeFor(dir);
         Optional<Settings> found = Detection.distribution(dir, home.root());
@@ -204,7 +215,8 @@ final class SettingsCommand extends GroupCommand {
                 out(), "Set it up as a build host? (no: look for a server instead) [Y/n] ", true)) {
           return Optional.empty();
         }
-        if (SettingsStore.load(home).isPresent()
+        boolean existed = SettingsStore.load(home).isPresent();
+        if (existed
             && !global().yes()
             && !(boot.interactive()
                 && Prompter.yes(
@@ -217,7 +229,8 @@ final class SettingsCommand extends GroupCommand {
                   Optional.of(
                       "pass --yes to replace them, or change one with `jrs-hotfix settings set`")));
         }
-        int saved = save(boot, home, found.get());
+        // past the question above, settings that existed may be replaced; new ones may not
+        int saved = save(boot, home, found.get(), existed || global().yes());
         if (saved != ExitCodes.SUCCESS) {
           return Optional.of(saved);
         }
@@ -235,16 +248,14 @@ final class SettingsCommand extends GroupCommand {
      * since it implies {@code --non-interactive}).
      */
     private int wizard(Bootstrap boot) {
-      int[] refused = {ExitCodes.SUCCESS};
       return new SettingsWizard(
               out(),
               boot.platform(),
               boot::homeFor,
               boot::remember,
-              (home, s) -> (refused[0] = save(boot, home, s)) == ExitCodes.SUCCESS)
-          .run()
-          .map(saved -> ExitCodes.SUCCESS)
-          .orElse(refused[0] != ExitCodes.SUCCESS ? refused[0] : ExitCodes.CANCELLED);
+              boot::installScan,
+              (home, s, replace) -> save(boot, home, s, replace))
+          .runToExit();
     }
   }
 }

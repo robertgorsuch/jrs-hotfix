@@ -10,6 +10,7 @@ import com.jaspersoft.jrshotfix.hotfix.HotfixException;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
 import com.jaspersoft.jrshotfix.hotfix.HotfixRuntime;
 import com.jaspersoft.jrshotfix.platform.DefaultHome;
+import com.jaspersoft.jrshotfix.platform.InstallScan;
 import com.jaspersoft.jrshotfix.platform.NativeTempDir;
 import com.jaspersoft.jrshotfix.platform.OperatorPrompt;
 import com.jaspersoft.jrshotfix.platform.Platform;
@@ -84,6 +85,8 @@ final class Bootstrap {
   private final Origin origin;
   private final Path lastHome;
   private final boolean turned;
+  private final Path cwd;
+  private final Optional<InstallScan> scan;
 
   private Bootstrap(
       Home home,
@@ -94,7 +97,9 @@ final class Bootstrap {
       boolean interactive,
       Origin origin,
       Path lastHome,
-      boolean turned) {
+      boolean turned,
+      Path cwd,
+      Optional<InstallScan> scan) {
     this.home = home;
     this.settings = settings;
     this.platform = platform;
@@ -104,6 +109,8 @@ final class Bootstrap {
     this.origin = origin;
     this.lastHome = lastHome;
     this.turned = turned;
+    this.cwd = cwd;
+    this.scan = scan;
   }
 
   static Bootstrap open(GlobalOptions options, Map<String, String> env, Clock clock) {
@@ -136,11 +143,9 @@ final class Bootstrap {
     // environment first, else ./jrs-hotfix with settings, else the home used last while its
     // settings are still there, else the one detected installation whose jrs-hotfix/ holds
     // settings; two or more of those is a question only the operator can answer
-    Home home =
-        explicit
-            ? HomeResolver.resolve(options.home(), env, Optional.empty())
-            : new Home(cwd.resolve(DefaultHome.DIR));
+    Home home = HomeResolver.resolve(options.home(), env, Optional.empty(), cwd);
     Optional<Settings> settings = SettingsStore.load(home);
+    Optional<InstallScan> scan = Optional.empty();
     if (settings.isEmpty() && !explicit) {
       Optional<Home> last =
           LastHome.read(pointer).filter(h -> Files.isRegularFile(h.settingsFile()));
@@ -149,8 +154,9 @@ final class Bootstrap {
         settings = SettingsStore.load(home);
       } else {
         Map<Home, Settings> found = new LinkedHashMap<>();
-        for (Path c : detected.scanInstallDirs().candidates()) {
-          Home h = HomeResolver.resolve(Optional.empty(), env, Optional.of(c));
+        scan = Optional.of(detected.scanInstallDirs());
+        for (Path c : scan.get().candidates()) {
+          Home h = HomeResolver.resolve(Optional.empty(), env, Optional.of(c), cwd);
           SettingsStore.load(h).ifPresent(s -> found.putIfAbsent(h, s));
         }
         if (found.size() > 1) {
@@ -173,8 +179,19 @@ final class Bootstrap {
     Platform platform = settings.map(s -> detected.withInstallDir(s.installDir())).orElse(detected);
     Origin origin =
         explicit ? Origin.EXPLICIT : settings.isPresent() ? Origin.SETTINGS : Origin.FALLBACK;
+    // the scan is kept only while it describes this platform: with settings it is bound to them
     return new Bootstrap(
-        home, settings, platform, Redactor.global(), clock, interactive, origin, pointer, false);
+        home,
+        settings,
+        platform,
+        Redactor.global(),
+        clock,
+        interactive,
+        origin,
+        pointer,
+        false,
+        cwd,
+        settings.isPresent() ? Optional.empty() : scan);
   }
 
   Home home() {
@@ -204,7 +221,21 @@ final class Bootstrap {
 
   /** This bootstrap as if a person were at a terminal: for tests of the questions commands ask. */
   Bootstrap asInteractive() {
-    return new Bootstrap(home, settings, platform, redactor, clock, true, origin, lastHome, turned);
+    return new Bootstrap(
+        home, settings, platform, redactor, clock, true, origin, lastHome, turned, cwd, scan);
+  }
+
+  /** The working directory the fallback home was resolved in; a build host is looked for there. */
+  Path cwd() {
+    return cwd.toAbsolutePath().normalize();
+  }
+
+  /**
+   * The installations on this host: the scan {@link #open} made already when it looked for
+   * settings, else a fresh one, so a command does not probe processes and folders twice.
+   */
+  InstallScan installScan() {
+    return scan.orElseGet(platform::scanInstallDirs);
   }
 
   /**
@@ -216,20 +247,42 @@ final class Bootstrap {
     return origin == Origin.FALLBACK;
   }
 
+  /** True when {@code other} is this bootstrap's home, compared as absolute normalized paths. */
+  boolean isHome(Home other) {
+    return same(home, other);
+  }
+
+  private static boolean same(Home a, Home b) {
+    return a.root().toAbsolutePath().normalize().equals(b.root().toAbsolutePath().normalize());
+  }
+
   /**
-   * This bootstrap over {@code target}, the home {@code settings detect} chose for an installation:
-   * so its run gates and run lock are taken in the home that is written, not in the fallback.
+   * A bootstrap over {@code target} for its run gates and run lock only: {@code settings detect}
+   * writing a home other than this one takes them there, not here. It carries no settings (the
+   * caller reads them under the lock) and is anchored at {@code target}: {@link #homeFor} on it
+   * answers {@code target}. Refused for a bootstrap turned towards a WAR, whose home is fixed.
    * Nothing is created by this.
    */
   Bootstrap at(Home target) {
-    Optional<Settings> s = SettingsStore.load(target);
-    Platform p = s.map(x -> platform.withInstallDir(x.installDir())).orElse(platform);
+    if (turned) {
+      throw new IllegalStateException("at() on a bootstrap turned towards a WAR");
+    }
     return new Bootstrap(
-        target, s, p, redactor, clock, interactive, Origin.TARGET, lastHome, turned);
+        target,
+        Optional.empty(),
+        platform,
+        redactor,
+        clock,
+        interactive,
+        Origin.TARGET,
+        lastHome,
+        false,
+        cwd,
+        Optional.empty());
   }
 
   private boolean explicitHome() {
-    return origin == Origin.EXPLICIT || origin == Origin.BESIDE_WAR;
+    return origin == Origin.EXPLICIT || origin == Origin.BESIDE_WAR || origin == Origin.TARGET;
   }
 
   /**
@@ -348,7 +401,9 @@ final class Bootstrap {
             interactive,
             origin == Origin.EXPLICIT ? Origin.EXPLICIT : Origin.BESIDE_WAR,
             lastHome,
-            true);
+            true,
+            cwd,
+            Optional.empty());
     turned.ensureHome();
     try {
       WarFile.unpack(file, s.webappDir(), platform.files());

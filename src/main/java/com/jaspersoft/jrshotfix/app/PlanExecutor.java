@@ -358,13 +358,25 @@ final class PlanExecutor {
   }
 
   /**
-   * Takes the run lock in the home for {@code what}, after refusing (exit 2) a home that is a file:
-   * creating the lock below a file fails with an I/O error that would otherwise surface as an
-   * unexpected exception, exit 4.
+   * Takes the run lock in the home for {@code what}. A home that is not a folder is refused (exit
+   * 2) with advice for its cause; any other I/O failure creating the lock (a parent that is a file,
+   * no rights, a full disk) is a precheck failure too, exit 2, never an unexpected exception (exit
+   * 4).
    */
   private RunLock lock(String what) {
     boot.requireHomeFolder();
-    return new RunLock(boot.home(), what, boot.clock().instant());
+    try {
+      return new RunLock(boot.home(), what, boot.clock().instant());
+    } catch (IllegalStateException e) {
+      if (!(e.getCause() instanceof IOException io)) {
+        throw e;
+      }
+      throw new HotfixException(
+          HotfixException.PRECHECK,
+          "cannot take the run lock in " + boot.home().root() + ": " + io,
+          "point --home (or JRS_HOTFIX_HOME) at a folder jrs-hotfix can create and write",
+          e);
+    }
   }
 
   /** Reports the run lock held by another process: exit 9. */

@@ -13,6 +13,8 @@ import com.jaspersoft.jrshotfix.hotfix.HotfixFixture;
 import com.jaspersoft.jrshotfix.hotfix.HotfixPlans;
 import com.jaspersoft.jrshotfix.json.Json;
 import com.jaspersoft.jrshotfix.pkg.Packages;
+import com.jaspersoft.jrshotfix.platform.Platform;
+import com.jaspersoft.jrshotfix.platform.TomcatLayout;
 import com.jaspersoft.jrshotfix.platform.Trees;
 import com.jaspersoft.jrshotfix.state.FileJournal;
 import com.jaspersoft.jrshotfix.state.RunPlans;
@@ -497,6 +499,70 @@ class CommandsTest {
   }
 
   @Test
+  void should_hold_the_lock_of_another_home_detect_writes_when_settings_were_found()
+      throws Exception {
+    // review of #69: settings found through the last home, not named; detect writes the
+    // installation's own home, whose run lock must be honored, not only the one it found
+    Fixture f = fixture();
+    Home other = new Home(tmp.resolve("other-home"));
+    SettingsStore.save(other, SettingsStore.load(f.home).orElseThrow());
+    Files.delete(f.home.settingsFile());
+    LastHome.write(f.lastHomeFile(), other);
+    f.hf.platform.candidates.add(f.hf.paths.installDir());
+    Path elsewhere = Files.createDirectories(tmp.resolve("elsewhere"));
+    try (RunLock held = new RunLock(f.home, "other", Instant.now())) {
+      assertThat(f.runIn(elsewhere, List.of("settings", "detect", "--yes", "--non-interactive")))
+          .isEqualTo(9);
+    }
+    assertThat(f.home.settingsFile()).doesNotExist();
+  }
+
+  @Test
+  void should_refuse_settings_that_appear_in_the_target_home_before_the_lock() throws Exception {
+    // review of #69: the "settings exist already" check is repeated under the target's lock, so
+    // a write by another process after the check is refused without --yes, not overwritten
+    Fixture f = fixture();
+    var theirs =
+        SettingsStore.load(f.home).orElseThrow().withKey("service.stopTimeoutSeconds", "77");
+    Files.delete(f.home.settingsFile());
+    f.hf.platform.candidates.add(f.hf.paths.installDir());
+    Platform racing =
+        new DelegatingPlatform(f.hf.platform) {
+          @Override
+          public Optional<TomcatLayout> detectTomcat(Path installDir) {
+            SettingsStore.save(f.home, theirs);
+            return super.detectTomcat(installDir);
+          }
+        };
+    Path elsewhere = Files.createDirectories(tmp.resolve("elsewhere"));
+    assertThat(f.runWith(racing, elsewhere, List.of("settings", "detect", "--non-interactive")))
+        .isEqualTo(2);
+    assertThat(f.err()).contains("settings exist already in");
+    assertThat(SettingsStore.load(f.home)).contains(theirs);
+  }
+
+  @Test
+  void should_exit_2_when_the_home_is_below_a_file() throws Exception {
+    // review of #69: the home itself does not exist, its parent is the launcher; creating the run
+    // lock fails with an I/O error, which is a precheck (exit 2), not an unexpected exception
+    Fixture f = fixture();
+    Path launcher = Files.createDirectories(tmp.resolve("bin")).resolve("jrs-hotfix");
+    Files.writeString(launcher, "#!/bin/sh\n");
+    List<String> args =
+        List.of(
+            "settings",
+            "set",
+            "service.stopTimeoutSeconds",
+            "42",
+            "--home",
+            launcher.resolve("sub").toString(),
+            "--non-interactive");
+    assertThat(f.runExactly(args)).isEqualTo(2);
+    assertThat(f.err()).contains("cannot take the run lock").doesNotContain("IllegalState");
+    assertThat(Files.readString(launcher)).isEqualTo("#!/bin/sh\n");
+  }
+
+  @Test
   void should_explain_the_fallback_when_the_defaulted_home_is_a_file() throws Exception {
     Fixture f = fixture();
     Files.delete(f.home.settingsFile());
@@ -777,12 +843,21 @@ class CommandsTest {
       return run(Map.of(), cwd, args);
     }
 
+    /** As {@link #runIn}, over {@code platform} instead of the fixture's own. */
+    int runWith(Platform platform, Path cwd, List<String> args) {
+      return run(Map.of(), cwd, args, platform);
+    }
+
     private int run(Map<String, String> extra, Path cwd, List<String> args) {
+      return run(extra, cwd, args, hf.platform);
+    }
+
+    private int run(Map<String, String> extra, Path cwd, List<String> args, Platform platform) {
       out = new StringWriter();
       err = new StringWriter();
       Map<String, String> env = new java.util.HashMap<>(env());
       env.putAll(extra);
-      Bootstrap.Opener opener = Bootstrap.opener(prompt -> hf.platform, env, cwd);
+      Bootstrap.Opener opener = Bootstrap.opener(prompt -> platform, env, cwd);
       return Main.commandLine(new PrintWriter(out, true), new PrintWriter(err, true), opener)
           .execute(args.toArray(String[]::new));
     }
