@@ -24,6 +24,7 @@ import java.io.Console;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.LinkedHashMap;
@@ -60,13 +61,27 @@ final class Bootstrap {
 
   static final Opener DEFAULT = options -> open(options, Env.vars(), Clock.systemUTC());
 
+  /** Where the home came from; it decides where settings go and what a refusal advises. */
+  enum Origin {
+    /** {@code --home} or {@code JRS_HOTFIX_HOME}. */
+    EXPLICIT,
+    /** {@code jrs-hotfix} beside the {@code --war} input, none being given. */
+    BESIDE_WAR,
+    /** A home that holds settings, found without being named. */
+    SETTINGS,
+    /** No settings anywhere and none named: {@code ./jrs-hotfix}, a fallback only. */
+    FALLBACK,
+    /** The home {@code settings detect} is about to write, chosen from the installation. */
+    TARGET
+  }
+
   private final Home home;
   private final Optional<Settings> settings;
   private final Platform platform;
   private final Redactor redactor;
   private final Clock clock;
   private final boolean interactive;
-  private final boolean explicitHome;
+  private final Origin origin;
   private final Path lastHome;
   private final boolean turned;
 
@@ -77,7 +92,7 @@ final class Bootstrap {
       Redactor redactor,
       Clock clock,
       boolean interactive,
-      boolean explicitHome,
+      Origin origin,
       Path lastHome,
       boolean turned) {
     this.home = home;
@@ -86,7 +101,7 @@ final class Bootstrap {
     this.redactor = redactor;
     this.clock = clock;
     this.interactive = interactive;
-    this.explicitHome = explicitHome;
+    this.origin = origin;
     this.lastHome = lastHome;
     this.turned = turned;
   }
@@ -100,6 +115,16 @@ final class Bootstrap {
       Map<String, String> env,
       Clock clock,
       Function<OperatorPrompt, Platform> detect) {
+    return open(options, env, clock, detect, Path.of(""));
+  }
+
+  /** As above, with {@code cwd} as the working directory the fallback home is resolved in. */
+  static Bootstrap open(
+      GlobalOptions options,
+      Map<String, String> env,
+      Clock clock,
+      Function<OperatorPrompt, Platform> detect,
+      Path cwd) {
     boolean interactive = !options.nonInteractive() && Terminal.present();
     OperatorPrompt prompt = interactive ? new ConsolePrompt() : OperatorPrompt.nonInteractive();
     Platform detected = detect.apply(prompt);
@@ -111,7 +136,10 @@ final class Bootstrap {
     // environment first, else ./jrs-hotfix with settings, else the home used last while its
     // settings are still there, else the one detected installation whose jrs-hotfix/ holds
     // settings; two or more of those is a question only the operator can answer
-    Home home = HomeResolver.resolve(options.home(), env, Optional.empty());
+    Home home =
+        explicit
+            ? HomeResolver.resolve(options.home(), env, Optional.empty())
+            : new Home(cwd.resolve(DefaultHome.DIR));
     Optional<Settings> settings = SettingsStore.load(home);
     if (settings.isEmpty() && !explicit) {
       Optional<Home> last =
@@ -143,8 +171,10 @@ final class Bootstrap {
       LastHome.write(pointer, home);
     }
     Platform platform = settings.map(s -> detected.withInstallDir(s.installDir())).orElse(detected);
+    Origin origin =
+        explicit ? Origin.EXPLICIT : settings.isPresent() ? Origin.SETTINGS : Origin.FALLBACK;
     return new Bootstrap(
-        home, settings, platform, Redactor.global(), clock, interactive, explicit, pointer, false);
+        home, settings, platform, Redactor.global(), clock, interactive, origin, pointer, false);
   }
 
   Home home() {
@@ -174,8 +204,32 @@ final class Bootstrap {
 
   /** This bootstrap as if a person were at a terminal: for tests of the questions commands ask. */
   Bootstrap asInteractive() {
+    return new Bootstrap(home, settings, platform, redactor, clock, true, origin, lastHome, turned);
+  }
+
+  /**
+   * True when no settings were found and no home was named, so {@link #home} is only the {@code
+   * ./jrs-hotfix} fallback: {@code settings detect} writes elsewhere ({@link #homeFor}) and must
+   * neither create nor lock this one.
+   */
+  boolean fallbackHome() {
+    return origin == Origin.FALLBACK;
+  }
+
+  /**
+   * This bootstrap over {@code target}, the home {@code settings detect} chose for an installation:
+   * so its run gates and run lock are taken in the home that is written, not in the fallback.
+   * Nothing is created by this.
+   */
+  Bootstrap at(Home target) {
+    Optional<Settings> s = SettingsStore.load(target);
+    Platform p = s.map(x -> platform.withInstallDir(x.installDir())).orElse(platform);
     return new Bootstrap(
-        home, settings, platform, redactor, clock, true, explicitHome, lastHome, turned);
+        target, s, p, redactor, clock, interactive, Origin.TARGET, lastHome, turned);
+  }
+
+  private boolean explicitHome() {
+    return origin == Origin.EXPLICIT || origin == Origin.BESIDE_WAR;
   }
 
   /**
@@ -183,7 +237,7 @@ final class Bootstrap {
    * JRS_HOTFIX_HOME} named one, else {@code installDir/jrs-hotfix}.
    */
   Home homeFor(Path installDir) {
-    return explicitHome ? home : new Home(installDir.resolve(DefaultHome.DIR));
+    return explicitHome() ? home : new Home(installDir.resolve(DefaultHome.DIR));
   }
 
   /** Makes {@code h} the home a later command finds without {@code --home}; never fails. */
@@ -193,22 +247,30 @@ final class Bootstrap {
 
   /**
    * Refuses (exit 2) a home that exists and is not a folder, before anything tries to create the
-   * run lock or other files below it. The usual cause: no settings and no {@code --home}, so the
-   * home falls back to {@code ./jrs-hotfix}, and the working directory is the distribution's {@code
-   * bin/}, where {@code jrs-hotfix} is the launcher script.
+   * run lock or other files below it. A symbolic link counts as existing even when it dangles, and
+   * as a folder only when it leads to one. The usual cause: no settings and no {@code --home}, so
+   * the home falls back to {@code ./jrs-hotfix}, and the working directory is the distribution's
+   * {@code bin/}, where {@code jrs-hotfix} is the launcher script.
    */
   void requireHomeFolder() {
     Path root = home.root();
-    if (Files.exists(root) && !Files.isDirectory(root)) {
+    if (Files.exists(root, LinkOption.NOFOLLOW_LINKS) && !Files.isDirectory(root)) {
+      String where = root.toAbsolutePath().normalize().toString();
       throw new HotfixException(
           HotfixException.PRECHECK,
-          "the jrs-hotfix home " + root.toAbsolutePath().normalize() + " is a file, not a folder",
-          explicitHome
-              ? "point --home (or JRS_HOTFIX_HOME) at a folder"
-              : "no settings were found, so the home defaults to ./jrs-hotfix, and here that is a"
-                  + " file (the launcher, when this is the tool's bin folder): pass `--home"
-                  + " <installDir>/jrs-hotfix`, set JRS_HOTFIX_HOME, or run jrs-hotfix from"
-                  + " another folder");
+          "the jrs-hotfix home " + where + " is not a folder",
+          switch (origin) {
+            case EXPLICIT -> "point --home (or JRS_HOTFIX_HOME) at a folder";
+            case BESIDE_WAR ->
+                "the home for a WAR defaults to jrs-hotfix beside it, and there that is not a"
+                    + " folder: pass `--home` with a folder for this WAR";
+            case FALLBACK ->
+                "no settings were found, so the home defaults to ./jrs-hotfix, and here that is"
+                    + " not a folder (the launcher, when this is the tool's bin folder): pass"
+                    + " `--home <installDir>/jrs-hotfix`, set JRS_HOTFIX_HOME, or run jrs-hotfix"
+                    + " from another folder";
+            case SETTINGS, TARGET -> "move " + where + " aside, or pass `--home` with a folder";
+          });
     }
   }
 
@@ -260,7 +322,7 @@ final class Bootstrap {
           file + " does not exist",
           "point --war at the WAR file, or at a deployed or exploded webapp directory");
     }
-    Home warHome = explicitHome ? home : besideWar(file);
+    Home warHome = explicitHome() ? home : besideWar(file);
     Settings saved = warSettings(warHome, file);
     Settings s =
         installOut
@@ -278,7 +340,15 @@ final class Bootstrap {
     }
     Bootstrap turned =
         new Bootstrap(
-            warHome, Optional.of(s), platform, redactor, clock, interactive, true, lastHome, true);
+            warHome,
+            Optional.of(s),
+            platform,
+            redactor,
+            clock,
+            interactive,
+            origin == Origin.EXPLICIT ? Origin.EXPLICIT : Origin.BESIDE_WAR,
+            lastHome,
+            true);
     turned.ensureHome();
     try {
       WarFile.unpack(file, s.webappDir(), platform.files());
@@ -409,7 +479,14 @@ final class Bootstrap {
   }
 
   static Opener opener(Function<OperatorPrompt, Platform> detect, Map<String, String> env) {
+    return opener(detect, env, Path.of(""));
+  }
+
+  /** As above, resolving the fallback home in {@code cwd}: for tests of the fallback. */
+  static Opener opener(
+      Function<OperatorPrompt, Platform> detect, Map<String, String> env, Path cwd) {
     Objects.requireNonNull(detect, "detect");
-    return options -> open(options, env, Clock.systemUTC(), detect);
+    Objects.requireNonNull(cwd, "cwd");
+    return options -> open(options, env, Clock.systemUTC(), detect, cwd);
   }
 }

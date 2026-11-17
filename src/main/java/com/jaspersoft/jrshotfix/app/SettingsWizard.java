@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -47,6 +48,7 @@ final class SettingsWizard {
   private final PrintWriter out;
   private final Platform platform;
   private final Function<Path, Home> homeFor;
+  private final BiPredicate<Home, Settings> save;
   private final Consumer<Home> remember;
 
   /** A wizard that saves into {@code home} whatever directory is chosen. */
@@ -60,10 +62,32 @@ final class SettingsWizard {
    */
   SettingsWizard(
       PrintWriter out, Platform platform, Function<Path, Home> homeFor, Consumer<Home> remember) {
+    this(
+        out,
+        platform,
+        homeFor,
+        remember,
+        (home, s) -> {
+          SettingsStore.save(home, s);
+          return true;
+        });
+  }
+
+  /**
+   * As above, writing through {@code save}, which answers false when it refused (and said why):
+   * {@code settings detect} takes the run lock of the home being written there.
+   */
+  SettingsWizard(
+      PrintWriter out,
+      Platform platform,
+      Function<Path, Home> homeFor,
+      Consumer<Home> remember,
+      BiPredicate<Home, Settings> save) {
     this.out = Objects.requireNonNull(out, "out");
     this.platform = Objects.requireNonNull(platform, "platform");
     this.homeFor = Objects.requireNonNull(homeFor, "homeFor");
     this.remember = Objects.requireNonNull(remember, "remember");
+    this.save = Objects.requireNonNull(save, "save");
   }
 
   /** Runs the wizard; the saved settings, or empty when input ended before they were complete. */
@@ -98,7 +122,10 @@ final class SettingsWizard {
       return Optional.empty();
     }
     Home home = homeFor.apply(confirmed.get().installDir());
-    SettingsStore.save(home, confirmed.get());
+    if (!save.test(home, confirmed.get())) {
+      out.println("Nothing was saved.");
+      return Optional.empty();
+    }
     remember.accept(home);
     out.println();
     out.println("settings written to " + home.settingsFile());

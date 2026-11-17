@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.IntSupplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
@@ -111,7 +112,28 @@ final class SettingsCommand extends GroupCommand {
     @Override
     public Integer call() {
       Bootstrap boot = open();
+      if (boot.fallbackHome()) {
+        // no settings anywhere and no --home: ./jrs-hotfix is only a fallback, and the settings
+        // go to <installDir>/jrs-hotfix, so the run gates and the run lock are taken there, in
+        // save(), once that home is known; the fallback is neither created nor refused
+        return detect(boot);
+      }
       return executor(boot).mutate("settings-detect", () -> detect(boot));
+    }
+
+    /**
+     * Writes {@code s} to {@code home}: directly when {@link #call} holds the run lock already,
+     * else under the run gates and run lock of {@code home} itself. Returns the exit code.
+     */
+    private int save(Bootstrap boot, Home home, Settings s) {
+      IntSupplier write =
+          () -> {
+            SettingsStore.save(home, s);
+            return ExitCodes.SUCCESS;
+          };
+      return boot.fallbackHome()
+          ? executor(boot.at(home)).mutate("settings-detect", write)
+          : write.getAsInt();
     }
 
     private int detect(Bootstrap boot) {
@@ -136,7 +158,10 @@ final class SettingsCommand extends GroupCommand {
         Optional<Settings> found = Detection.defaults(boot.platform(), candidate);
         if (found.isPresent()) {
           Home home = boot.homeFor(candidate);
-          SettingsStore.save(home, found.get());
+          int saved = save(boot, home, found.get());
+          if (saved != ExitCodes.SUCCESS) {
+            return saved;
+          }
           boot.remember(home);
           out().println("settings written to " + home.settingsFile());
           print(out(), home, found.get());
@@ -192,7 +217,10 @@ final class SettingsCommand extends GroupCommand {
                   Optional.of(
                       "pass --yes to replace them, or change one with `jrs-hotfix settings set`")));
         }
-        SettingsStore.save(home, found.get());
+        int saved = save(boot, home, found.get());
+        if (saved != ExitCodes.SUCCESS) {
+          return Optional.of(saved);
+        }
         boot.remember(home);
         out().println("settings written to " + home.settingsFile());
         print(out(), home, found.get());
@@ -207,10 +235,16 @@ final class SettingsCommand extends GroupCommand {
      * since it implies {@code --non-interactive}).
      */
     private int wizard(Bootstrap boot) {
-      return new SettingsWizard(out(), boot.platform(), boot::homeFor, boot::remember)
+      int[] refused = {ExitCodes.SUCCESS};
+      return new SettingsWizard(
+              out(),
+              boot.platform(),
+              boot::homeFor,
+              boot::remember,
+              (home, s) -> (refused[0] = save(boot, home, s)) == ExitCodes.SUCCESS)
           .run()
           .map(saved -> ExitCodes.SUCCESS)
-          .orElse(ExitCodes.CANCELLED);
+          .orElse(refused[0] != ExitCodes.SUCCESS ? refused[0] : ExitCodes.CANCELLED);
     }
   }
 }
