@@ -23,6 +23,7 @@ import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * The interactive {@code settings detect}: finds the installations on this host, lets the operator
@@ -31,8 +32,9 @@ import java.util.function.Predicate;
  * input saves nothing and returns empty; an answer that is not acceptable is asked again; the saved
  * settings hold exactly the keys {@link Settings#keys()} lists, with the value of any service field
  * the chosen kind does not use cleared; the settings are saved in the home {@code homeFor} names
- * for the chosen directory; settings already in that home are replaced only after the operator's
- * yes, and on no they are kept, remembered as the last home and returned.
+ * for the chosen directory, the same home the replace question was about; settings already in that
+ * home are replaced only after the operator's yes, and on no they are kept, remembered as the last
+ * home and returned.
  */
 final class SettingsWizard {
 
@@ -47,7 +49,22 @@ final class SettingsWizard {
   private final PrintWriter out;
   private final Platform platform;
   private final Function<Path, Home> homeFor;
+  private final Saver save;
+  private final Supplier<InstallScan> scan;
   private final Consumer<Home> remember;
+
+  /** Writes the settings to a home and answers an exit code; a refusal has been reported. */
+  @FunctionalInterface
+  interface Saver {
+    /**
+     * Saves {@code s} in {@code home}; settings found there are replaced only when {@code replace}
+     * (the operator agreed to replace the ones shown).
+     */
+    int save(Home home, Settings s, boolean replace);
+  }
+
+  /** How a run ended: the settings saved or kept, if any, and the exit code. */
+  record Outcome(Optional<Settings> settings, int exitCode) {}
 
   /** A wizard that saves into {@code home} whatever directory is chosen. */
   SettingsWizard(PrintWriter out, Platform platform, Home home) {
@@ -60,18 +77,55 @@ final class SettingsWizard {
    */
   SettingsWizard(
       PrintWriter out, Platform platform, Function<Path, Home> homeFor, Consumer<Home> remember) {
+    this(
+        out,
+        platform,
+        homeFor,
+        remember,
+        () -> Detection.candidates(platform),
+        (home, s, replace) -> {
+          SettingsStore.save(home, s);
+          return ExitCodes.SUCCESS;
+        });
+  }
+
+  /**
+   * As above, choosing among the installations {@code scan} gives and writing through {@code save}:
+   * {@code settings detect} reuses the scan the bootstrap made and takes the run lock of the home
+   * being written in it.
+   */
+  SettingsWizard(
+      PrintWriter out,
+      Platform platform,
+      Function<Path, Home> homeFor,
+      Consumer<Home> remember,
+      Supplier<InstallScan> scan,
+      Saver save) {
     this.out = Objects.requireNonNull(out, "out");
     this.platform = Objects.requireNonNull(platform, "platform");
     this.homeFor = Objects.requireNonNull(homeFor, "homeFor");
     this.remember = Objects.requireNonNull(remember, "remember");
+    this.scan = Objects.requireNonNull(scan, "scan");
+    this.save = Objects.requireNonNull(save, "save");
   }
 
-  /** Runs the wizard; the saved settings, or empty when input ended before they were complete. */
+  /** Runs the wizard; the saved settings, or empty when nothing was saved or kept. */
   Optional<Settings> run() {
-    InstallScan scan = Detection.candidates(platform);
-    Optional<Settings> detected = pickInstallation(scan);
+    return outcome().settings();
+  }
+
+  /**
+   * Runs the wizard; the exit code: success when settings were saved or kept, cancelled when input
+   * ended or the operator declined, else the code the saver refused with.
+   */
+  int runToExit() {
+    return outcome().exitCode();
+  }
+
+  private Outcome outcome() {
+    Optional<Settings> detected = pickInstallation(scan.get());
     if (detected.isEmpty()) {
-      return Optional.empty();
+      return new Outcome(Optional.empty(), ExitCodes.CANCELLED);
     }
     Settings s = detected.get();
     Home target = homeFor.apply(s.installDir());
@@ -84,7 +138,7 @@ final class SettingsWizard {
           out, "Settings already exist for " + s.installDir() + "; replace them? [y/N] ", false)) {
         out.println("kept the settings in " + target.settingsFile());
         remember.accept(target);
-        return existing;
+        return new Outcome(existing, ExitCodes.SUCCESS);
       }
     }
     out.println();
@@ -95,15 +149,21 @@ final class SettingsWizard {
     Optional<Settings> confirmed = confirm(s);
     if (confirmed.isEmpty()) {
       out.println("Nothing was saved.");
-      return Optional.empty();
+      return new Outcome(Optional.empty(), ExitCodes.CANCELLED);
     }
-    Home home = homeFor.apply(confirmed.get().installDir());
-    SettingsStore.save(home, confirmed.get());
+    // written to the home asked about above, never one recomputed from the confirmed values: the
+    // replace question and the write cannot then be about two different homes
+    Home home = target;
+    int saved = save.save(home, confirmed.get(), existing.isPresent());
+    if (saved != ExitCodes.SUCCESS) {
+      out.println("Nothing was saved.");
+      return new Outcome(Optional.empty(), saved);
+    }
     remember.accept(home);
     out.println();
     out.println("settings written to " + home.settingsFile());
     SettingsCommand.print(out, home, confirmed.get());
-    return confirmed;
+    return new Outcome(confirmed, ExitCodes.SUCCESS);
   }
 
   // ---- steps ------------------------------------------------------------------------------------

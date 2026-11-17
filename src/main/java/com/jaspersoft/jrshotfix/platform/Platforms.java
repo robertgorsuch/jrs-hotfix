@@ -95,6 +95,14 @@ public final class Platforms {
   }
 
   /**
+   * True when this JVM runs on Windows, from {@code os.name}: for code below the platform that has
+   * no {@link Platform} to ask, such as durability and the console code page.
+   */
+  public static boolean hostIsWindows() {
+    return osFamily(System.getProperty("os.name", "")).orElse(null) == Platform.OsFamily.WINDOWS;
+  }
+
+  /**
    * Maps an {@code os.name} value to a family, or empty when it is neither Windows nor Linux. macOS
    * and BSD are empty rather than Linux: the Linux platform reads {@code /proc} and drives {@code
    * systemctl} (review 3.1).

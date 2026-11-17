@@ -80,24 +80,39 @@ class DurabilityTest {
     // seen 2026-11-16: an apply on Windows logged one AccessDeniedException per directory, hundreds
     // of DEBUG lines that buried the run log; on Windows the directory is not opened at all
     List<String> logged = new CopyOnWriteArrayList<>();
+    Durability.resetWindowsNote();
     Diag.install((level, message) -> logged.add(message));
     try {
       for (int i = 0; i < 50; i++) {
-        Durability.syncDirectory(dir, true);
-        Durability.syncDirectory(dir.resolve("absent"), true);
+        assertThat(Durability.syncDirectory(dir, true)).isFalse();
+        assertThat(Durability.syncDirectory(dir.resolve("absent"), true)).isFalse();
       }
     } finally {
       Diag.reset();
     }
     assertThat(logged).noneMatch(m -> m.contains("cannot be synced"));
-    // once per process: an earlier test in this JVM may already have said it
-    assertThat(logged.stream().filter(m -> m.contains("not forced on Windows"))).hasSizeLessThan(2);
+    assertThat(logged.stream().filter(m -> m.contains("not forced on Windows"))).hasSize(1);
   }
 
   @Test
   void should_still_force_directories_elsewhere(@TempDir Path dir) {
     // the POSIX path is unchanged: the directory is opened and forced; a failure is logged, not
     // thrown (on a Windows test host the open fails, which is exactly that branch)
-    assertThatCode(() -> Durability.syncDirectory(dir, false)).doesNotThrowAnyException();
+    List<String> logged = new CopyOnWriteArrayList<>();
+    Diag.install((level, message) -> logged.add(message));
+    boolean forced;
+    try {
+      forced = Durability.syncDirectory(dir, false);
+    } finally {
+      Diag.reset();
+    }
+    assertThat(logged).noneMatch(m -> m.contains("not forced on Windows"));
+    if (Platforms.hostIsWindows()) {
+      assertThat(forced).isFalse();
+      assertThat(logged).anyMatch(m -> m.contains("cannot be synced"));
+    } else {
+      assertThat(forced).isTrue();
+      assertThat(logged).noneMatch(m -> m.contains("cannot be synced"));
+    }
   }
 }

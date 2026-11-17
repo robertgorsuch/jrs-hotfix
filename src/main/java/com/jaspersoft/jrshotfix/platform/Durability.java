@@ -36,10 +36,7 @@ public final class Durability {
   private static final int MOVE_ATTEMPTS = 20;
   private static final long MOVE_RETRY_DELAY_MS = 50;
 
-  private static final boolean ON_WINDOWS =
-      Platforms.osFamily(System.getProperty("os.name", ""))
-          .filter(os -> os == Platform.OsFamily.WINDOWS)
-          .isPresent();
+  private static final boolean ON_WINDOWS = Platforms.hostIsWindows();
 
   /** Set once the skip on Windows has been logged, so the log says it once per process. */
   private static final AtomicBoolean WINDOWS_SKIP_NOTED = new AtomicBoolean();
@@ -90,10 +87,13 @@ public final class Durability {
     syncDirectory(dir, ON_WINDOWS);
   }
 
-  /** As {@link #syncDirectory(Path)}, with the platform given: for tests of both branches. */
-  static void syncDirectory(Path dir, boolean windows) {
+  /**
+   * As {@link #syncDirectory(Path)}, with the platform given: for tests of both branches. True when
+   * the directory was opened and forced.
+   */
+  static boolean syncDirectory(Path dir, boolean windows) {
     if (dir == null) {
-      return;
+      return false;
     }
     if (windows) {
       if (WINDOWS_SKIP_NOTED.compareAndSet(false, true)) {
@@ -101,13 +101,20 @@ public final class Durability {
             "directory entries are not forced on Windows; relying on the file system's own"
                 + " journal");
       }
-      return;
+      return false;
     }
     try (FileChannel channel = FileChannel.open(dir, StandardOpenOption.READ)) {
       channel.force(true);
+      return true;
     } catch (IOException e) {
       Diag.debug("{} cannot be synced ({}); relying on the file system's own journal", dir, e);
+      return false;
     }
+  }
+
+  /** Forgets that the skip on Windows was logged: for tests that count the note. */
+  static void resetWindowsNote() {
+    WINDOWS_SKIP_NOTED.set(false);
   }
 
   /**
